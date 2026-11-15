@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Frame } from "../src/App";
 import { fallbackContext } from "../src/shell/context";
@@ -6,7 +6,7 @@ import { fallbackContext } from "../src/shell/context";
 // #3 O bloco "Pedido ao fornecedor" na gaveta da proposta decidida, como no wireframe
 // artifacts/wireframe-pedido-ao-fornecedor/index.html. Esqueleto vermelho de ponta a ponta (#14):
 // nada disso existe ainda. A API é falsa, no formato que a camada de contrato (#17) vai fixar com a #2;
-// o JSON do pedido (campo `supplierRequest` do detalhe da proposta) e os caminhos das ações são provisórios.
+// o JSON do pedido (campo `supplierRequest` do detalhe da proposta) e os caminhos das ações são provisórios (#2, #17).
 
 const KEY = "35261100000000000000550010000200461000200461";
 const money = (cents: number) => ({ cents, text: `R$ ${(cents / 100).toFixed(2).replace(".", ",")}` });
@@ -17,8 +17,11 @@ const draft = {
   status: "draft",
   returnNote: {
     number: "ND-0012",
-    lines: [{ description: "Shampoo 350 ml", quantity: "40 UN", unitPrice: money(5408), total: money(216_320) }],
-    total: money(216_320),
+    lines: [
+      { description: "Shampoo 350 ml", quantity: "40 UN", unitPrice: money(5408), total: money(216_320) },
+      { description: "Condicionador 350 ml", quantity: "10 UN", unitPrice: money(3000), total: money(30_000) },
+    ],
+    total: money(246_320),
   },
   email: { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução do item trocado", body: MAIL_TEXT },
   attachment: { name: "nota-devolucao-ND-0012.pdf", url: "/api/supplier-requests/sr-1/nota.pdf" },
@@ -75,14 +78,17 @@ async function openDrawer() {
   render(<Frame context={fallbackContext("ana@jachegou.test")} />);
   await screen.findByText("Decisão registrada");
 }
+const blockOf = (heading: HTMLElement) => (heading.closest("section") ?? heading.parentElement) as HTMLElement;
 const posted = (suffix: string) => calls.some((c) => c.method === "POST" && c.path.endsWith(suffix));
 
 describe("#3 bloco Pedido ao fornecedor na gaveta", () => {
   it("#3/AC-1: a proposta decidida com pedido mostra o bloco com o selo do Claude", async () => {
     current = draft;
     await openDrawer();
-    expect(await screen.findByText("Pedido ao fornecedor")).toBeTruthy();
-    expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
+    const heading = await screen.findByText("Pedido ao fornecedor");
+    const block = blockOf(heading);
+    expect(within(block).getByText("Claude")).toBeTruthy();
+    expect(screen.getByText("Decisão registrada").compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("#3/AC-1: sem pedido, o bloco não existe, nem o título", async () => {
@@ -101,13 +107,20 @@ describe("#3 bloco Pedido ao fornecedor na gaveta", () => {
   it("#3/AC-3: o rascunho mostra a nota (itens, valores, total) e o e-mail (para, prazo, assunto, texto, anexo)", async () => {
     current = draft;
     await openDrawer();
-    expect(await screen.findByText(/Shampoo 350 ml/)).toBeTruthy();
-    expect(screen.getAllByText(/R\$ 2163,20/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/fiscal@higienetotal\.test/)).toBeTruthy();
-    expect(screen.getByText(/NF 20046 · devolução do item trocado/)).toBeTruthy();
-    expect(screen.getByText(MAIL_TEXT, { exact: false })).toBeTruthy();
-    expect(screen.getByText(/nota-devolucao-ND-0012\.pdf/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Emitir e enviar" })).toBeTruthy();
+    const block = blockOf(await screen.findByText("Pedido ao fornecedor"));
+    const inBlock = within(block);
+    expect(inBlock.getAllByText(/Shampoo 350 ml/).length).toBeGreaterThan(0);
+    expect(inBlock.getByText(/Condicionador 350 ml/)).toBeTruthy();
+    expect(inBlock.getByText(/40 UN/)).toBeTruthy();
+    expect(inBlock.getByText(/R\$ 54,08/)).toBeTruthy();
+    expect(inBlock.getByText(/R\$ 2163,20/)).toBeTruthy(); // total da linha 1
+    expect(inBlock.getByText(/R\$ 300,00/)).toBeTruthy(); // total da linha 2
+    expect(inBlock.getByText(/R\$ 2463,20/)).toBeTruthy(); // total da nota, diferente de cada linha
+    expect(inBlock.getByText(/fiscal@higienetotal\.test/)).toBeTruthy();
+    expect(inBlock.getByText(/NF 20046 · devolução do item trocado/)).toBeTruthy();
+    expect(inBlock.getByText(MAIL_TEXT, { exact: false })).toBeTruthy();
+    expect(inBlock.getByText(/nota-devolucao-ND-0012\.pdf/)).toBeTruthy();
+    expect(inBlock.getByRole("button", { name: "Emitir e enviar" })).toBeTruthy();
   });
 
   it("#3/AC-4: Emitir e enviar chama a rota de envio, sem confirmação, e mostra emitida e enviada", async () => {
