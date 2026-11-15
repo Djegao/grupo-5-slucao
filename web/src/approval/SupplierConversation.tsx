@@ -32,6 +32,7 @@ export interface SupplierConversationProps {
  */
 export function SupplierConversation({ conversation, onNextStep }: SupplierConversationProps): ReactElement {
   const { status, sent, reply, asOf, reading } = conversation;
+  const nextStep = reading.nextStep;
   return (
     <section aria-label={t.title} style={{ display: "grid", gap: "var(--spacing-md)" }}>
       <h3 style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", margin: 0 }}>
@@ -108,12 +109,16 @@ export function SupplierConversation({ conversation, onNextStep }: SupplierConve
         <Text as="p" variant="body-base">
           {t.summary(reading.summary)}
         </Text>
-        <Text as="p" variant="body-base">
-          {t.nextStepLabel}:
-        </Text>
-        <Button variant="outline" size="base" onClick={() => onNextStep(reading.nextStep)}>
-          {t.nextStep[reading.nextStep]}
-        </Button>
+        {nextStep ? (
+          <>
+            <Text as="p" variant="body-base">
+              {t.nextStepLabel}:
+            </Text>
+            <Button variant="outline" size="base" onClick={() => onNextStep(nextStep)}>
+              {t.nextStep[nextStep]}
+            </Button>
+          </>
+        ) : null}
       </div>
     </section>
   );
