@@ -18,6 +18,8 @@ import type { DraftOutcome, RequestRecord, SupplierDeps } from './ports.js';
 // #11: preparar o rascunho nunca emite nota nem envia e-mail (#2/AC-3).
 
 const REQUEST_TYPE = 'return_note';
+/** #12/AC-4: quem consta no histórico de um rascunho: o agente do Claude, no Cron e no refazer. */
+export const AGENT_ACTOR = 'agente';
 
 export type DraftResult =
   | { readonly kind: 'ok'; readonly record: RequestRecord }
@@ -69,6 +71,7 @@ export async function draftRequest(deps: SupplierDeps, queueId: number, ask: Ask
     to: source.supplierEmail,
     draftedOn,
     model: DEFAULT_MODEL,
+    by: AGENT_ACTOR,
     outcome: judge(raw, catalog),
   });
   return created.kind === 'ok' ? { kind: 'ok', record: created.record } : { kind: 'conflict', reason: 'open_request_exists' };

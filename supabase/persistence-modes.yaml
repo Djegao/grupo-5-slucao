@@ -1,0 +1,48 @@
+# Registro de modos de persistência (#12): uma entrada por tabela, ao lado de supabase/migrations/.
+# Chaves em inglês (formato do registro); descrições em português.
+# O desenho que explica cada escolha: supabase/persistence-pedido-fornecedor.md.
+#
+# mode:     append-only | upsert-with-history | ephemeral
+# history:  json-column | json-child-table | history-table | none
+# Tabelas criadas antes da #12 ainda não estão aqui: registrá-las é trabalho em aberto
+# (ver "Em aberto" no desenho), não uma declaração de que não têm modo.
+
+database: postgresql 17          # supabase/config.toml, major_version = 17 (Supabase)
+migrations: supabase/migrations
+
+strategies:
+  # #12: não há unidade de trabalho com BEGIN/COMMIT na api. Todo acesso é PostgREST
+  # (api/src/connectors/supabase-rest.ts), e cada requisição é uma transação do próprio PostgREST:
+  # confirma se não falhar, desfaz em qualquer falha de banco
+  # (https://docs.postgrest.org/en/stable/references/transactions.html).
+  # Logo, a unidade de trabalho é UMA requisição, que toca UMA tabela; o que precisa ser atômico
+  # (entidade + histórico + versão + trava do envio) cabe numa linha só. O efeito em outra raiz é um
+  # passo idempotente que o caso de uso refaz (api/src/supplier/use-cases.ts, cabeçalho).
+  unit_of_work: postgrest-single-request
+  tenancy:
+    strategy: none               # sem inquilino neste modelo (brief da #12)
+
+tables:
+  issued_return_notes:
+    mode: append-only
+    history: none
+    # #12: a nota que o mock emitiu é um fato; nunca muda nem sai.
+    projection: none             # lida direto pela chave (queue_id ou id); não há estado derivado
+    refusal: grant               # revoke update, delete, truncate de anon, authenticated e service_role
+    ids: "id bigint generated always as identity (maxvalue 999999999) = a sequência: ND-<id>, número <id>"
+
+  outbox_supplier_emails:
+    mode: upsert-with-history
+    history: json-column
+    history_column: history      # jsonb, lista de {version, at, by, action, state}; estado inteiro depois
+    version_column: version
+    # #12: o pedido ao fornecedor (raiz SupplierRequest): a pessoa edita o corpo do rascunho e o estado
+    # anda; histórico na própria linha porque o PostgREST não dá transação entre duas tabelas.
+    send_guard: "send_claim uuid + send_claimed_at timestamptz (trava do envio, com prazo)"
+    deletion: none               # nada é apagado; o fim é status = discarded com motivo, quem e quando
+    erasure: not stated          # sent_by e discarded_by identificam pessoas (ADR-005); sem caminho de apagamento registrado
+
+  kit_fornecedores:
+    mode: ephemeral
+    # #12: só ganha a coluna email aqui.
+    reason: "cópia fiel de data/kit/fornecedores.json (contrato base_do_kit), refeita por upsert em scripts/load_kit.py a cada merge; o registro é o JSON versionado no git, não a tabela"

@@ -41,7 +41,16 @@ describe('#11/AC-4 emitir e enviar', () => {
   it('grava quem enviou, quando, o canal e o identificador do provedor', async () => {
     const w = await drafted(fakeMailer({ ok: true, channel: 'resend', providerMessageId: 'msg-9' }));
     await createSupplierUseCases(w.deps).send(41, BY);
-    expect(w.requests.rows[0]?.stamps).toContainEqual({ sent: { by: BY, at: NOW, channel: 'resend', providerMessageId: 'msg-9' } });
+    expect(w.requests.rows[0]?.stamps).toContainEqual({
+      by: BY,
+      at: NOW,
+      action: 'sent',
+      sent: {
+        channel: 'resend',
+        providerMessageId: 'msg-9',
+        attachments: [{ filename: 'ND-101.json', contentType: 'application/json', issuedReturnNoteId: 101 }],
+      },
+    });
   });
 
   it('pedido que não existe é not_found, sem emitir nada', async () => {
@@ -160,7 +169,7 @@ describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
     const w = await drafted();
     const before = w.requests.rows[0]!.request;
     const note = before.note;
-    const result = await createSupplierUseCases(w.deps).editBody(41, 'Pedimos o retorno até {{prazo}}.');
+    const result = await createSupplierUseCases(w.deps).editBody(41, 'Pedimos o retorno até {{prazo}}.', BY);
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.rendered.body).toBe('Pedimos o retorno até 17/11/2026.');
@@ -169,11 +178,12 @@ describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
     expect(before.asks).toEqual(GOOD_TEXT.asks);
     expect(before.note).toBe(note);
     expect(w.requests.saves).toBe(1);
+    expect(w.requests.rows[0]?.stamps).toContainEqual({ by: BY, at: NOW, action: 'edited' });
   });
 
   it('número digitado fora do catálogo é recusado e o corpo anterior fica', async () => {
     const w = await drafted();
-    const result = await createSupplierUseCases(w.deps).editBody(41, 'Devolvemos 999 caixas.');
+    const result = await createSupplierUseCases(w.deps).editBody(41, 'Devolvemos 999 caixas.', BY);
     expect(result).toEqual({ kind: 'invalid', reason: 'number_mismatch', field: 'body' });
     expect(w.requests.rows[0]?.request.body).toBe(GOOD_TEXT.body);
     expect(w.requests.saves).toBe(0);
@@ -182,15 +192,15 @@ describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
   it('só o rascunho se edita; o inexistente é not_found', async () => {
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
-    expect(await useCases.editBody(99, 'texto')).toEqual({ kind: 'not_found' });
+    expect(await useCases.editBody(99, 'texto', BY)).toEqual({ kind: 'not_found' });
     await useCases.send(41, BY);
-    expect(await useCases.editBody(41, 'texto')).toEqual({ kind: 'conflict', reason: 'not_draft' });
+    expect(await useCases.editBody(41, 'texto', BY)).toEqual({ kind: 'conflict', reason: 'not_draft' });
   });
 
   it('sem a nota de origem para refazer o catálogo, não edita', async () => {
     const w = await drafted();
     const useCases = createSupplierUseCases({ ...w.deps, source: { find: async () => null } });
-    expect(await useCases.editBody(41, 'texto')).toEqual({ kind: 'invalid', reason: 'source_missing' });
+    expect(await useCases.editBody(41, 'texto', BY)).toEqual({ kind: 'invalid', reason: 'source_missing' });
   });
 });
 
@@ -201,7 +211,7 @@ describe('#11/AC-6 descartar respeita o ciclo do pedido', () => {
     expect(result.kind).toBe('ok');
     expect(statusOf(w, 41)).toBe('discarded');
     expect(w.requests.rows[0]?.request.discardReason).toBe('fornecedor já avisado por telefone');
-    expect(w.requests.rows[0]?.stamps).toContainEqual({ discarded: { by: BY, at: NOW } });
+    expect(w.requests.rows[0]?.stamps).toContainEqual({ by: BY, at: NOW, action: 'discarded' });
   });
 
   it('motivo em branco é invalid; pedido enviado é conflito; inexistente é not_found', async () => {
@@ -256,5 +266,91 @@ describe('#11/AC-6 refazer respeita um pedido aberto por nota de origem e tipo',
     await useCases.discard(41, BY, 'x');
     const result = await useCases.redraft(41, fakeAsk({ subject: 'oi' }));
     expect(result.kind === 'ok' && result.record.request.status).toBe('discarded');
+  });
+});
+
+describe('#12/AC-4 o envio toma a trava antes de qualquer efeito', () => {
+  it('trava o pedido depois de conferir o texto e antes de emitir, mover a fila ou enviar', async () => {
+    const w = await drafted();
+    expect((await createSupplierUseCases(w.deps).send(41, BY)).kind).toBe('ok');
+    expect(w.requests.claims).toBe(1);
+    expect(w.requests.releases).toBe(0);
+  });
+
+  it('trava recusada é conflito send_in_progress: nada é emitido, movido nem enviado', async () => {
+    const w = await drafted();
+    w.requests.refuseClaim = true;
+    expect(await createSupplierUseCases(w.deps).send(41, BY)).toEqual({ kind: 'conflict', reason: 'send_in_progress' });
+    expect(w.notes.issuedCount).toBe(0);
+    expect(w.queue.emitCalls).toEqual([]);
+    expect(w.mailer.sent).toEqual([]);
+  });
+
+  it('o texto inválido nem chega a tomar a trava', async () => {
+    const w = await drafted();
+    const useCases = createSupplierUseCases({ ...w.deps, source: { find: async () => null } });
+    await useCases.send(41, BY);
+    expect(w.requests.claims).toBe(0);
+  });
+
+  it('o envio que para depois da trava (fila já tratada) a solta, para edição e descarte voltarem', async () => {
+    const w = await drafted();
+    w.queue.views[0]!.status = 'cancelada';
+    expect(await createSupplierUseCases(w.deps).send(41, BY)).toEqual({ kind: 'conflict', reason: 'queue_not_pending' });
+    expect(w.requests.releases).toBe(1);
+    expect(w.requests.rows[0]?.claim).toBeNull();
+  });
+
+  it('o envio que termina, bem ou mal, não solta a trava por conta própria: o último save a limpa', async () => {
+    const ok = await drafted();
+    await createSupplierUseCases(ok.deps).send(41, BY);
+    const failed = await drafted(fakeMailer({ ok: false, reason: 'caixa_de_saida_indisponivel' }));
+    await createSupplierUseCases(failed.deps).send(41, BY);
+    expect([ok.requests.releases, failed.requests.releases]).toEqual([0, 0]);
+    expect([ok.requests.rows[0]?.claim, failed.requests.rows[0]?.claim]).toEqual([null, null]);
+  });
+
+  it('cada gravação do envio diz quem fez e quando', async () => {
+    const w = await drafted(fakeMailer({ ok: false, reason: 'x' }));
+    await createSupplierUseCases(w.deps).send(41, BY);
+    expect(w.requests.rows[0]?.stamps.map((c) => [c.action, c.by, c.at])).toEqual([
+      ['issued', BY, NOW],
+      ['send_failed', BY, NOW],
+    ]);
+  });
+
+  it('o e-mail leva a chave da trava, para o provedor deduplicar', async () => {
+    const w = await drafted();
+    await createSupplierUseCases(w.deps).send(41, BY);
+    expect(w.mailer.sent[0]?.idempotencyKey).toBe('claim-1');
+  });
+});
+
+describe('#12/AC-4 gravação que não achou a versão lida é conflito stale', () => {
+  it('editar e descartar devolvem stale', async () => {
+    const w = await drafted();
+    const useCases = createSupplierUseCases(w.deps);
+    w.requests.staleNext = true;
+    expect(await useCases.editBody(41, 'Pedimos o retorno até {{prazo}}.', BY)).toEqual({ kind: 'conflict', reason: 'stale' });
+    w.requests.staleNext = true;
+    expect(await useCases.discard(41, BY, 'x')).toEqual({ kind: 'conflict', reason: 'stale' });
+  });
+
+  it('o registro da emissão que volta stale para o envio: nada é movido nem enviado, e a trava é solta', async () => {
+    const w = await drafted();
+    w.requests.staleNext = true;
+    expect(await createSupplierUseCases(w.deps).send(41, BY)).toEqual({ kind: 'conflict', reason: 'stale' });
+    expect(w.mailer.sent).toEqual([]);
+    expect(w.queue.emitCalls).toEqual([]);
+    expect(w.requests.releases).toBe(1);
+  });
+
+  it('o carimbo do envio que não foi gravado (trava perdida) também é stale, e o pedido não vira enviado', async () => {
+    const w = await drafted();
+    const useCases = createSupplierUseCases({
+      ...w.deps,
+      requests: { ...w.deps.requests, save: async (r, c) => (c.action === 'sent' ? 'stale' : w.requests.save(r, c)) },
+    });
+    expect(await useCases.send(41, BY)).toEqual({ kind: 'conflict', reason: 'stale' });
   });
 });

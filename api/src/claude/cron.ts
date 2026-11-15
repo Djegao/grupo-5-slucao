@@ -12,6 +12,9 @@ import { tasksFor } from './tasks/index.js';
 /**
  * #171 Pedidos por tarefa a cada rodada. Cada pedido custa 2 subrequests (a Messages API e o upsert) e a rodada
  * lê umas 7 vezes antes: 2 tarefas × 5 × 2 + 7 = 27, dentro dos 50 do plano gratuito. A rodada vai depois da captura.
+ * #12 A tarefa do rascunho do pedido ao fornecedor entra com 5 × 2 = 10 pedidos a mais e a leitura da fila (2) mais uma
+ * #12 por devolução pendente (o findOpen): 3 tarefas × 5 × 2 + 7 + 2 + N = 39 + N, dentro dos 50 só com até 11 devolvidas
+ * #12 pendentes. Passando disso a leitura estoura o orçamento: a lista de pedidos abertos numa só leitura é trabalho em aberto.
  */
 export const CRON_LIMIT = 5;
 

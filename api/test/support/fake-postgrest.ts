@@ -8,6 +8,9 @@ export class FakePostgrest {
   readonly tables = new Map<string, Row[]>();
   readonly requests: { method: string; url: string; headers: Record<string, string> }[] = [];
   private nextId = 1;
+  private readonly sequences = new Map<string, number>();
+  private readonly uniques: { table: string; columns: string[]; when: (row: Row) => boolean }[] = [];
+  private readonly failures: { table: string; method: string; status: number; body: unknown }[] = [];
 
   constructor(seed: Record<string, Row[]> = {}) {
     for (const [t, rows] of Object.entries(seed)) this.tables.set(t, rows.map((r) => ({ ...r })));
@@ -15,6 +18,16 @@ export class FakePostgrest {
 
   rows(table: string): Row[] {
     return this.tables.get(table) ?? [];
+  }
+
+  /** #12 Uma restrição única (parcial, se `when` filtra): o POST que a viola volta 409 com o código 23505, como o PostgREST. */
+  unique(table: string, columns: string[], when: (row: Row) => boolean = () => true): void {
+    this.uniques.push({ table, columns, when });
+  }
+
+  /** #12 A próxima requisição da tabela e do método falha com este status e corpo (uma vez). */
+  failNext(table: string, method: string, status: number, body: unknown): void {
+    this.failures.push({ table, method, status, body });
   }
 
   readonly fetch: FetchFn = async (input, init = {}) => {
@@ -29,6 +42,11 @@ export class FakePostgrest {
     this.tables.set(table, rows);
     const json = (status: number, payload: unknown) =>
       new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
+    const failureAt = this.failures.findIndex((f) => f.table === table && f.method === method);
+    if (failureAt >= 0) {
+      const [failure] = this.failures.splice(failureAt, 1);
+      return json(failure!.status, failure!.body);
+    }
 
     if (method === 'GET') {
       let result = rows.filter((r) => this.matches(r, params));
@@ -72,9 +90,13 @@ export class FakePostgrest {
             out.push(existing);
             continue;
           }
-          return json(409, { message: 'duplicate key' });
+          return json(409, { code: '23505', message: 'duplicate key' });
         }
         const row: Row = { ...this.defaults(table), ...incoming };
+        const violated = this.uniques.some(
+          (u) => u.table === table && u.when(row) && rows.some((r) => u.when(r) && u.columns.every((c) => r[c] === row[c])),
+        );
+        if (violated) return json(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
         rows.push(row);
         out.push(row);
       }
@@ -108,6 +130,30 @@ export class FakePostgrest {
         cancelled_at: null,
       };
     }
+    // #12 O pedido ao fornecedor e a nota emitida: identidade por tabela e as colunas que a migração deixa nulas.
+    if (table === 'outbox_supplier_emails') {
+      return {
+        id: this.sequence(table),
+        status: 'draft',
+        discard_reason: null,
+        send_failure_reason: null,
+        issued_return_note_id: null,
+        channel: null,
+        provider_message_id: null,
+        sent_by: null,
+        sent_at: null,
+        discarded_by: null,
+        discarded_at: null,
+        send_claim: null,
+        send_claimed_at: null,
+        attachments: [],
+        version: 1,
+        history: [],
+        created_at: now,
+        updated_at: now,
+      };
+    }
+    if (table === 'issued_return_notes') return { id: this.sequence(table), created_at: now };
     if (table.startsWith('outbox_')) return { id: this.nextId++, published_at: now };
     if (table === 'invoices') return { captured_at: now, classification: null, checked_at: null };
     // #63 As colunas com default da migração do domínio e da aprovação.
@@ -117,28 +163,46 @@ export class FakePostgrest {
     return {};
   }
 
+  private sequence(table: string): number {
+    const next = (this.sequences.get(table) ?? 0) + 1;
+    this.sequences.set(table, next);
+    return next;
+  }
+
   private matches(row: Row, params: URLSearchParams): boolean {
     for (const [col, expr] of params) {
       if (['select', 'order', 'on_conflict', 'limit'].includes(col)) continue;
-      // #71 e #63: in.(a,"b") do PostgREST, valores separados por vírgula, aspas opcionais.
-      const inList = /^in\.\((.*)\)$/.exec(expr);
-      if (inList) {
-        const values = (inList[1] ?? '').split(',').map((v) => v.replace(/^"(.*)"$/, '$1'));
-        if (!values.includes(String(row[col]))) return false;
+      // #12 or=(a.is.null,b.lt.X): cada termo é `coluna.operador.valor`; o valor pode ter pontos.
+      if (col === 'or') {
+        const terms = /^\((.*)\)$/.exec(expr)?.[1]?.split(',') ?? [];
+        if (!terms.some((term) => this.term(row, term))) return false;
         continue;
       }
-      // #56 not.is.null: o filtro que pega todas as linhas de uma coluna not null.
-      if (expr === 'not.is.null') {
-        if (row[col] === null || row[col] === undefined) return false;
-        continue;
-      }
-      if (expr.startsWith('gte.')) {
-        if (Date.parse(String(row[col])) < Date.parse(expr.slice(4))) return false;
-        continue;
-      }
-      if (!expr.startsWith('eq.')) throw new Error(`fake: filtro não suportado ${col}=${expr}`);
-      if (String(row[col]) !== expr.slice(3)) return false;
+      if (!this.test(row, col, expr)) return false;
     }
     return true;
+  }
+
+  private term(row: Row, term: string): boolean {
+    const [col = '', ...rest] = term.split('.');
+    return this.test(row, col, rest.join('.'));
+  }
+
+  private test(row: Row, col: string, expr: string): boolean {
+    // #71 e #63: in.(a,"b") do PostgREST, valores separados por vírgula, aspas opcionais.
+    const inList = /^in\.\((.*)\)$/.exec(expr);
+    if (inList) {
+      const values = (inList[1] ?? '').split(',').map((v) => v.replace(/^"(.*)"$/, '$1'));
+      return values.includes(String(row[col]));
+    }
+    // #56 not.is.null: o filtro que pega todas as linhas de uma coluna not null.
+    if (expr === 'not.is.null') return row[col] !== null && row[col] !== undefined;
+    // #12 is.null: a coluna sem valor.
+    if (expr === 'is.null') return row[col] === null || row[col] === undefined;
+    if (expr.startsWith('gte.')) return !(Date.parse(String(row[col])) < Date.parse(expr.slice(4)));
+    // #12 lt.: menor que, em instantes (a coluna sem valor nunca é menor).
+    if (expr.startsWith('lt.')) return row[col] !== null && row[col] !== undefined && Date.parse(String(row[col])) < Date.parse(expr.slice(3));
+    if (!expr.startsWith('eq.')) throw new Error(`fake: filtro não suportado ${col}=${expr}`);
+    return String(row[col]) === expr.slice(3);
   }
 }

@@ -83,19 +83,36 @@ export const fakeQueue = (views: ReturnNoteView[]): FakeQueue => {
   return queue;
 };
 
-type Stored = RequestRecord & { stamps: RequestChange[] };
+type Stored = RequestRecord & { stamps: RequestChange[]; claim: string | null };
 
-export type FakeRequests = SupplierDeps['requests'] & { rows: Stored[]; saves: number };
+export type FakeRequests = SupplierDeps['requests'] & {
+  rows: Stored[];
+  saves: number;
+  claims: number;
+  releases: number;
+  /** #12: o que o caso de uso mandou criar, para conferir quem fez. */
+  created: NewRequest[];
+  /** #12: quando true, o próximo save diz `stale`, como o PATCH que não achou a versão lida. */
+  staleNext: boolean;
+  /** #12: quando true, a próxima trava é recusada (outro envio em curso). */
+  refuseClaim: boolean;
+};
 
 export const fakeRequests = (): FakeRequests => {
   const rows: Stored[] = [];
   const store: FakeRequests = {
     rows,
     saves: 0,
+    claims: 0,
+    releases: 0,
+    created: [],
+    staleNext: false,
+    refuseClaim: false,
     findOpen: async (key, type) =>
       rows.find((r) => r.request.invoiceAccessKey === key && r.request.requestType === type && r.request.isOpen) ?? null,
     get: async (id) => rows.find((r) => r.request.id === id) ?? null,
     create: async (input: NewRequest): Promise<CreateResult> => {
+      store.created.push(input);
       const opens = input.outcome.kind === 'draft';
       if (opens && rows.some((r) => r.request.invoiceAccessKey === input.invoiceAccessKey && r.request.isOpen)) {
         return { kind: 'conflict' };
@@ -105,14 +122,34 @@ export const fakeRequests = (): FakeRequests => {
         input.outcome.kind === 'draft'
           ? SupplierRequest.draft({ ...base, text: input.outcome.text })
           : SupplierRequest.rejected({ ...base, rejection: input.outcome.rejection });
-      const row: Stored = { request, queueId: input.queueId, to: input.to, stamps: [] };
+      const row: Stored = { request, queueId: input.queueId, to: input.to, stamps: [], claim: null };
       rows.push(row);
       return { kind: 'ok', record: row };
     },
     save: async (request, change) => {
+      if (store.staleNext) {
+        store.staleNext = false;
+        return 'stale';
+      }
       store.saves += 1;
       const row = rows.find((r) => r.request === request);
-      if (row !== undefined && change !== undefined) row.stamps.push(change);
+      if (row !== undefined) {
+        row.stamps.push(change);
+        if (change.action === 'sent' || change.action === 'send_failed') row.claim = null;
+      }
+      return 'ok';
+    },
+    claimSend: async (id) => {
+      store.claims += 1;
+      const row = rows.find((r) => r.request.id === id);
+      if (row === undefined || store.refuseClaim || row.claim !== null) return { kind: 'conflict' };
+      row.claim = `claim-${store.claims}`;
+      return { kind: 'claimed', claim: row.claim };
+    },
+    releaseSend: async (id) => {
+      store.releases += 1;
+      const row = rows.find((r) => r.request.id === id);
+      if (row !== undefined) row.claim = null;
     },
   };
   return store;
