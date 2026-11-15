@@ -649,13 +649,16 @@ function boardPage() {
   }
 }
 
+const KPI_SUB = { aguardando: 'pedidos no prazo', atendidos: 'fornecedor atendeu', precisam: 'pedem uma decisão sua', atrasados: 'passaram do prazo' };
+
 function chips() {
   const counts = board.counts ?? {};
+  // #157 Os cards de números, como os da Fila de aprovação; clicar filtra a tabela (de novo, limpa).
   const items = BUCKETS.map(
     ([key, label]) =>
-      `<button data-filter="${key}" aria-pressed="${board.filter === key}">${esc(label)}<span class="n">${Number(counts[key] ?? 0)}</span></button>`,
+      `<button class="kpi" data-filter="${key}" aria-pressed="${board.filter === key}"><span class="k-label"><span class="k-dot"></span>${esc(label)}</span><span class="k-value">${Number(counts[key] ?? 0)}</span><span class="k-sub">${esc(KPI_SUB[key] ?? '')}</span></button>`,
   ).join('');
-  return `<div class="chips" role="group" aria-label="Filtrar por status">${items}</div>`;
+  return `<div class="kpis" role="group" aria-label="Filtrar por status">${items}</div>`;
 }
 
 function table() {
@@ -683,17 +686,18 @@ function row(i) {
 function statusCell(i) {
   const l = i.latest;
   const doc = l?.supplierDocument ? `: ${esc(l.supplierDocument)}` : '';
+  const badge = (cls, text) => `<span class="badge ${cls}">${text}</span>`;
   let text;
-  if (i.closed) text = '<span class="ok">■ Encerrado</span>';
+  if (i.closed) text = badge('b-grey', 'Encerrado');
   else if (i.bucket === 'atrasados') {
-    text = `⏰ Atrasado <button class="small" data-row-cobrar="${esc(i.id)}" ${board.busy ? 'disabled' : ''}>Cobrar</button>`;
-  } else if (!l) text = 'Aguardando resposta';
-  else if (i.documentConfirmed || l.nextStep === 'close') text = `<span class="ok">✓ Atendeu${doc}</span>`;
-  else if (l.nextStep === 'confirm_document') text = `✓ Atendeu${doc} · <span class="warn">confirmar</span>`;
-  else if (l.outcome === 'needs_information') text = i.followUpSent ? '↻ Respondido · aguardando' : '? Pediu informação';
-  else if (i.followUpSent) text = '↻ Cobrado · aguardando';
-  else if (l.outcome === 'refused') text = '✕ Recusou';
-  else text = esc(OUTCOME[l.outcome] ?? l.outcome);
+    text = `${badge('b-err', 'Atrasado')} <button class="small" data-row-cobrar="${esc(i.id)}" ${board.busy ? 'disabled' : ''}>Cobrar</button>`;
+  } else if (!l) text = badge('b-info', 'Aguardando resposta');
+  else if (i.documentConfirmed || l.nextStep === 'close') text = badge('b-ok', `Atendeu${doc}`);
+  else if (l.nextStep === 'confirm_document') text = badge('b-warn', `Atendeu${doc} · confirmar`);
+  else if (l.outcome === 'needs_information') text = i.followUpSent ? badge('b-info', 'Respondido · aguardando') : badge('b-purple', 'Pediu informação');
+  else if (i.followUpSent) text = badge('b-info', 'Cobrado · aguardando');
+  else if (l.outcome === 'refused') text = badge('b-err', 'Recusou');
+  else text = badge('b-grey', esc(OUTCOME[l.outcome] ?? l.outcome));
   const flag = l?.injectionFlag ? `<br><span class="flag">⚠ Ordem escondida na resposta</span>` : '';
   return text + flag;
 }
