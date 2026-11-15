@@ -26,13 +26,15 @@ button{font:inherit;border:2px solid var(--ink);background:#fff;border-radius:4p
 button[disabled]{opacity:.45;border-style:dashed}
 .skel{height:10px;background:linear-gradient(90deg,#e6e6e1,#f2f2ee,#e6e6e1);border-radius:4px}
 .q{background:var(--warn);border:1px solid #c58b00;border-radius:6px;padding:10px 12px;margin:10px 0}
+.q.ok{background:#e8f5e9;border-color:#2e7d32}
+.q.ok b.id{background:#2e7d32}
 .q b.id{background:#c58b00;color:#fff;border-radius:3px;padding:0 6px;margin-right:6px}
 .flow{background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px;overflow:auto;font:12.5px/1.5 ui-monospace,monospace;white-space:pre}
 table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
 </style></head><body><main>
 <h1>Bloco "Pedido ao fornecedor" na gaveta da proposta</h1>
 <p class="lead">Wireframe da camada 1 da #3 (história de frontend; origem: formacao-fde-solucao-case#156; a API é a #2). Fixa estrutura, estados e fluxo, nunca o visual final. Componentes: <code>InvoiceDrawer</code> &gt; <code>ProposalPanel</code> &gt; novo bloco logo após o <code>Alert</code> "Decisão registrada"; <code>Block</code>, <code>DataList</code>, <code>AiSourceBadge source="ai" label="Claude"</code>, <code>Alert</code>, <code>Button</code> (padrão busy/erro de <code>run()</code>/<code>decisionError()</code> em devolucoes.tsx).</p>
-<div class="alert warn"><b>Status: aguardando aprovação do dono do design.</b> Não aprovado. Aprovação: <i>(a registrar quando vier: quem e quando)</i>.</div>
+<div class="alert"><b>Status: aprovado como desenhado.</b> Aprovação: dono do grupo 5, 15/11/2026. Inclui o estado 11 (#3/AC-8) e a pasta artifacts/wireframe-pedido-ao-fornecedor/.</div>
 
 <h2>1. Lugar do bloco na gaveta</h2>
 <div class="grid"><figure><figcaption>Estrutura <small>(AC-1)</small></figcaption>
@@ -124,6 +126,12 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <div class="btns"><span></span><div class="r"><button class="pri">Refazer</button></div></div>
 <div class="lock">Refazer pede ao Claude um novo rascunho; o bloco volta ao estado 2 (escrevendo).</div></div></div></figure>
 
+<figure><figcaption>11. Não foi possível preparar <small>(error · AC-8)</small></figcaption><div class="drawer"><div class="ctx">… Decisão registrada …</div>
+<div class="block"><div class="head"><span>Pedido ao fornecedor</span><span class="badge">✦ Claude</span></div>
+<div class="alert error"><b>Não foi possível preparar o pedido: o texto citou um número que não está no catálogo.</b></div>
+<div class="btns"><span></span><div class="r"><button class="pri">Refazer</button></div></div>
+<div class="lock">Quando o Claude falha ou o rascunho é descartado pela regra de números. O motivo vem da API. Sem nota e sem e-mail para revisar. Refazer pede um novo rascunho e o bloco volta ao estado 2. Pendente: "Refazendo…".</div></div></div></figure>
+
 <figure><figcaption>10. Sem pedido <small>(bloco ausente · AC-1)</small></figcaption><div class="drawer"><div class="ctx">… Decisão registrada …</div>
 <div class="block absent">(nada é desenhado: nem título, nem espaço)</div>
 <div class="lock">Proposta decidida sem pedido (E7, match) ou ainda não decidida: a gaveta segue de "Decisão registrada" (ou do formulário "Sua decisão") direto para o resto.</div></div></figure>
@@ -151,18 +159,20 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
                             └───────────────────┘       └──────────────────────┘
                                      ▲   Tentar enviar de novo (só o e-mail)  │
                                      └────────────────────────────────────────┘
+   2 Escrevendo ── Claude falha ou número fora do catálogo ──▶ 11 Não foi possível preparar
+   11 ── Refazer ──▶ 2 Escrevendo
    10 Sem pedido: o bloco não existe (fora do fluxo).</div>
 
-<h2>4. Perguntas de design em aberto (decididas com recomendação; o dono confirma ou muda)</h2>
-<div class="q"><b class="id">Q1</b><b>Confirmar antes de "Emitir e enviar"?</b> Recomendo <b>não</b>: o clique é a ação deliberada (#156/AC-3), a história pede "um clique" e o rascunho à vista já é a revisão. Alternativa: diálogo "Emitir a nota de devolução e enviar o e-mail?" (emitir não se desfaz).</div>
-<div class="q"><b class="id">Q2</b><b>Para onde volta "Refazer"?</b> Recomendo o estado <b>escrevendo</b> (novo rascunho do Claude), sem formulário. Alternativa: reabrir o rascunho descartado.</div>
-<div class="q"><b class="id">Q3</b><b>Como o texto editado é salvo ou cancelado, e o que aparece ao editar?</b> Recomendo <code>textarea</code> já preenchida com o texto do rascunho (números reais, não marcadores), "Salvar texto" e "Cancelar edição"; salvar chama a API, que confere os números (#156/AC-6/AC-7); número fora do banco volta como Alert de erro e mantém a edição aberta. Assunto, para, prazo, anexo, itens e valores ficam travados; Descartar e Emitir ficam desabilitados durante a edição. Depende do contrato da #2.</div>
-<div class="q"><b class="id">Q4</b><b>Onde fica o link da nota?</b> Recomendo no anexo "📎 nota-devolucao-ND-n.pdf", que vira link (nova aba) em emitida e enviada e em envio falho; no rascunho é só texto "anexa ao enviar". Depende de a API expor a URL do PDF.</div>
-<div class="q"><b class="id">Q5</b><b>Estado pendente.</b> Recomendo desabilitar todos os botões e trocar o texto do principal ("Emitindo e enviando…", "Enviando…", "Reenviando…"), sem modal nem barra.</div>
-<div class="q"><b class="id">Q6</b><b>Erro da ação.</b> Recomendo Alert de erro no topo do bloco, mensagens por status como em <code>decisionError()</code>, e o bloco volta ao estado anterior. Um 409 (outra pessoa já agiu) ganha mensagem própria pedindo para reabrir a gaveta.</div>
-<div class="q"><b class="id">Q7</b><b>Depois de emitida e enviada, mostrar o que foi enviado?</b> Recomendo um resumo recolhido "Ver o que foi enviado", só leitura. Alternativa: só a linha de status.</div>
-<div class="q"><b class="id">Q8</b><b>Como a gaveta sabe que o Claude terminou?</b> Recomendo sondar a API a cada poucos segundos enquanto o estado for "escrevendo", sem botão "atualizar". Se o Claude falhar ou a regra descartar o rascunho por número fora do catálogo (#156/AC-6), proponho um estado extra "Não foi possível preparar o pedido: motivo" com "Refazer" (como o descartado, com Alert de erro). Isso não está nos critérios da #3: o dono decide se entra.</div>
-<div class="q"><b class="id">Q9</b><b>Descartar pede confirmação?</b> Recomendo que não: se desfaz com "Refazer".</div>
+<h2>4. Perguntas de design (todas decididas pelo dono do grupo 5, em 15/11/2026)</h2>
+<div class="q ok"><b class="id">Q1</b><b>Confirmar antes de "Emitir e enviar"?</b> <b>Decidido: não.</b> O clique é a ação deliberada (#156/AC-3), a história pede "um clique" e o rascunho à vista já é a revisão. Alternativa: diálogo "Emitir a nota de devolução e enviar o e-mail?" (emitir não se desfaz).</div>
+<div class="q ok"><b class="id">Q2</b><b>Para onde volta "Refazer"?</b> <b>Decidido:</b> o estado <b>escrevendo</b> (novo rascunho do Claude), sem formulário. Alternativa: reabrir o rascunho descartado.</div>
+<div class="q ok"><b class="id">Q3</b><b>Como o texto editado é salvo ou cancelado, e o que aparece ao editar?</b> Recomendo <code>textarea</code> já preenchida com o texto do rascunho (números reais, não marcadores), "Salvar texto" e "Cancelar edição"; salvar chama a API, que confere os números (#156/AC-6/AC-7); número fora do banco volta como Alert de erro e mantém a edição aberta. Assunto, para, prazo, anexo, itens e valores ficam travados; Descartar e Emitir ficam desabilitados durante a edição. Depende do contrato da #2.</div>
+<div class="q ok"><b class="id">Q4</b><b>Onde fica o link da nota?</b> Recomendo no anexo "📎 nota-devolucao-ND-n.pdf", que vira link (nova aba) em emitida e enviada e em envio falho; no rascunho é só texto "anexa ao enviar". Depende de a API expor a URL do PDF.</div>
+<div class="q ok"><b class="id">Q5</b><b>Estado pendente.</b> Recomendo desabilitar todos os botões e trocar o texto do principal ("Emitindo e enviando…", "Enviando…", "Reenviando…"), sem modal nem barra.</div>
+<div class="q ok"><b class="id">Q6</b><b>Erro da ação.</b> Recomendo Alert de erro no topo do bloco, mensagens por status como em <code>decisionError()</code>, e o bloco volta ao estado anterior. Um 409 (outra pessoa já agiu) ganha mensagem própria pedindo para reabrir a gaveta.</div>
+<div class="q ok"><b class="id">Q7</b><b>Depois de emitida e enviada, mostrar o que foi enviado?</b> Recomendo um resumo recolhido "Ver o que foi enviado", só leitura. Alternativa: só a linha de status.</div>
+<div class="q ok"><b class="id">Q8</b><b>Como a gaveta sabe que o Claude terminou?</b> Recomendo sondar a API a cada poucos segundos enquanto o estado for "escrevendo", sem botão "atualizar". Se o Claude falhar ou a regra descartar o rascunho por número fora do catálogo (#156/AC-6), vale o estado 11 "Não foi possível preparar o pedido: motivo" com "Refazer". <b>Decidido: entra</b>, como #3/AC-8.</div>
+<div class="q ok"><b class="id">Q9</b><b>Descartar pede confirmação?</b> Recomendo que não: se desfaz com "Refazer".</div>
 
 <h2>5. Textos (resumo, para texts.ts)</h2>
 <table><tr><th>Estado</th><th>Texto</th></tr>
@@ -171,6 +181,7 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <tr><td>Botões</td><td>Descartar · Editar · Emitir e enviar (ou Enviar ao fornecedor) · Salvar texto · Cancelar edição · Tentar enviar de novo · Refazer</td></tr>
 <tr><td>Emitida e enviada</td><td>Nota de devolução ND-n emitida e enviada por você às hh:mm · aguardando resposta até dd/mm</td></tr>
 <tr><td>Envio falho</td><td>A nota ND-n foi emitida, mas o e-mail não saiu: motivo.</td></tr>
-<tr><td>Descartado</td><td>Pedido descartado por você às hh:mm</td></tr></table>
+<tr><td>Descartado</td><td>Pedido descartado por você às hh:mm</td></tr>
+<tr><td>Não preparado</td><td>Não foi possível preparar o pedido: motivo</td></tr></table>
 <p class="note">Fora desta camada: a lista "Pedidos ao fornecedor" e a leitura da resposta (#157); a API (#2).</p>
 </main></body></html>
