@@ -507,6 +507,7 @@ export const texts = {
     sendFailedEmailOnly: (reason: string) => `O e-mail não saiu: ${reason}.`,
     discarded: (by: string, time: string) => `Pedido descartado ${by} às ${time}`,
     notPrepared: (reason: string) => `Não foi possível preparar o pedido: ${reason}.`,
+    loadFailed: { title: "Não foi possível carregar o pedido", retry: "Tentar de novo", loading: "Carregando…" },
     errors: {
       forbidden: "Você não tem permissão para esta ação.",
       conflict: "Outra pessoa já agiu neste pedido. Feche e reabra a gaveta para ver o estado atual.",

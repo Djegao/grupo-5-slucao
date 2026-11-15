@@ -2,7 +2,7 @@
  * #3 Liga o estado do bloco "Pedido ao fornecedor" às chamadas (#16): carrega o pedido, consulta de
  * tempos em tempos enquanto o Claude escreve (AC-2) e traduz cada ação em pendente, feito ou recusado.
  */
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { SupplierRequestBlockProps, SupplierRequestPending, SupplierRequestView } from "./SupplierRequestBlock";
 import {
   initialSupplierRequestState,
@@ -22,7 +22,9 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
   const portRef = useRef(port);
   portRef.current = port;
   const live = useRef(true);
-  const writing = state.request?.status === "writing";
+  const [attempt, setAttempt] = useState(0);
+  // #3/AC-9 Com a consulta parada (5 falhas seguidas), só "Tentar de novo" volta a consultar.
+  const polling = state.request?.status === "writing" && !state.loadFailed;
 
   useEffect(() => {
     live.current = true;
@@ -32,16 +34,18 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
       .then((request) => {
         if (!controller.signal.aborted) dispatch({ type: "loaded", request });
       })
-      // #3/AC-1 Sem conseguir buscar, o bloco não aparece: a gaveta segue com o resto da proposta.
-      .catch(() => undefined);
+      // #3/AC-9 Sem conseguir buscar, o bloco mostra a falha de carga; o erro em si não sai daqui.
+      .catch(() => {
+        if (!controller.signal.aborted) dispatch({ type: "loadFailed" });
+      });
     return () => {
       live.current = false;
       controller.abort();
     };
-  }, [accessKey]);
+  }, [accessKey, attempt]);
 
   useEffect(() => {
-    if (!writing) return undefined;
+    if (!polling) return undefined;
     const controller = new AbortController();
     const timer = setInterval(() => {
       portRef.current
@@ -49,14 +53,21 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
         .then((request) => {
           if (!controller.signal.aborted) dispatch({ type: "loaded", request });
         })
-        // #3/AC-2 Uma consulta que falha não derruba o bloco: a próxima tenta de novo.
-        .catch(() => undefined);
+        // #3/AC-9 Uma consulta que falha conta; com 5 seguidas o estado para a consulta e mostra a falha de carga.
+        .catch(() => {
+          if (!controller.signal.aborted) dispatch({ type: "pollFailed" });
+        });
     }, pollMs);
     return () => {
       clearInterval(timer);
       controller.abort();
     };
-  }, [writing, accessKey, pollMs]);
+  }, [polling, accessKey, pollMs]);
+
+  const reload = useCallback(() => {
+    dispatch({ type: "reloadStarted" });
+    setAttempt((n) => n + 1);
+  }, []);
 
   const act = useCallback(async (pending: SupplierRequestPending, call: () => Promise<SupplierRequestView>) => {
     dispatch({ type: "started", pending });
@@ -73,6 +84,9 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
     pending: state.pending,
     error: state.error,
     draftText: state.draftText,
+    loadFailed: state.loadFailed,
+    reloading: state.reloading,
+    onReload: reload,
     onSend: () => void act("send", () => portRef.current.send(accessKey)),
     onResend: () => void act("resend", () => portRef.current.resend(accessKey)),
     onDiscard: () => void act("discard", () => portRef.current.discard(accessKey)),

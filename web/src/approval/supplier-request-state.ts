@@ -25,12 +25,31 @@ export interface SupplierRequestState {
   pending?: SupplierRequestPending;
   /** #3 A mensagem por status; nunca o texto do erro nem o corpo da resposta. */
   error?: string;
+  /** #3/AC-9 A carga falhou (inicial, ou consulta que falhou 5 vezes seguidas): o bloco dá lugar ao alerta com "Tentar de novo". */
+  loadFailed: boolean;
+  /** #3/AC-9 "Tentar de novo" em andamento ("Carregando…"). */
+  reloading: boolean;
+  /** #3/AC-9 Consultas seguidas que falharam enquanto o pedido é escrito; zera quando uma dá certo. */
+  pollFailures: number;
 }
 
-export const initialSupplierRequestState: SupplierRequestState = { request: null, editing: false, draftText: "" };
+export const initialSupplierRequestState: SupplierRequestState = {
+  request: null,
+  editing: false,
+  draftText: "",
+  loadFailed: false,
+  reloading: false,
+  pollFailures: 0,
+};
+
+/** #3/AC-9 Com 5 falhas seguidas a consulta para e o bloco mostra a falha de carga. */
+export const MAX_POLL_FAILURES = 5;
 
 export type SupplierRequestEvent =
   | { type: "loaded"; request: SupplierRequestView | null }
+  | { type: "loadFailed" }
+  | { type: "pollFailed" }
+  | { type: "reloadStarted" }
   | { type: "started"; pending: SupplierRequestPending }
   | { type: "done"; request: SupplierRequestView }
   | { type: "failed"; error: string }
@@ -42,7 +61,18 @@ export function supplierRequestReducer(state: SupplierRequestState, event: Suppl
   switch (event.type) {
     case "loaded":
       // #3/AC-2 A busca periódica não pisa numa ação em andamento nem numa edição aberta.
-      return state.pending || state.editing ? state : { ...state, request: event.request };
+      return state.pending || state.editing
+        ? state
+        : { ...state, request: event.request, loadFailed: false, reloading: false, pollFailures: 0 };
+    case "loadFailed":
+      // #3/AC-9 A carga que falha não vira "sem pedido": o bloco mostra a falha, sem o texto do erro.
+      return { ...state, loadFailed: true, reloading: false };
+    case "pollFailed": {
+      const pollFailures = state.pollFailures + 1;
+      return pollFailures >= MAX_POLL_FAILURES ? { ...state, pollFailures, loadFailed: true, reloading: false } : { ...state, pollFailures };
+    }
+    case "reloadStarted":
+      return { ...state, reloading: true };
     case "started":
       return { ...state, pending: event.pending, error: undefined };
     case "done":
