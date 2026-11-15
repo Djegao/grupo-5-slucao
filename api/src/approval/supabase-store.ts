@@ -367,6 +367,11 @@ export class SupabaseApprovalStore implements ApprovalStore {
     return (await this.load({ state: 'in.(aprovada,alterada)' })).filter((f) => f.approval?.decidedOn === day);
   }
 
+  /** #156 Todos os processos decididos (aprovada ou alterada), de qualquer dia: a varredura do pedido ao fornecedor. */
+  async listDecided(): Promise<CaseFile[]> {
+    return (await this.load({ state: 'in.(aprovada,alterada)' })).filter((f) => f.approval !== null);
+  }
+
   /**
    * #63 Regra 8: a aprovação entra primeiro, e a restrição única de `approvals.proposal_id` decide quem
    * chegou antes; quem chega depois recebe `AlreadyDecidedError` sem mudar nada. Depois vêm a

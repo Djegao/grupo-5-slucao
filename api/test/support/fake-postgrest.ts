@@ -4,8 +4,20 @@ import type { FetchFn } from '../../src/connectors/supabase-rest.js';
 
 type Row = Record<string, unknown>;
 
+/** #156 Uma restrição única do banco que o fake imita, inclusive a parcial (`where`). */
+export type FakeUnique = {
+  readonly table: string;
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly where?: (row: Row) => boolean;
+};
+
 export class FakePostgrest {
   readonly tables = new Map<string, Row[]>();
+  /** #156 As restrições únicas declaradas: a violação vira 409 com o código 23505 e o nome da restrição. */
+  readonly uniques: FakeUnique[] = [];
+  /** #156 O último valor da sequência `return_note_number_seq`, que a rota rpc incrementa. */
+  sequence = 0;
   readonly requests: { method: string; url: string; headers: Record<string, string> }[] = [];
   private nextId = 1;
 
@@ -29,6 +41,9 @@ export class FakePostgrest {
     this.tables.set(table, rows);
     const json = (status: number, payload: unknown) =>
       new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
+
+    // #156 rpc/<função>: a sequência do sequencial da nota de devolução. O POST devolve o escalar, como o PostgREST.
+    if (method === 'POST' && table === 'rpc/next_return_note_number') return json(200, ++this.sequence);
 
     if (method === 'GET') {
       let result = rows.filter((r) => this.matches(r, params));
@@ -75,14 +90,27 @@ export class FakePostgrest {
           return json(409, { message: 'duplicate key' });
         }
         const row: Row = { ...this.defaults(table), ...incoming };
+        const violated = this.uniques.find((u) => u.table === table && this.collides(rows, row, u));
+        if (violated) {
+          return json(409, {
+            code: '23505',
+            message: `duplicate key value violates unique constraint "${violated.name}"`,
+          });
+        }
         rows.push(row);
+        this.recordHistory(table, row);
         out.push(row);
       }
       return json(201, out);
     }
     if (method === 'PATCH') {
       const hit = rows.filter((r) => this.matches(r, params));
-      for (const r of hit) Object.assign(r, body as Row);
+      for (const r of hit) {
+        Object.assign(r, body as Row);
+        // #156 O trigger BEFORE UPDATE sobe a versão; o AFTER grava o histórico.
+        if (table === 'supplier_requests') r.version = Number(r.version) + 1;
+        this.recordHistory(table, r);
+      }
       return json(200, hit);
     }
     if (method === 'DELETE') {
@@ -92,8 +120,22 @@ export class FakePostgrest {
     return json(405, {});
   };
 
+  private collides(rows: Row[], row: Row, unique: FakeUnique): boolean {
+    if (unique.where && !unique.where(row)) return false;
+    return rows.some((r) => (!unique.where || unique.where(r)) && unique.columns.every((c) => r[c] === row[c]));
+  }
+
+  /** #156 O trigger AFTER INSERT OR UPDATE de supplier_requests: uma linha de histórico por versão. */
+  private recordHistory(table: string, row: Row): void {
+    if (table !== 'supplier_requests') return;
+    const history = this.tables.get('supplier_request_history') ?? [];
+    this.tables.set('supplier_request_history', history);
+    history.push({ request_id: row.id, version: row.version, at: row.updated_at, by: row.updated_by, state: { ...row } });
+  }
+
   private defaults(table: string): Row {
     const now = new Date().toISOString();
+    if (table === 'supplier_requests') return { version: 1 };
     // #140 A fila de devolução: o estado inicial e as colunas que a migração deixa nulas.
     if (table === 'outbox_return_notes') {
       return {

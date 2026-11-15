@@ -90,6 +90,13 @@ const TABLE = 'outbox_return_notes';
 const COLUMNS =
   'id,invoice_access_key,payload,published_at,status,nfe_number,emitted_by,emitted_at,cancel_justification,cancelled_by,cancelled_at';
 
+/** #156 O valor de uma linha da fila: a quantidade devolvida vezes o preço da linha na nota de origem, em centavos. */
+export const lineValueCents = (unitPriceCents: number, amount: number): number => Math.round(unitPriceCents * amount);
+
+/** #156 O valor da devolução: a soma das linhas; nulo se alguma linha não está na nota de origem. */
+export const totalValueCents = (values: readonly (number | null)[]): number | null =>
+  values.every((v): v is number => v !== null) ? values.reduce((a, b) => a + b, 0) : null;
+
 function toView(row: Row, invoice: InvoiceRow | undefined, now: Date): ReturnNoteView {
   const lines = row.payload.lines.map((l): ReturnNoteLineView => {
     const item = invoice?.items.find((i) => i.supplierCode === l.supplierCode);
@@ -97,11 +104,10 @@ function toView(row: Row, invoice: InvoiceRow | undefined, now: Date): ReturnNot
       supplierCode: l.supplierCode,
       description: item?.description ?? l.supplierCode,
       quantity: { amount: l.amount, unit: l.unit },
-      valueCents: item ? Math.round(item.unitPriceCents * l.amount) : null,
+      valueCents: item ? lineValueCents(item.unitPriceCents, l.amount) : null,
     };
   });
-  const values = lines.map((l) => l.valueCents);
-  const valueCents = values.every((v): v is number => v !== null) ? values.reduce((a, b) => a + b, 0) : null;
+  const valueCents = totalValueCents(lines.map((l) => l.valueCents));
   const since = Date.parse(row.published_at);
   const end = Date.parse(row.emitted_at ?? row.cancelled_at ?? '') || now.getTime();
   return {

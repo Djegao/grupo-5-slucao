@@ -1,0 +1,79 @@
+# Registro dos modos de persistência (#156). Uma entrada por tabela que as migrações criam.
+# Lido pela revisão de persistência (PER-1, PER-7, PER-8, IDX-3, MT-1). As chaves ficam em inglês;
+# as descrições, em português. O desenho que justifica cada entrada está em
+# supabase/persistence/supplier-requests.md.
+#
+# mode:     append-only | upsert-with-history | ephemeral
+# history:  json-child-table | json-column | history-table | none
+# refusal:  como o banco recusa UPDATE e DELETE numa tabela append-only (trigger | grant)
+# growth:   fixed quando só migrações gravam a tabela
+
+database: postgresql 17          # supabase/config.toml, [db] major_version = 17
+migrations: supabase/migrations
+
+strategies:
+  # #156 A unidade de trabalho é uma requisição ao PostgREST: "every request to an API resource runs
+  # inside a transaction" (docs.postgrest.org, references/transactions). O Worker não abre transação
+  # entre chamadas. Entidade e histórico entram na mesma requisição por trigger, que roda na mesma
+  # transação do comando (postgresql.org/docs/current/trigger-definition.html). Um caso de uso que
+  # toca mais de uma raiz é uma cadeia de passos de uma requisição cada, todos idempotentes e chaveados.
+  unit_of_work: one PostgREST request (api/src/connectors/supabase-rest.ts); history by trigger
+  unit_of_work_decision: none recorded yet (ver "Left open" na nota de desenho)
+  # #156 Uma empresa só (a Já Chegou); supplier_id é a contraparte, não um inquilino.
+  tenancy:
+    strategy: none
+    decision: none
+  # #156 Primeira função RPC do projeto: só o sequencial da nota de devolução (nextval). EXECUTE fica
+  # só para service_role, o papel da chave secreta do Worker.
+  rpc:
+    - next_return_note_number
+
+tables:
+  # #156 O pedido ao fornecedor: rascunho que a pessoa edita e cujo status anda. Entidade editada.
+  supplier_requests:
+    mode: upsert-with-history
+    history: json-child-table
+    history_table: supplier_request_history   # (request_id, version, at, by, state jsonb)
+    version_column: version                    # incrementado pelo trigger BEFORE UPDATE
+    concurrency_token: updated_at              # o da porta (save(request, expectedUpdatedAt)), mais version
+    tenant: none
+    erasure: none on record                    # created_by/edited_by/sent_by/discarded_by: ver Left open
+
+  # #156 O histórico do pedido: um registro por mudança, escrito pelo trigger AFTER INSERT OR UPDATE.
+  supplier_request_history:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none                           # o estado atual mora em supplier_requests, não é derivado daqui
+    refusal: trigger
+
+  # #156 A nota de devolução emitida pelo mock: um fato, uma por linha da fila da #140.
+  return_note_emissions:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none                           # lida pela chave (queue_row_id, note_id); nenhum estado derivado
+    refusal: trigger
+
+  # #156 A caixa de saída mock do e-mail ao fornecedor: um fato por envio, idempotente por request_id.
+  outbox_supplier_emails:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none                           # lida pela chave request_id; nenhum estado derivado
+    refusal: trigger
+
+  # #156 O e-mail de teste de cada fornecedor do kit. Só migrações gravam.
+  supplier_contacts:
+    mode: append-only
+    history: none
+    growth: fixed
+    tenant: none
+    refusal: grant                             # INSERT/UPDATE/DELETE/TRUNCATE revogados de anon, authenticated e service_role
+
+# Tabelas que migrações anteriores criaram e que este registro ainda não declara (PER-1 aberto para
+# elas; declarar é decisão do dono de cada uma, fora da #156): kit_* (base do kit), invoices,
+# divergences, proposals, approvals, titles, outbox_dock_actions, outbox_registry_corrections,
+# outbox_return_notes, outbox_store_actions, claude_suggestions, exceptions, automation_runs.
+# A #156 lê proposals, approvals, invoices e escreve em outbox_return_notes pelos caminhos da #59 e
+# da #140, sem mudar o modo de nenhuma delas.
