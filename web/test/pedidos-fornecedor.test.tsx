@@ -33,9 +33,8 @@ const SUPPLIER_REQUESTS: SupplierRequest[] = [
   { invoice: "51877", supplier: "F02 Bebidas", request: "Nota de devolução", amount: "R$ 980,00", dueDate: "20/11", status: "Aguardando" },
 ];
 
-describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
-  // #21 Costura de dados: o GET da lista devolve `items`; a proposta da gaveta é 404 como nos outros
-  // testes de rota. A camada de contrato troca isto pelo formato real.
+describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => {
+  // #21 Costura de dados: o GET devolve `items`, a proposta da gaveta é 404, e o contrato troca pelo real.
   let items: SupplierRequest[] = SUPPLIER_REQUESTS;
   let failList = false;
   const respond = async (input: RequestInfo | URL): Promise<Response> => {
@@ -52,15 +51,15 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   function renderRoute() {
-    window.history.replaceState(null, "", "/pedidos-fornecedor");
+    window.history.replaceState(null, "", "/pedidos-fornecedor"); // ADR-004
     return render(<Frame context={fallbackContext("analista@barte.com")} />);
   }
 
-  it.fails("#5/AC-5 o menu 'Contas a pagar' tem 'Pedidos ao fornecedor' depois dos itens existentes", () => {
+  it.fails("#5/AC-5: o menu 'Contas a pagar' tem 'Pedidos ao fornecedor' depois dos itens existentes", () => {
     const group = NAVIGATION.find((g) => g.key === "pagar")!;
     const last = group.items[group.items.length - 1]!;
     expect(last.label).toBe("Pedidos ao fornecedor");
-    expect(last.href).toBe("/pedidos-fornecedor");
+    expect(last.href).toBe("/pedidos-fornecedor"); // ADR-004
     expect(group.items.map((i) => i.label).slice(0, 4)).toEqual([
       "Fila de aprovação",
       "Lista do dia",
@@ -69,23 +68,23 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     ]);
   });
 
-  it.fails("#5/AC-1 #5/AC-2 a rota abre com o título, os chips com contagem e o chip Aguardando ativo", async () => {
+  it.fails("#5/AC-1 #5/AC-2: a rota abre com o título, os chips com contagem e o chip Aguardando ativo", async () => {
     renderRoute();
     expect(await screen.findByRole("heading", { name: "Pedidos ao fornecedor" })).toBeTruthy();
-    // Os chips são radios do filtro de situação (como em devolucoes.test.tsx), não texto solto: a
-    // célula de Status "Aguardando" da linha também casaria com getByText.
-    const aguardando = await screen.findByRole("radio", { name: /^Aguardando/ });
+    // #5 Os chips são radios do filtro de situação (como em devolucoes.test.tsx), não texto solto.
+    // #5 A célula de Status "Aguardando" da linha também casaria com getByText.
+    const waitingChip = await screen.findByRole("radio", { name: /^Aguardando/ });
     for (const chip of [/^Atendidos/, /^Precisam de você/, /^Atrasados/]) {
       expect(screen.getByRole("radio", { name: chip })).toBeTruthy();
     }
     expect(screen.getByRole("radio", { name: /^Atrasados/ }).textContent).toMatch(/2/);
     // #5 Q3 (wireframe): o filtro inicial é Aguardando. Só a linha aguardando aparece.
-    expect(aguardando.getAttribute("aria-checked")).toBe("true");
+    expect(waitingChip.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText("51877")).toBeTruthy();
     expect(screen.queryByText("59738")).toBeNull();
   });
 
-  it.fails("#5/AC-1 cenário: filtrar 'Atrasados' mostra os dois com Nota, Fornecedor, Solicitação, Valor, Prazo e Status, por prazo crescente", async () => {
+  it.fails("#5/AC-1: cenário: filtrar 'Atrasados' mostra os dois com Nota, Fornecedor, Solicitação, Valor, Prazo e Status, por prazo crescente", async () => {
     renderRoute();
     fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
 
@@ -110,22 +109,22 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     expect(second.getByRole("button", { name: "Cobrar" })).toBeTruthy();
   });
 
-  it.fails("#5/AC-3 clicar na linha abre a gaveta no bloco 'Pedido ao fornecedor' com a conversa e a leitura do agente", async () => {
+  it.fails("#5/AC-3: clicar na linha abre a gaveta no bloco 'Pedido ao fornecedor' com a conversa e a leitura do agente", async () => {
     renderRoute();
     fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
     const row = (await screen.findByText("59738")).closest("tr")!;
     fireEvent.click(row);
 
-    // A gaveta do kit é achada pelo título, como em approval.test.tsx, não por role="dialog".
+    // #5 A gaveta do kit é achada pelo título, como em approval.test.tsx, não por role="dialog".
     expect(await screen.findByRole("heading", { name: /Proposta da nota/ })).toBeTruthy();
     expect(await screen.findByText("Pedido ao fornecedor")).toBeTruthy();
-    // Estado 7 do wireframe: pedido enviado, resposta do fornecedor e leitura do agente.
+    // #5 Estado 7 do wireframe: pedido enviado, resposta do fornecedor e leitura do agente.
     expect(screen.getByText(/Pedido enviado/)).toBeTruthy();
     expect(screen.getByText(/Resposta do fornecedor/)).toBeTruthy();
     expect(screen.getByText(/Leitura do agente/)).toBeTruthy();
   });
 
-  it.fails("#5/AC-4 cenário: 'Cobrar' abre a gaveta no bloco 'Pedido ao fornecedor' com o rascunho da cobrança, sem enviar", async () => {
+  it.fails("#5/AC-4: cenário: 'Cobrar' abre a gaveta no bloco 'Pedido ao fornecedor' com o rascunho da cobrança, sem enviar", async () => {
     renderRoute();
     fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
     const row = (await screen.findByText("59738")).closest("tr")!;
@@ -142,7 +141,7 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
   });
 
   // #18 Estados desenhados no wireframe: erro, vazio e chip com contagem 0.
-  it.fails("#18 estado de erro: a lista falha, mostra 'Tentar de novo' e, ao tentar, volta a carregar a lista", async () => {
+  it.fails("#18: estado de erro: a lista falha, mostra 'Tentar de novo' e, ao tentar, volta a carregar a lista", async () => {
     failList = true;
     renderRoute();
     expect(await screen.findByText("Não consegui carregar os pedidos ao fornecedor.")).toBeTruthy();
@@ -151,19 +150,19 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     expect(await screen.findByText("51877")).toBeTruthy();
   });
 
-  it.fails("#18 estado vazio: sem solicitações, diz o que fazer e oferece ir à Fila de aprovação", async () => {
+  it.fails("#18: estado vazio: sem solicitações, diz o que fazer e oferece ir à Fila de aprovação", async () => {
     items = [];
     renderRoute();
     expect(await screen.findByText("Nenhum pedido ao fornecedor ainda.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ir para a Fila de aprovação" })).toBeTruthy();
   });
 
-  it.fails("#5/AC-2 chip com contagem 0: 'Atrasados 0' mostra 'Nenhum pedido atrasado' e a ação 'Ver todos'", async () => {
+  it.fails("#5/AC-2: chip com contagem 0: 'Atrasados 0' mostra 'Nenhum pedido atrasado' e a ação 'Ver todos'", async () => {
     items = SUPPLIER_REQUESTS.filter((r) => r.status === "Aguardando");
     renderRoute();
-    const atrasados = await screen.findByRole("radio", { name: /^Atrasados/ });
-    expect(atrasados.textContent).toMatch(/0/);
-    fireEvent.click(atrasados);
+    const lateChip = await screen.findByRole("radio", { name: /^Atrasados/ });
+    expect(lateChip.textContent).toMatch(/0/);
+    fireEvent.click(lateChip);
     expect(await screen.findByText(/Nenhum pedido atrasado/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ver todos" })).toBeTruthy();
   });
