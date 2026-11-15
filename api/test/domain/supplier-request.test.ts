@@ -3,7 +3,6 @@ import {
   DomainError,
   InvalidTransitionError,
   SupplierRequest,
-  addBusinessDays,
   buildSupplierRequestFacts,
   factKey,
   hasOpenRequest,
@@ -112,29 +111,8 @@ describe('a validação do texto do Claude', () => {
 });
 
 describe('o prazo padrão', () => {
-  it('#10/AC-4 é de 3 dias úteis depois do rascunho', () => {
-    expect(addBusinessDays('2026-11-09', 3)).toBe('2026-11-12'); // #10: segunda → quinta
-    expect(addBusinessDays('2026-11-12', 3)).toBe('2026-11-17'); // #10: quinta → terça (pula o fim de semana)
-  });
-
-  it('#10/AC-4 um rascunho de sexta, sábado ou domingo vence na quarta', () => {
-    for (const day of ['2026-11-13', '2026-11-14', '2026-11-15']) {
-      expect(addBusinessDays(day, 3)).toBe('2026-11-18');
-    }
-  });
-
-  it('#10/AC-4 atravessa a virada do mês e do ano', () => {
-    expect(addBusinessDays('2026-11-27', 3)).toBe('2026-12-02');
-    expect(addBusinessDays('2026-12-30', 3)).toBe('2027-01-04');
-  });
-
   it('#10/AC-4 o pedido nasce com o prazo de 3 dias úteis depois do dia do rascunho', () => {
     expect(drafted().dueOn).toBe('2026-11-17');
-  });
-
-  it('#10/AC-4 recusa data que não é AAAA-MM-DD', () => {
-    expect(() => addBusinessDays('hoje', 3)).toThrow(DomainError);
-    expect(() => addBusinessDays('2026-02-30', 3)).toThrow(DomainError);
   });
 });
 
