@@ -7,6 +7,9 @@ import { fallbackContext, NAVIGATION } from "../src/shell/context";
  * #18 Esqueleto de ponta a ponta da lista "Pedidos ao fornecedor" (história #5), escrito contra o
  * wireframe aprovado em artifacts/wireframe-pedidos-fornecedor/index.html.
  *
+ * Em skip (#18, #21): as dependências do web não instalam (#25), então os `it.fails` não se verificam, e um
+ * teste que falha por defeito de ambiente ainda ficaria verde. A #21 (camada de contrato) tira o skip e troca `it.fails` por `it` (#18, #21).
+ *
  * Ele está VERMELHO DE PROPÓSITO: nada implementa a tela ainda. Para o `make check` e o CI seguirem
  * verdes, cada comportamento está em `it.fails`, que passa enquanto o teste inteiro falha, por
  * qualquer motivo, inclusive um erro de consulta lançado. A camada de contrato (#21) troca `it.fails`
@@ -33,7 +36,7 @@ const SUPPLIER_REQUESTS: SupplierRequest[] = [
   { invoice: "51877", supplier: "F02 Bebidas", request: "Nota de devolução", amount: "R$ 980,00", dueDate: "20/11", status: "Aguardando" },
 ];
 
-describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => {
+describe.skip("#18: /pedidos-fornecedor (wireframe aprovado, #5) … até #21", () => {
   // #21 Costura de dados: o GET devolve `items`, a proposta da gaveta é 404, e o contrato troca pelo real.
   let items: SupplierRequest[] = SUPPLIER_REQUESTS;
   let failList = false;
