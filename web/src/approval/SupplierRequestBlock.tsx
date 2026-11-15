@@ -82,6 +82,10 @@ export interface SupplierRequestBlockProps {
   onCancelEdit: () => void;
   onResend: () => void;
   onRedo: () => void;
+  /** #3/AC-9 A carga falhou: o alerta ocupa o lugar do bloco, e "Tentar de novo" chama `onReload`. */
+  loadFailed?: boolean;
+  reloading?: boolean;
+  onReload: () => void;
   onDraftTextChange: (text: string) => void;
 }
 
@@ -96,6 +100,7 @@ function clock(instant: string): string {
 
 export function SupplierRequestBlock(props: SupplierRequestBlockProps): JSX.Element | null {
   const { request, pending, error } = props;
+  if (props.loadFailed) return <LoadFailed reloading={props.reloading === true} onReload={props.onReload} />;
   if (!request) return null;
   return (
     <section aria-label={t.title} aria-busy={pending ? true : undefined}>
@@ -104,6 +109,16 @@ export function SupplierRequestBlock(props: SupplierRequestBlockProps): JSX.Elem
         <State {...props} request={request} />
       </Panel>
     </section>
+  );
+}
+
+/** #3/AC-9 No lugar do bloco, sem título nem selo (não há pedido carregado); a mensagem é fixa, nunca a do erro. */
+function LoadFailed({ reloading, onReload }: { reloading: boolean; onReload: () => void }): JSX.Element {
+  return (
+    <div>
+      <Alert variant="error" title={t.loadFailed.title} showCloseButton={false} />
+      <PrimaryAction label={reloading ? t.loadFailed.loading : t.loadFailed.retry} onClick={onReload} pending={reloading} />
+    </div>
   );
 }
 
