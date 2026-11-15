@@ -157,6 +157,23 @@ describe('devolução da proposta decidida: returnNoteFor', () => {
     expect(returnNoteFor(invoice, decision('E2', DockAction.refuse()), r, [])).toBeNull();
   });
 
+  it('#1/AC-4 #6/AC-3: recusar mantém a quantidade proporcional exata na unidade da nota, mesmo fracionada (7 UN, fator 6, dá 7/6 CX)', () => {
+    const r = receipt([{ supplierCode: 'F08-002', amount: 7, unit: 'UN' }]);
+    const note = returnNoteFor(invoice, decision('E2', DockAction.refuse()), r, [box]);
+    expect(lines(note)).toEqual([['F08-002', 7 / 6, 'CX']]);
+  });
+
+  it('#1/AC-4 #6/AC-3: recusar uma NAO_CATALOGADA com recebimento até o dia da decisão devolve os itens recebidos', () => {
+    const onDecisionDay = receipt([{ supplierCode: 'F08-001', amount: 40 }], { receivedOn: '2026-11-12' });
+    const earlier = receipt([{ supplierCode: 'F08-001', amount: 40 }], { receivedOn: '2026-11-10' });
+    const refuse = decision('NAO_CATALOGADA', DockAction.refuse());
+    for (const r of [onDecisionDay, earlier]) {
+      const note = returnNoteFor(invoice, refuse, r, []);
+      expect(lines(note)).toEqual([['F08-001', 40, 'UN']]);
+      expect(note?.reason).toBe('NAO_CATALOGADA recusada na nota 9999: devolução dos itens já recebidos');
+    }
+  });
+
   it('#1/AC-4 #6/AC-3: recebimento do dia da decisão conta; do dia seguinte não', () => {
     const items = [{ supplierCode: 'F08-001', amount: 10 }];
     const sameDay = receipt(items, { receivedOn: '2026-11-12' });

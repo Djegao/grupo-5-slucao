@@ -20,8 +20,8 @@ const keyOf = (item: InvoiceItem): string => item.sku ?? item.supplierCode;
 const WITHOUT_RETURN: readonly Classification[] = ['MATCH', 'E4', 'E5', 'E6', 'E7', 'E8'];
 
 /** #1: a nota de devolução da proposta de E3 que já saía pelo `e3ReturnNote`; o texto não muda. */
-const reasonOf = (classification: Classification, invoice: InvoiceView, kind: 'parcial' | 'recusa'): string => {
-  if (kind === 'recusa') {
+const reasonOf = (classification: Classification, invoice: InvoiceView, kind: 'partial' | 'refusal'): string => {
+  if (kind === 'refusal') {
     return `${classification} recusada na nota ${invoice.number}: devolução dos itens já recebidos`;
   }
   if (classification === 'E1') {
@@ -46,7 +46,7 @@ function fromPartial(invoice: InvoiceView, decision: ReturnDecision): ReturnNote
     return item === undefined ? [] : [{ supplierCode: item.supplierCode, quantity: line.quantity }];
   });
   if (lines.length === 0) return null;
-  return { invoiceAccessKey: invoice.accessKey, lines, reason: reasonOf(decision.classification, invoice, 'parcial') };
+  return { invoiceAccessKey: invoice.accessKey, lines, reason: reasonOf(decision.classification, invoice, 'partial') };
 }
 
 function boxFactorOf(invoice: InvoiceView, item: InvoiceItem, products: readonly Product[]): number {
@@ -56,7 +56,12 @@ function boxFactorOf(invoice: InvoiceView, item: InvoiceItem, products: readonly
   return product?.boxFactor ?? 0;
 }
 
-/** #1/AC-4: o recebido na unidade do item da nota; sem fator para converter, não dá para devolver. */
+/**
+ * #1/AC-4: o recebido na unidade do item da nota. A conversão é proporcional e exata, sem arredondar:
+ * 7 UN com fator 6 em item de CX dá 7/6 CX, porque a fila de #140 valora a linha por quantidade x
+ * preço unitário da nota, e assim o valor devolvido fecha. Linha recebida sem fator de caixa (ausente
+ * ou inválido) é pulada de propósito: não há como convertê-la para a unidade da nota.
+ */
 function inItemUnit(received: ReceiptItem, item: InvoiceItem, factor: number): number | null {
   const unit = item.quantity.unit;
   if (received.quantity.unit === unit) return received.quantity.amount;
@@ -90,7 +95,7 @@ function fromRefusal(
     return amount > 0 ? [{ supplierCode: item.supplierCode, quantity: Quantity.of(amount, item.quantity.unit) }] : [];
   });
   if (lines.length === 0) return null;
-  return { invoiceAccessKey: invoice.accessKey, lines, reason: reasonOf(decision.classification, invoice, 'recusa') };
+  return { invoiceAccessKey: invoice.accessKey, lines, reason: reasonOf(decision.classification, invoice, 'refusal') };
 }
 
 /**
