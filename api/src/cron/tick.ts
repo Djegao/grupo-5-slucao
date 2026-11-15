@@ -180,7 +180,7 @@ async function runSupplierRequests(rest: SupabaseRest, env: Env): Promise<void> 
     const round = await runSupplierRequestsRound(rest, env);
     const skipped = Object.entries(round.skipped).map(([reason, n]) => `${reason} ${n}`).join(", ");
     console.log(
-      `cron: pedidos ao fornecedor abertos ${round.opened}, escritos ${round.drafted}, descartados ${round.discarded}, com falha ${round.failed}, de fora [${skipped}]${round.stopped ? ", escrita parada pelo Claude" : ""}`,
+      `cron: pedidos ao fornecedor abertos ${round.opened}, escritos ${round.drafted}, descartados ${round.discarded}, com falha ${round.failed}, de fora [${skipped}]${round.stopped ? ", escrita parada pelo Claude" : ""}; respostas lidas ${round.replies.read}, atrasados ${round.replies.overdue}, com falha ${round.replies.failed}`,
     );
   } catch (error) {
     const status = error instanceof SupabaseRestError ? `HTTP ${error.status}` : "falha no passo";

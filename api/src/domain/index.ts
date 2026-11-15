@@ -20,3 +20,4 @@ export * from './return-note-plan.js';
 export * from './return-note-emission.js';
 export * from './supplier-request-facts.js';
 export * from './supplier-request.js';
+export * from './supplier-reply.js';

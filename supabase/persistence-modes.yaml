@@ -71,6 +71,38 @@ tables:
     tenant: none
     refusal: grant                             # INSERT/UPDATE/DELETE/TRUNCATE revogados de anon, authenticated e service_role
 
+  # #157 A caixa de entrada mock: uma resposta do fornecedor por linha, ligada ao pedido.
+  inbox_supplier_messages:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none                           # lida por request_id e por received_at
+    refusal: trigger
+
+  # #157 A leitura do agente (ou do sistema, no no_reply): um fato por resposta; o estado é a última leitura.
+  supplier_reply_readings:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none                           # a aba da lista deriva da última leitura, na leitura
+    refusal: trigger
+
+  # #157/AC-3 A confirmação, por uma pessoa, do documento citado. Uma por leitura.
+  supplier_document_confirmations:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none
+    refusal: trigger
+
+  # #157/AC-2 A caixa de saída mock da cobrança: um envio por leitura, só com uma pessoa.
+  outbox_supplier_follow_ups:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none
+    refusal: trigger
+
 # Tabelas que migrações anteriores criaram e que este registro ainda não declara (PER-1 aberto para
 # elas; declarar é decisão do dono de cada uma, fora da #156): kit_* (base do kit), invoices,
 # divergences, proposals, approvals, titles, outbox_dock_actions, outbox_registry_corrections,

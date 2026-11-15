@@ -2,6 +2,7 @@
 import { ClaudeClient, credentialsFromEnv, type Ask, type FetchFn } from '../claude/client.js';
 import { SupabaseRestError, type SupabaseRest } from '../connectors/supabase-rest.js';
 import type { Env } from '../env.js';
+import { runSupplierRepliesRound, supabaseSupplierReplyDeps, type SupplierRepliesRound } from '../supplier-replies/index.js';
 import {
   openForDecided,
   supabaseSupplierRequestDeps,
@@ -17,7 +18,9 @@ import {
  * deste passo: listar as decididas ~8, mais 1 leitura dos pedidos existentes a cada 50 notas (`listByInvoices`), mais
  * ~5 para abrir um pedido; e escrever um pedido ~10 (ler, dossiê em 7 leituras em paralelo, a Messages API, gravar).
  * Com 1 aberto e 1 escrito por rodada o passo fica em ~24 até 50 notas decididas: o pedido sai em até duas rodadas
- * (30 min), dentro da janela de 24 h. Se o volume de casos decididos crescer muito, o passo vai para um Cron próprio.
+ * (30 min), dentro da janela de 24 h. A #157 soma ~4 (atrasados) em toda rodada e, só na rodada em que a #156 não
+ * abriu nem escreveu (~10 gastos), mais ~7 para ler uma resposta: o pior caso do passo fica em ~28, e a rodada inteira
+ * em ~27 + 28 + o recordRun, abaixo dos 50. Se o volume crescer, o passo vai para um Cron próprio.
  */
 export const OPEN_LIMIT = 1;
 export const WRITE_LIMIT = 1;
@@ -35,6 +38,8 @@ export type SupplierRequestsRound = {
   readonly stopped: boolean;
   /** #156: o Claude escreveu? Falso sem credencial: só abriu. */
   readonly wrote: boolean;
+  /** #157: os atrasados marcados e as respostas lidas nesta rodada. */
+  readonly replies: SupplierRepliesRound;
 };
 
 export type SupplierRequestsRoundOptions = {
@@ -77,18 +82,44 @@ export async function runSupplierRequestsRound(
   }
   const credentials = credentialsFromEnv(env);
   const ask = options.ask ?? (credentials ? new ClaudeClient({ credentials, fetch: options.fetch }).ask : undefined);
-  if (!ask) {
-    log('sem credencial do Claude; pedidos ao fornecedor abertos e o texto fica para a próxima rodada');
-    return { opened, skipped, drafted: 0, discarded: 0, failed, stopped: false, wrote: false };
-  }
-  const written = await writeDrafts(deps, ask, { limit: WRITE_LIMIT });
+  // #157 Por causa do teto de subrequests, a rodada cuida das respostas só quando não abriu nem escreveu nada.
+  let written: Awaited<ReturnType<typeof writeDrafts>> | null = null;
+  if (ask) written = await writeDrafts(deps, ask, { limit: WRITE_LIMIT });
+  else log('sem credencial do Claude; pedidos ao fornecedor abertos e o texto fica para a próxima rodada');
+  const wroteSomething = written !== null && written.drafted + written.discarded + written.failed + written.skipped > 0;
+  // #157 Os atrasados (sem Claude, ~4 subrequests) rodam sempre; a leitura com o Claude só quando a #156 não abriu nem escreveu.
+  const replies = await repliesRound(rest, env, options, log, opened === 0 && !wroteSomething ? ask : undefined);
   return {
     opened,
     skipped,
-    drafted: written.drafted,
-    discarded: written.discarded,
-    failed: failed + written.failed,
-    stopped: written.stopped,
-    wrote: true,
+    drafted: written?.drafted ?? 0,
+    discarded: written?.discarded ?? 0,
+    failed: failed + (written?.failed ?? 0),
+    stopped: written?.stopped ?? false,
+    wrote: written !== null,
+    replies,
   };
+}
+
+/** #157 A resposta do fornecedor: atrasados sem Claude e a leitura de até 1 resposta com ele. Erro fica isolado. */
+async function repliesRound(
+  rest: SupabaseRest,
+  env: Env,
+  options: SupplierRequestsRoundOptions,
+  log: (line: string) => void,
+  ask: Ask | undefined,
+): Promise<SupplierRepliesRound> {
+  const deps = supabaseSupplierReplyDeps(rest, {
+    ...(options.clock ? { clock: options.clock } : {}),
+    ...(options.ids ? { ids: options.ids } : {}),
+    log,
+    secrets: supplierRequestOptionsFromEnv(env, log).secrets ?? [],
+  });
+  try {
+    return await runSupplierRepliesRound(deps, ask);
+  } catch (error) {
+    const status = error instanceof SupabaseRestError ? `HTTP ${error.status}` : 'falha no passo';
+    log(`respostas do fornecedor indisponíveis (${status})`);
+    return { overdue: 0, read: 0, failed: 1, wrote: false };
+  }
 }

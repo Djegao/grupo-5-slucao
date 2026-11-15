@@ -14,6 +14,7 @@ import { automation } from "./automation";
 import { barredAmount } from "./barred-amount";
 import { returnNoteRoutes, type ReturnNotesDeps } from "./return-notes";
 import { supplierRequestRoutes, type SupplierRequestsDeps } from "./supplier-requests";
+import { supplierReplyRoutes } from "./supplier-replies";
 
 type PublicHandler = () => Response;
 type ProtectedHandler = (identity: Identity, request: Request, env: Env) => Response | Promise<Response>;
@@ -99,6 +100,10 @@ export async function route(request: Request, env: Env, deps: RouterDeps): Promi
 
   const supplierRequests = await supplierRequestRoutes(request, auth.identity, env, deps.supplierRequests ?? {}, supabaseFromEnv);
   if (supplierRequests) return supplierRequests;
+
+  // #157 A resposta do fornecedor: a lista, a conversa, confirmar o documento e cobrar.
+  const supplierReplies = await supplierReplyRoutes(request, auth.identity, env, deps.supplierRequests ?? {}, supabaseFromEnv);
+  if (supplierReplies) return supplierReplies;
 
   const methods = own(protectedRoutes(deps), pathname);
   if (methods) return dispatch(request, methods, (handler) => handler(auth.identity, request, env));
