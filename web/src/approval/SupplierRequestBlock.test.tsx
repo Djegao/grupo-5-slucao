@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SupplierRequestBlock, type SupplierRequestBlockProps, type SupplierRequestView } from "./SupplierRequestBlock";
 
 // #3 O bloco "Pedido ao fornecedor", um teste de renderização por estado do wireframe
-// (artifacts/wireframe-pedido-ao-fornecedor/index.html). O bloco é só de apresentação: props entram, callbacks saem.
+// #3 (artifacts/wireframe-pedido-ao-fornecedor/index.html). O bloco é só de apresentação: props entram, callbacks saem.
 // A busca por papel e rótulo é a verificação de acessibilidade do projeto (não há workbench nem axe, #15).
 
 const money = (cents: number) => ({ text: `R$ ${(cents / 100).toFixed(2).replace(".", ",")}` });

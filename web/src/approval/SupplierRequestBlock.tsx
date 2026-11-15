@@ -11,7 +11,7 @@ import { texts } from "../texts";
 
 const t = texts.supplierRequest;
 
-/** Um valor em reais já formatado, como a API o entrega. */
+/** (#17) Um valor em reais já formatado, como a API o entrega. */
 export interface SupplierRequestMoney {
   text: string;
 }
@@ -23,10 +23,10 @@ export interface SupplierRequestNoteLine {
   total: SupplierRequestMoney;
 }
 
-/** A nota de devolução. Ausente nos pedidos só de e-mail (cancelamento, pedido, cadastro). */
+/** #3 A nota de devolução. Ausente nos pedidos só de e-mail (cancelamento, pedido, cadastro). */
 export interface SupplierRequestNote {
   number: string;
-  /** Quem recebe e a nota de referência, quando a API os traz. */
+  /** (#17) Quem recebe e a nota de referência, quando a API os traz. */
   supplier?: string;
   reference?: string;
   lines: readonly SupplierRequestNoteLine[];
@@ -35,7 +35,7 @@ export interface SupplierRequestNote {
 
 export interface SupplierRequestEmail {
   to: string;
-  /** Dia no formato AAAA-MM-DD. */
+  /** (#17) Dia no formato AAAA-MM-DD. */
   dueOn: string;
   subject: string;
   body: string;
@@ -52,7 +52,7 @@ interface WithContent {
   attachment?: SupplierRequestAttachment;
 }
 
-/** Os estados do pedido que a gaveta desenha; o 10 (sem pedido) é `request` nulo. */
+/** #3 Os estados do pedido que a gaveta desenha; o 10 (sem pedido) é `request` nulo. */
 export type SupplierRequestView =
   | { status: "writing" }
   | ({ status: "draft" } & WithContent)
@@ -62,18 +62,18 @@ export type SupplierRequestView =
   | { status: "discarded"; discardedAt: string; discardedBy?: string }
   | { status: "failed"; failure: string };
 
-/** A ação em andamento: trava os botões e troca o texto do principal. */
+/** #3 A ação em andamento: trava os botões e troca o texto do principal. */
 export type SupplierRequestPending = "send" | "discard" | "save" | "resend" | "redo";
 
 export interface SupplierRequestBlockProps {
-  /** Nulo: a proposta não tem pedido, e o bloco não existe. */
+  /** #3/AC-1 Nulo: a proposta não tem pedido, e o bloco não existe. */
   request: SupplierRequestView | null;
-  /** Quem está na gaveta; "por você" quando foi essa pessoa. */
+  /** #3/AC-4 Quem está na gaveta; "por você" quando foi essa pessoa. */
   viewer: string;
   pending?: SupplierRequestPending;
-  /** A mensagem da ação recusada, já em português para quem decide. */
+  /** (#16) A mensagem da ação recusada, já em português para quem decide. */
   error?: string;
-  /** O texto em edição, no estado `editing`. */
+  /** #3/AC-6 O texto em edição, no estado `editing`. */
   draftText?: string;
   onSend: () => void;
   onDiscard: () => void;
@@ -85,10 +85,10 @@ export interface SupplierRequestBlockProps {
   onDraftTextChange: (text: string) => void;
 }
 
-/** "2026-11-18" vira "18/11", sem passar por fuso. */
+/** #3 "2026-11-18" vira "18/11", sem passar por fuso. */
 const dayMonth = (day: string): string => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
-/** "2026-11-15T13:40:00Z" vira "10h40" na hora de quem olha. */
+/** #3 "2026-11-15T13:40:00Z" vira "10h40" na hora de quem olha. */
 function clock(instant: string): string {
   const at = new Date(instant);
   return `${String(at.getHours()).padStart(2, "0")}h${String(at.getMinutes()).padStart(2, "0")}`;
@@ -201,7 +201,7 @@ function EmailView({ email, locked, text, onText }: { email: SupplierRequestEmai
 }
 
 function AttachmentLink({ attachment }: { attachment: SupplierRequestAttachment }): JSX.Element {
-  // A URL vem da API: só caminho do próprio site ou http(s) vira link; qualquer outro esquema fica como texto.
+  // #3/AC-4 A URL vem da API: só caminho do próprio site ou http(s) vira link; qualquer outro esquema fica como texto.
   const safe = /^(\/(?!\/)|https?:\/\/)/.test(attachment.url);
   if (!safe) return <Text variant="body-xs">{attachment.name}</Text>;
   return (
