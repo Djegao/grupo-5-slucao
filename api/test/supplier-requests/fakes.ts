@@ -57,6 +57,11 @@ export class FakeRequests implements SupplierRequestRepository {
   async listByInvoice(key: string) {
     return [...this.rows.values()].filter((s) => s.invoiceAccessKey === key).map((s) => SupplierRequest.restore(s));
   }
+  listByInvoicesCalls = 0;
+  async listByInvoices(keys: readonly string[]) {
+    this.listByInvoicesCalls += 1;
+    return [...this.rows.values()].filter((s) => keys.includes(s.invoiceAccessKey)).map((s) => SupplierRequest.restore(s));
+  }
   async listByStatus(status: SupplierRequestStatus) {
     return [...this.rows.values()].filter((s) => s.status === status).map((s) => SupplierRequest.restore(s));
   }

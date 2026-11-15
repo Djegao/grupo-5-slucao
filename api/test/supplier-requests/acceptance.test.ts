@@ -30,7 +30,7 @@ const listOf = async (w: World, key: string): Promise<View[]> =>
   ((await (await w.call(`/api/pedidos-fornecedor?nota=${key}`)).json()) as { requests: View[] }).requests;
 const post = (w: World, id: string, action: string, body?: unknown) => w.call(`/api/pedidos-fornecedor/${id}/${action}`, 'POST', body);
 
-/** Dado uma proposta E2 decidida com receber parcial devolvendo 40 UN do primeiro item da nota de origem. */
+/** #156 Dado uma proposta E2 decidida com receber parcial devolvendo 40 UN do primeiro item da nota de origem. */
 async function e2World(options: Parameters<typeof buildWorld>[0] = {}) {
   const w = await buildWorld(options);
   const decided = decide(w.fake, 'E2', E2_NUMBER, LINES);
@@ -39,7 +39,7 @@ async function e2World(options: Parameters<typeof buildWorld>[0] = {}) {
   return { w, ...decided, code, unitCents, totalCents: unitCents * LINES, ask: fakeAsk(goodBody(code)) };
 }
 
-/** E o rascunho já escrito pelo Cron. */
+/** #156 E o rascunho já escrito pelo Cron. */
 async function drafted() {
   const world = await e2World();
   await world.w.cron(world.ask);
@@ -52,19 +52,19 @@ describe('#156 pedido ao fornecedor: aceite', () => {
     const w = await buildWorld();
     const e2 = decide(w.fake, 'E2', E2_NUMBER, LINES);
     const e3 = decide(w.fake, 'E3', E3_NUMBER, 2);
-    // When o Cron abre os pedidos, sem o Claude (um por rodada: o teto de subrequests do Worker)
+    // #156 When o Cron abre os pedidos, sem o Claude (um por rodada: o teto de subrequests do Worker)
     expect(await w.cron()).toMatchObject({ opened: 1, drafted: 0, wrote: false });
     expect(await w.cron()).toMatchObject({ opened: 1, drafted: 0, wrote: false });
-    // Then cada nota tem um pedido escrevendo, sem texto
+    // #156 Then cada nota tem um pedido escrevendo, sem texto
     for (const key of [e2.key, e3.key]) {
       const [request] = await listOf(w, key);
       expect(request).toMatchObject({ status: 'writing', body: null, template: null });
     }
-    // When o Claude escreve na rodada seguinte
+    // #156 When o Claude escreve na rodada seguinte
     const ask = fakeAsk((prompt) => (prompt.includes(String(e2.item.supplierCode)) ? goodBody(String(e2.item.supplierCode)) : goodBody(String(e3.item.supplierCode))));
     expect(await w.cron(ask)).toMatchObject({ opened: 0, drafted: 1, wrote: true });
     expect(await w.cron(ask)).toMatchObject({ opened: 0, drafted: 1, wrote: true });
-    // Then os dois viram rascunho
+    // #156 Then os dois viram rascunho
     for (const key of [e2.key, e3.key]) expect((await listOf(w, key))[0]?.status).toBe('draft');
   });
 
@@ -76,7 +76,7 @@ describe('#156 pedido ao fornecedor: aceite', () => {
     expect(draft.items[0]).toMatchObject({ supplierCode: code, quantity: { amount: LINES }, unitPriceCents: unitCents, valueCents: totalCents });
     const queue = (await (await w.call('/api/return-notes')).json()) as { notes: { invoiceAccessKey: string; valueCents: number }[] };
     expect(queue.notes.filter((n) => n.invoiceAccessKey === key)).toMatchObject([{ valueCents: totalCents }]);
-    // E depois de emitida a nota segue o formato do kit, cita a nota de origem e fecha com a fila
+    // #156 E depois de emitida a nota segue o formato do kit, cita a nota de origem e fecha com a fila
     const sent = (await (await post(w, request.id, 'emitir-e-enviar')).json()) as { note: { nota_referenciada: string; natureza: string; valor_total: number; itens: { quantidade: number; valor: number }[] } };
     expect(sent.note).toMatchObject({ nota_referenciada: key, natureza: 'devolucao', valor_total: totalCents / 100 });
     expect(sent.note.itens).toMatchObject([{ quantidade: LINES, valor: totalCents / 100 }]);
@@ -89,9 +89,9 @@ describe('#156 pedido ao fornecedor: aceite', () => {
     expect(w.fake.rows('outbox_supplier_emails')).toHaveLength(0);
     expect(w.fake.rows('outbox_return_notes')[0]).toMatchObject({ status: 'pendente' });
     expect((await listOf(w, key))[0]?.status).toBe('draft');
-    // When a pessoa clica
+    // #156 When a pessoa clica
     const response = await post(w, request.id, 'emitir-e-enviar');
-    // Then sai
+    // #156 Then sai
     expect(response.status).toBe(200);
     expect(w.fake.rows('outbox_supplier_emails')).toHaveLength(1);
   });
@@ -118,9 +118,9 @@ describe('#156 pedido ao fornecedor: aceite', () => {
     await post(w, first!.id, 'descartar');
     const fresh = (await (await post(w, first!.id, 'refazer')).json()) as { request: View };
     await w.cron(world.ask);
-    // When emite de novo a mesma devolução
+    // #156 When emite de novo a mesma devolução
     const again = (await (await post(w, fresh.request.id, 'emitir-e-enviar')).json()) as { status: string; note: { nota_id: string; chave: string } };
-    // Then é a mesma nota e a fila só tem uma emissão
+    // #156 Then é a mesma nota e a fila só tem uma emissão
     expect(again.status).toBe('sent');
     expect(again.note).toMatchObject({ nota_id: failed.note.nota_id, chave: failed.note.chave });
     expect(w.fake.rows('return_note_emissions')).toHaveLength(1);
@@ -165,7 +165,7 @@ describe('#156 pedido ao fornecedor: aceite', () => {
     const redo = await post(w, request.id, 'refazer');
     expect(redo.status).toBe(409);
     expect(await redo.json()).toEqual({ error: 'conflict', reason: 'wrong_state' });
-    // E com o pedido descartado, outro aberto bloqueia o refazer do primeiro
+    // #156 E com o pedido descartado, outro aberto bloqueia o refazer do primeiro
     await post(w, request.id, 'descartar');
     const fresh = (await (await post(w, request.id, 'refazer')).json()) as { request: View };
     expect(fresh.request.status).toBe('writing');

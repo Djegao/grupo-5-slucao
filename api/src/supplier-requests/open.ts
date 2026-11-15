@@ -70,10 +70,10 @@ export type OpenForDecidedResult = {
 /** #156: `limit` é o teto de pedidos abertos por rodada (o Cron tem teto de subrequests); sem ele, todos. */
 export type OpenForDecidedOptions = { readonly limit?: number };
 
-async function openOne(deps: SupplierRequestDeps, decided: DecidedCase): Promise<OpenOutcome> {
+async function openOne(deps: SupplierRequestDeps, decided: DecidedCase, existingAll: readonly SupplierRequest[]): Promise<OpenOutcome> {
   const planned = planCase(decided);
   if (!planned) return { kind: 'skipped', reason: 'not_qualifying' };
-  const existing = (await deps.requests.listByInvoice(decided.invoice.accessKey)).filter((r) => r.requestType === REQUEST_TYPE);
+  const existing = existingAll.filter((r) => r.invoiceAccessKey === decided.invoice.accessKey && r.requestType === REQUEST_TYPE);
   if (hasOpenRequest(existing, decided.invoice.accessKey, REQUEST_TYPE)) return { kind: 'skipped', reason: 'open_request_exists' };
   // #156: o que já foi tratado (enviado ou descartado) não reabre pela varredura; "refazer" é da pessoa.
   if (existing.length > 0) return { kind: 'skipped', reason: 'already_handled' };
@@ -90,11 +90,15 @@ export async function openForDecided(deps: SupplierRequestDeps, options: OpenFor
   const skipped: OpenForDecidedResult['skipped'][number][] = [];
   let failed = 0;
   const limit = options.limit ?? Number.POSITIVE_INFINITY;
-  for (const decided of await deps.source.listDecided()) {
+  const decidedCases = await deps.source.listDecided();
+  // #156 Os pedidos existentes de todas as notas numa leitura só (em blocos de 50): a varredura custa o mesmo com
+  // 1 ou 100 casos já tratados. A corrida entre duas rodadas fica com o índice único do banco (`duplicate_open`).
+  const existingAll = decidedCases.length ? await deps.requests.listByInvoices(decidedCases.map((d) => d.invoice.accessKey)) : [];
+  for (const decided of decidedCases) {
     if (opened.length >= limit) break;
     let outcome: OpenOutcome;
     try {
-      outcome = await openOne(deps, decided);
+      outcome = await openOne(deps, decided, existingAll);
     } catch {
       // #156: um caso com defeito não bloqueia os outros; quem chama loga só a contagem.
       failed += 1;

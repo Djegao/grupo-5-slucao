@@ -15,6 +15,8 @@ import type {
 export interface SupplierRequestRepository {
   findById(id: string): Promise<SupplierRequest | null>;
   listByInvoice(invoiceAccessKey: string): Promise<SupplierRequest[]>;
+  /** #156: os pedidos de várias notas numa leitura só (a varredura do Cron não paga uma leitura por nota). */
+  listByInvoices(invoiceAccessKeys: readonly string[]): Promise<SupplierRequest[]>;
   listByStatus(status: SupplierRequestStatus): Promise<SupplierRequest[]>;
   /** #156/AC-8: insere o pedido novo; `duplicate_open` quando a corrida já deixou outro aberto (unicidade no banco). */
   add(request: SupplierRequest): Promise<'saved' | 'duplicate_open'>;
@@ -63,7 +65,13 @@ export type SupplierEmail = {
   readonly to: string;
   readonly subject: string;
   readonly body: string;
-  readonly attachments: readonly { readonly filename: string; readonly contentType: string; readonly content: string }[];
+  /** #156: `content` é texto; com `encoding: 'base64'` (o PDF), é o binário em base64. */
+  readonly attachments: readonly {
+    readonly filename: string;
+    readonly contentType: string;
+    readonly content: string;
+    readonly encoding?: 'base64';
+  }[];
 };
 
 /**

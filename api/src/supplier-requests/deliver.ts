@@ -3,6 +3,7 @@ import { storedError } from '../claude/runner.js';
 import type { ReturnNote, SupplierRequest } from '../domain/index.js';
 import type { SendResult, SupplierRequestDeps } from './ports.js';
 import { catalogOf, persist, type PlannedCase } from './shared.js';
+import { returnNotePdfBase64 } from './return-note-pdf.js';
 
 const MAX_REASON = 100;
 /** #156: o motivo guardado quando a porta lança: um código, nunca o texto da exceção. */
@@ -26,6 +27,13 @@ export async function deliver(
       body,
       attachments: [
         { filename: `nota-devolucao-${note.nota_id}.json`, contentType: 'application/json', content: JSON.stringify(note) },
+        // #156/AC-5 O PDF simples da nota, em base64.
+        {
+          filename: `nota-devolucao-${note.nota_id}.pdf`,
+          contentType: 'application/pdf',
+          content: returnNotePdfBase64(note),
+          encoding: 'base64',
+        },
       ],
     });
   } catch (error) {

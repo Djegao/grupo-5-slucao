@@ -10,7 +10,7 @@ afterEach(() => {
 
 type Sent = { tools?: { input_schema?: { required?: string[] } }[] };
 
-/** O fetch do Worker no teste: o PostgREST falso e, para o pedido ao fornecedor, o Claude falso; qualquer outra tarefa do Claude falha. */
+/** #156 O fetch do Worker no teste: o PostgREST falso e, para o pedido ao fornecedor, o Claude falso; qualquer outra tarefa do Claude falha. */
 function stubFetch(world: Awaited<ReturnType<typeof buildWorld>>, code: string, claudeCalls: { n: number }) {
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     if (input.startsWith('https://api.anthropic.com')) {

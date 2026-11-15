@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ANALYST, brl, rewrittenBody, E2_NUMBER, ENV, buildWorld, decide, fakeAsk, goodBody, type World } from './http-world.js';
 
 // #156 Contrato da API do pedido ao fornecedor: o formato do JSON e o código de cada rota. O contrato é
-// escrito aqui, à mão (api/src/http/supplier-requests.ts, cabeçalho); o código é validado contra ele.
+// #156 escrito aqui, à mão (api/src/http/supplier-requests.ts, cabeçalho); o código é validado contra ele.
 
 const VIEW_FIELDS = {
   id: 'string',

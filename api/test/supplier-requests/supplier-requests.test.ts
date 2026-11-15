@@ -599,3 +599,24 @@ describe('o canal do envio por configuração', () => {
     expect(selectSupplierEmail({ resendApiKey: 'k' }, { mock }).channel).toBe('mock');
   });
 });
+
+describe('#156 a varredura do Cron tem custo constante', () => {
+  it('lê os pedidos existentes de todas as notas numa leitura só, com 1 ou 30 casos decididos', async () => {
+    const keys = Array.from({ length: 30 }, (_, i) => `${ORIGIN_KEY.slice(0, 40)}${String(i).padStart(4, '0')}`);
+    const cases = keys.map((key) => {
+      const base = E2_CASE();
+      return { ...base, invoice: { ...base.invoice, accessKey: key } };
+    });
+    const w = world({ cases });
+    let perInvoice = 0;
+    const original = w.requests.listByInvoice.bind(w.requests);
+    w.requests.listByInvoice = async (key: string) => {
+      perInvoice += 1;
+      return original(key);
+    };
+    await openForDecided(w.deps, { limit: 1 });
+    await openForDecided(w.deps, { limit: 1 });
+    expect(w.requests.listByInvoicesCalls).toBe(2);
+    expect(perInvoice).toBe(0);
+  });
+});

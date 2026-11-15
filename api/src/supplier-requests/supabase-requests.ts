@@ -171,6 +171,9 @@ function toRow(s: SupplierRequestSnapshot): Row {
   };
 }
 
+/** #156 Chaves por leitura em `listByInvoices`. */
+const INVOICE_CHUNK = 50;
+
 class SupabaseSupplierRequestRepository implements SupplierRequestRepository {
   /** #156: a `version` que esta instância leu ou recebeu do último `save`, para o PATCH condicional. */
   private readonly versions = new Map<string, number>();
@@ -184,6 +187,17 @@ class SupabaseSupplierRequestRepository implements SupplierRequestRepository {
 
   listByInvoice(invoiceAccessKey: string): Promise<SupplierRequest[]> {
     return this.read({ invoice_access_key: `eq.${invoiceAccessKey}` }, 'created_at');
+  }
+
+  /** #156 Em blocos de 50 chaves (a URL do `in.()` fica em ~2,3 KB): 1 subrequest a cada 50 notas. */
+  async listByInvoices(invoiceAccessKeys: readonly string[]): Promise<SupplierRequest[]> {
+    const keys = [...new Set(invoiceAccessKeys)];
+    const out: SupplierRequest[] = [];
+    for (let i = 0; i < keys.length; i += INVOICE_CHUNK) {
+      const chunk = keys.slice(i, i + INVOICE_CHUNK);
+      out.push(...(await this.read({ invoice_access_key: `in.(${chunk.join(',')})` }, 'created_at')));
+    }
+    return out;
   }
 
   listByStatus(status: SupplierRequestStatus): Promise<SupplierRequest[]> {

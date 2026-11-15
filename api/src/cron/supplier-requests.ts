@@ -14,10 +14,10 @@ import {
 /**
  * #156 Tetos da rodada. O Worker tem teto de 50 subrequests por invocação (plano gratuito; ver claude/cron.ts), e a
  * captura e a rodada do Claude (#171) já gastam uns 27 antes deste passo, mais o `recordRun` (#211) no fim. A conta
- * deste passo: listar as decididas ~8, mais 1 por caso já tratado (`listByInvoice`), mais ~5 para abrir um pedido; e
- * escrever um pedido ~10 (ler, dossiê em 7 leituras em paralelo, a Messages API, gravar). Com 1 aberto e 1 escrito por
- * rodada o passo fica em ~25 + 1 por caso já tratado: o pedido sai em até duas rodadas (30 min), dentro da janela de
- * 24 h. Se o volume de casos decididos crescer, o passo vai para um gatilho Cron próprio.
+ * deste passo: listar as decididas ~8, mais 1 leitura dos pedidos existentes a cada 50 notas (`listByInvoices`), mais
+ * ~5 para abrir um pedido; e escrever um pedido ~10 (ler, dossiê em 7 leituras em paralelo, a Messages API, gravar).
+ * Com 1 aberto e 1 escrito por rodada o passo fica em ~24 até 50 notas decididas: o pedido sai em até duas rodadas
+ * (30 min), dentro da janela de 24 h. Se o volume de casos decididos crescer muito, o passo vai para um Cron próprio.
  */
 export const OPEN_LIMIT = 1;
 export const WRITE_LIMIT = 1;
