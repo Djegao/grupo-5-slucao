@@ -267,7 +267,7 @@ const SPELLED_NUMBERS: ReadonlySet<string> = new Set([
 const folded = (token: string): string => token.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
 /** #68: o texto confere quando todo marcador está no catálogo e nenhum número sobra fora dos marcadores. */
-function textChecks(text: string, catalog: FactCatalog, allowed: ReadonlySet<string>): boolean {
+export function textChecks(text: string, catalog: FactCatalog, allowed: ReadonlySet<string>): boolean {
   for (const m of text.matchAll(MARKER)) {
     if (!Object.hasOwn(catalog.facts, m[1] ?? '')) return false;
   }
@@ -281,7 +281,7 @@ function textChecks(text: string, catalog: FactCatalog, allowed: ReadonlySet<str
   return true;
 }
 
-const renderText = (text: string, catalog: FactCatalog): string =>
+export const renderText = (text: string, catalog: FactCatalog): string =>
   text.replace(MARKER, (_, key: string) => catalog.facts[key]?.value ?? '');
 
 const unavailable = (reason: DossierUnavailableReason, generatedAt: string): DossierUnavailable =>

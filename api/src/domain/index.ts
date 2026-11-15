@@ -16,3 +16,7 @@ export * from './reconciliation.js';
 export * from './description-match.js';
 export * from './probable-order.js';
 export * from './dossier.js';
+export * from './return-note-plan.js';
+export * from './return-note-emission.js';
+export * from './supplier-request-facts.js';
+export * from './supplier-request.js';
