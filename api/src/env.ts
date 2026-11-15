@@ -40,4 +40,14 @@ export interface Env {
    * trocar de via muda só o secret, não o código.
    */
   BARTE_ACADEMY_ANTHROPIC_API_KEY?: string;
+  /**
+   * #156 CNPJ da Já Chegou, o emitente da nota de devolução que o mock emite. Não é segredo: a esteira pode passar com
+   * `wrangler deploy --var`. Vazio: vale `DEFAULT_ISSUER_CNPJ` (src/supplier-requests/config.ts).
+   */
+  ISSUER_CNPJ?: string;
+  /**
+   * #156/AC-5 Chave do Resend, secret do Worker (`wrangler secret put`), opcional. Sem ela, ou enquanto não houver o
+   * adaptador do Resend, o e-mail ao fornecedor sai pela caixa mock (outbox_supplier_emails), sem erro.
+   */
+  RESEND_API_KEY?: string;
 }

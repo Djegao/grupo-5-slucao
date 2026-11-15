@@ -13,6 +13,7 @@ import { SupabaseApprovalStore } from "../approval/supabase-store";
 import { publishDecidedDockActions, publishDecidedStoreActions } from "../dock/publish-decided";
 import { NO_FIGURES, recordRun, type RunFigures } from "../automation/runs";
 import { lastDaysUtc, publishApprovedUnregistered } from "./publish-approved-e8";
+import { runSupplierRequestsRound } from "./supplier-requests";
 
 /** #66 A janela, em dias, das decisões que o Cron manda ao Cadastro; ver `lastDaysUtc`. */
 const PUBLISH_WINDOW_DAYS = 7;
@@ -88,6 +89,8 @@ async function runRound(
   // #171 O Claude vai por último: é periférico, e a captura (o caminho crítico) fica com os subrequests da
   // invocação. As sugestões que ele grava aqui a próxima rodada lê. Falha fechada: a regra decide sozinha.
   await runClaudeRound(rest, env);
+  // #156 O pedido ao fornecedor vem depois: abre o das propostas decididas e o Claude escreve o texto.
+  await runSupplierRequests(rest, env);
   console.log(
     `cron: execução agendada (${controller.cron}); notas vistas ${result.seen}, novas ${result.inserted}, conferidas ${result.checked}, com erro ${result.failed}, propostas ${proposals.proposed}, aprovadas pela regra ${proposals.approvedByRule}, cadastro E8 ${cadastroE8}, ações publicadas na doca ${dock}, ações publicadas no app da loja ${storeActions}, títulos duplicados bloqueados ${duplicates.blocked}, com falha ${duplicates.failed}; recebimentos sem nota [${unreconciled.noKey.join(", ")}], com chave sem nota [${unreconciled.keyWithoutInvoice.join(", ")}]`,
   );
@@ -165,5 +168,22 @@ async function publishStoreActions(rest: SupabaseRest): Promise<number> {
     const status = error instanceof SupabaseRestError ? `HTTP ${error.status}` : "falha na publicação";
     console.log(`cron: app da loja indisponível (${status}); a próxima rodada repete`);
     return 0;
+  }
+}
+
+/**
+ * #156 Abre os pedidos ao fornecedor e pede ao Claude o texto. Se falha, registra uma linha sem dado sensível e a
+ * rodada segue: a abertura é idempotente e o pedido `writing` espera a próxima rodada.
+ */
+async function runSupplierRequests(rest: SupabaseRest, env: Env): Promise<void> {
+  try {
+    const round = await runSupplierRequestsRound(rest, env);
+    const skipped = Object.entries(round.skipped).map(([reason, n]) => `${reason} ${n}`).join(", ");
+    console.log(
+      `cron: pedidos ao fornecedor abertos ${round.opened}, escritos ${round.drafted}, descartados ${round.discarded}, com falha ${round.failed}, de fora [${skipped}]${round.stopped ? ", escrita parada pelo Claude" : ""}`,
+    );
+  } catch (error) {
+    const status = error instanceof SupabaseRestError ? `HTTP ${error.status}` : "falha no passo";
+    console.log(`cron: pedido ao fornecedor indisponível (${status}); a próxima rodada repete`);
   }
 }

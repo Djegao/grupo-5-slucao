@@ -1,13 +1,13 @@
 // #156: o que a gaveta lê: os pedidos da nota, o texto cru e o preenchido, e a nota de devolução.
 import {
+  SupplierRequest,
   renderText,
   type ReturnNote,
   type ReturnNoteDraft,
-  type SupplierRequest,
   type SupplierRequestSnapshot,
 } from '../domain/index.js';
 import type { SupplierRequestDeps } from './ports.js';
-import { catalogOf, planCase, type PlannedCase } from './shared.js';
+import { catalogOf, loadPlanned, planCase, type PlannedCase } from './shared.js';
 
 export type ReturnNoteView =
   | { readonly state: 'draft'; readonly draft: ReturnNoteDraft }
@@ -48,4 +48,13 @@ export async function readSupplierRequests(
   const planned = decided ? planCase(decided) : null;
   const ordered = [...requests].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return { requests: await Promise.all(ordered.map((r) => viewOf(deps, r, planned))) };
+}
+
+/** #156: a visão de um pedido que acabou de mudar, para a resposta da ação. */
+export async function viewSupplierRequest(
+  deps: SupplierRequestDeps,
+  snapshot: SupplierRequestSnapshot,
+): Promise<SupplierRequestView> {
+  const request = SupplierRequest.restore(snapshot);
+  return viewOf(deps, request, await loadPlanned(deps, snapshot.invoiceAccessKey));
 }

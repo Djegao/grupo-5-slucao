@@ -16,3 +16,4 @@ export { supabaseSupplierEmailSender, type SupabaseEmailSenderOptions } from './
 export { supabaseSupplierDirectory } from './supabase-directory.js';
 export { supabaseDecidedProposalSource } from './supabase-source.js';
 export { supabaseSupplierRequestDeps, type SupabaseSupplierRequestOptions } from './supabase-deps.js';
+export * from './config.js';

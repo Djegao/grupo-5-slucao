@@ -63,7 +63,12 @@ export async function openPlanned(
 export type OpenForDecidedResult = {
   readonly opened: string[];
   readonly skipped: { readonly invoiceAccessKey: string; readonly reason: SkipReason }[];
+  /** #156: casos cuja abertura lançou; ficam para a próxima rodada sem derrubar os outros. */
+  readonly failed: number;
 };
+
+/** #156: `limit` é o teto de pedidos abertos por rodada (o Cron tem teto de subrequests); sem ele, todos. */
+export type OpenForDecidedOptions = { readonly limit?: number };
 
 async function openOne(deps: SupplierRequestDeps, decided: DecidedCase): Promise<OpenOutcome> {
   const planned = planCase(decided);
@@ -80,13 +85,23 @@ async function openOne(deps: SupplierRequestDeps, decided: DecidedCase): Promise
  * com tudo já aberto, lê e não grava nada. Cada caso é independente; o que não qualifica, não tem
  * e-mail, não fecha com a fila ou já tem pedido fica de fora, com o motivo.
  */
-export async function openForDecided(deps: SupplierRequestDeps): Promise<OpenForDecidedResult> {
+export async function openForDecided(deps: SupplierRequestDeps, options: OpenForDecidedOptions = {}): Promise<OpenForDecidedResult> {
   const opened: string[] = [];
   const skipped: OpenForDecidedResult['skipped'][number][] = [];
+  let failed = 0;
+  const limit = options.limit ?? Number.POSITIVE_INFINITY;
   for (const decided of await deps.source.listDecided()) {
-    const outcome = await openOne(deps, decided);
+    if (opened.length >= limit) break;
+    let outcome: OpenOutcome;
+    try {
+      outcome = await openOne(deps, decided);
+    } catch {
+      // #156: um caso com defeito não bloqueia os outros; quem chama loga só a contagem.
+      failed += 1;
+      continue;
+    }
     if (outcome.kind === 'opened') opened.push(outcome.request.id);
     else skipped.push({ invoiceAccessKey: decided.invoice.accessKey, reason: outcome.reason });
   }
-  return { opened, skipped };
+  return { opened, skipped, failed };
 }
