@@ -9,7 +9,7 @@ vi.mock("../router", () => ({ navigate }));
 // #19 A lista "Pedidos ao fornecedor" por props, um teste por estado do wireframe aprovado (#18). Sem Storybook nem axe em web/ (#25):
 // #19 a consulta por papel e nome acessível faz o papel da checagem de acessibilidade. Dados fictícios.
 
-const late: SupplierRequestRow = {
+const late: Extract<SupplierRequestRow, { status: "late" }> = {
   id: "sr-1",
   invoiceNumber: "59738",
   supplier: "F07 Limpeza",
@@ -137,7 +137,7 @@ describe("#19 SupplierRequestList", () => {
     expect(screen.getByText("Nenhum pedido ao fornecedor ainda.")).toBeTruthy();
     expect(screen.getByText(/depois que você emite e envia a nota de devolução/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Ir para a Fila de aprovação" }));
-    expect(navigate).toHaveBeenCalledWith("/pagar/fila");
+    expect(navigate).toHaveBeenCalledWith("/pagar/fila"); // ADR-004
   });
 
   it("#5/AC-2: chip com 0 diz 'Nenhum pedido atrasado.' e 'Ver todos' limpa o filtro", () => {

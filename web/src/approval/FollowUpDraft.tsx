@@ -6,20 +6,24 @@ import { texts } from "../texts";
 const t = texts.supplierRequests.draft;
 
 /** #19 Em que ponto está o rascunho: para revisar, enviando, enviado ou com o envio falho. */
-export type FollowUpPhase = "review" | "sending" | "sent" | "failed";
+export type FollowUpPhase = FollowUpPhaseState["phase"];
 
 /** #19 O motivo do envio falho é um código fechado: o texto de um erro de fora não chega à tela (layer-exposure). */
 export type FollowUpFailure = "mailRefused" | "unknown";
 
-export interface FollowUpDraftProps {
+/** #19 O que cada fase exige: `sent` traz quando saiu e `failed` traz o motivo, então nenhuma tela desenha data ou motivo vazio. */
+export type FollowUpPhaseState =
+  | { phase: "review" }
+  | { phase: "sending" }
+  | { phase: "sent"; sentOn: string; sentTime?: string }
+  | { phase: "failed"; failure: FollowUpFailure };
+
+export type FollowUpDraftProps = FollowUpDraftBaseProps & FollowUpPhaseState;
+
+interface FollowUpDraftBaseProps {
   draft: FollowUpDraftView;
-  phase: FollowUpPhase;
   /** #19 Só o texto do e-mail se libera para edição; para, assunto, prazo e anexo ficam travados. */
   editing: boolean;
-  failure?: FollowUpFailure;
-  /** #19 Quando a cobrança saiu, em `sent`. */
-  sentOn?: string;
-  sentTime?: string;
   onEdit: () => void;
   onBodyChange: (body: string) => void;
   onSend: () => void;
@@ -42,12 +46,13 @@ function Field({ label, children }: { label: string; children: string }): ReactE
 
 /** #5/AC-4 O rascunho da cobrança no formato do pedido da #3 (para, prazo, assunto, texto, anexo): a cobrança só sai no clique em enviar. */
 export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
-  const { draft, phase, editing, failure, sentOn, sentTime, onEdit, onBodyChange, onSend, onDiscard, onRetry } = props;
-  if (phase === "sent") {
+  const { draft, editing, onEdit, onBodyChange, onSend, onDiscard, onRetry } = props;
+  const phase = props.phase;
+  if (props.phase === "sent") {
     return (
       <div role="status">
         <Text as="p" variant="body-base">
-          {t.sent(shortDate(sentOn ?? ""), sentTime, shortDate(draft.dueOn))}
+          {t.sent(shortDate(props.sentOn), props.sentTime, shortDate(draft.dueOn))}
         </Text>
       </div>
     );
@@ -59,10 +64,10 @@ export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
       <Text as="p" variant="caption-sm" color="var(--content-tertiary)">
         {t.subtitle}
       </Text>
-      {phase === "failed" ? (
+      {props.phase === "failed" ? (
         <div role="alert">
           <Text as="p" variant="body-base">
-            {failure === "mailRefused" ? t.failed.mailRefused : t.failed.unknown}
+            {props.failure === "mailRefused" ? t.failed.mailRefused : t.failed.unknown}
           </Text>
           <Text as="p" variant="caption-sm">
             {t.failedKept}

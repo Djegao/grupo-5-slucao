@@ -16,7 +16,7 @@ export type SupplierRowStatus =
   | "needsInformation"
   | "refused";
 
-export interface SupplierRequestRow {
+interface SupplierRequestRowBase {
   id: string;
   invoiceNumber: string;
   /** #19 Ex.: "F07 Limpeza". */
@@ -26,10 +26,15 @@ export interface SupplierRequestRow {
   amountCents: number;
   /** #19 Data ISO (AAAA-MM-DD) do prazo. */
   dueOn: string;
-  status: SupplierRowStatus;
-  /** #19 Ex.: "ND 881", o documento que o fornecedor citou ao atender. */
-  document?: string;
 }
+
+/** #19 Só `fulfilledToConfirm` mostra o documento ("Atendeu: ND 881"), e por isso o exige: nenhuma outra situação o aceita. */
+export type SupplierRequestRow = SupplierRequestRowBase &
+  (
+    | { status: Exclude<SupplierRowStatus, "fulfilledToConfirm"> }
+    /** #19 Ex.: "ND 881", o documento que o fornecedor citou ao atender. */
+    | { status: "fulfilledToConfirm"; document: string }
+  );
 
 /** #157 O resultado da resposta, como o agente o leu (reply_outcome). */
 export type SupplierReplyOutcome = "fulfilled" | "partially_fulfilled" | "refused" | "needs_information" | "no_reply";

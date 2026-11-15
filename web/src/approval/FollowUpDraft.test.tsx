@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FollowUpDraftView } from "../components/supplier-request-view";
-import { FollowUpDraft, type FollowUpDraftProps } from "./FollowUpDraft";
+import { FollowUpDraft, type FollowUpPhaseState } from "./FollowUpDraft";
 
 // #19 O rascunho da cobrança do bloco "Pedido ao fornecedor" (história #5), um teste por estado 8, 9 e 10 do wireframe (#18).
 // #19 Sem axe em web/ (#25): a consulta por papel e nome acessível faz o papel da checagem de acessibilidade. Dados fictícios.
@@ -14,9 +14,9 @@ const draft: FollowUpDraftView = {
   attachmentName: "pedido original (nota de devolução ND 6)",
 };
 
-function renderDraft(props: Partial<FollowUpDraftProps> = {}) {
+function renderDraft(state: FollowUpPhaseState = { phase: "review" }, editing = false) {
   const handlers = { onEdit: vi.fn(), onBodyChange: vi.fn(), onSend: vi.fn(), onDiscard: vi.fn(), onRetry: vi.fn() };
-  render(<FollowUpDraft draft={draft} phase="review" editing={false} {...handlers} {...props} />);
+  render(<FollowUpDraft draft={draft} editing={editing} {...handlers} {...state} />);
   return handlers;
 }
 
@@ -49,7 +49,7 @@ describe("#19 FollowUpDraft", () => {
   });
 
   it("#5/AC-4: editando, o texto vira um campo com o rótulo 'Texto' e cada mudança é avisada; o resto continua travado", () => {
-    const { onBodyChange } = renderDraft({ editing: true });
+    const { onBodyChange } = renderDraft({ phase: "review" }, true);
     const field = screen.getByRole("textbox", { name: "Texto" });
     expect((field as HTMLTextAreaElement).value).toBe(draft.body);
     fireEvent.change(field, { target: { value: "Pode responder até 20/11?" } });

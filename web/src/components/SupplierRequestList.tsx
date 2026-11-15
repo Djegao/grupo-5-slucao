@@ -12,6 +12,9 @@ import { shortDate, type SupplierFilter, type SupplierFilterValue, type Supplier
 
 const t = texts.supplierRequests;
 
+/** #19 A rota em português da Fila de aprovação, que o vazio geral oferece. */
+const FILA_ROUTE = "/pagar/fila"; // ADR-004
+
 const FILTERS: SupplierFilter[] = ["waiting", "fulfilled", "needsYou", "late"];
 
 /** #19 O tom do selo de cada situação (mapa Q2 do wireframe). */
@@ -42,7 +45,7 @@ export interface SupplierRequestListProps {
 }
 
 function statusText(row: SupplierRequestRow): string {
-  if (row.status === "fulfilledToConfirm") return t.status.fulfilledToConfirm(row.document ?? "");
+  if (row.status === "fulfilledToConfirm") return t.status.fulfilledToConfirm(row.document);
   return t.status[row.status];
 }
 
@@ -104,7 +107,7 @@ export function SupplierRequestList(props: SupplierRequestListProps): ReactEleme
       loadingLabel={t.loading}
       errorTitle={t.error}
       emptyLabel={t.empty.title}
-      empty={<EmptyState title={t.empty.title} description={t.empty.description} action={{ label: t.empty.action, to: "/pagar/fila" }} />}
+      empty={<EmptyState title={t.empty.title} description={t.empty.description} action={{ label: t.empty.action, to: FILA_ROUTE }} />}
     >
       {() =>
         rows.length === 0 ? (
