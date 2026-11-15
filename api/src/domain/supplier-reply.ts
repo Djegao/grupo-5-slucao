@@ -31,7 +31,7 @@ export type ReadingField = 'reply_outcome' | 'fulfilled_asks' | 'supplier_docume
 
 export type ReadingRejection = {
   readonly ok: false;
-  readonly reason: 'invalid_shape' | 'unknown_ask' | 'number_mismatch' | 'no_reply_for_reply' | 'injection_not_in_reply';
+  readonly reason: 'invalid_shape' | 'unknown_ask' | 'number_mismatch' | 'no_reply_for_reply' | 'injection_not_in_reply' | 'document_not_in_reply';
   readonly field: ReadingField;
 };
 
@@ -39,7 +39,7 @@ export type ReadingValidation = { readonly ok: true; readonly reading: SupplierR
 
 /** #33: contra o que a leitura é conferida: o que pedimos, o texto da resposta e o catálogo de fatos do pedido. */
 export type ReadingContext = {
-  /** Os itens do que pedimos, como o modelo os viu; `fulfilled_asks` só traz itens desta lista. */
+  /** #33: os itens do que pedimos, como o modelo os viu; `fulfilled_asks` só traz itens desta lista. */
   readonly asks: readonly string[];
   readonly replyText: string;
   readonly catalog: FactCatalog;
@@ -53,12 +53,15 @@ const isTexts = (v: unknown): v is string[] => Array.isArray(v) && v.every(isTex
 const rejection = (reason: ReadingRejection['reason'], field: ReadingField): ReadingRejection =>
   Object.freeze({ ok: false, reason, field });
 
+const MARKER = /\{\{[^}]*\}\}/; // #33: marcador {{chave}}, que o summary não tem
+
 const bareToken = (token: string): string => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 
 /**
- * #4/AC-1: o summary é texto corrido, sem {{chave}}: ele conta o que o fornecedor disse, e o que o
- * fornecedor disse (o número do documento dele) não está no catálogo. Por isso cada número do summary
- * tem de ser um valor de fato do catálogo, um identificador do pedido ou o `supplier_document` citado;
+ * #4/AC-1: o summary é texto corrido, sem {{chave}} (`validateReading` recusa o marcador, porque o
+ * summary não é renderizado): ele conta o que o fornecedor disse, e o que o fornecedor disse (o número
+ * do documento dele) não está no catálogo. Por isso cada número do summary tem de ser um valor de fato
+ * do catálogo, um identificador do pedido ou o `supplier_document` citado, que está na resposta;
  * `textChecks` (o mesmo contrato do texto da #2) faz a conferência, e recusa também o número por extenso.
  */
 function allowedNumbers(catalog: FactCatalog, supplierDocument: string | null): ReadonlySet<string> {
@@ -94,7 +97,9 @@ export function validateReading(raw: unknown, ctx: ReadingContext): ReadingValid
   if (!fulfilled_asks.every((a) => ctx.asks.includes(a))) return rejection('unknown_ask', 'fulfilled_asks');
   if (supplier_document !== null && !isText(supplier_document)) return rejection('invalid_shape', 'supplier_document');
   const document = supplier_document === null ? null : supplier_document.trim();
-  if (!isText(summary)) return rejection('invalid_shape', 'summary');
+  // #33: o documento é palavra do modelo, e libera número no summary: tem de estar na resposta, como o injection_flag.
+  if (document !== null && !ctx.replyText.includes(document)) return rejection('document_not_in_reply', 'supplier_document');
+  if (!isText(summary) || MARKER.test(summary)) return rejection('invalid_shape', 'summary');
   if (!textChecks(summary, ctx.catalog, allowedNumbers(ctx.catalog, document))) return rejection('number_mismatch', 'summary');
   if (!isNextStep(next_step)) return rejection('invalid_shape', 'next_step');
   if (injection_flag !== null && !isText(injection_flag)) return rejection('invalid_shape', 'injection_flag');
@@ -142,7 +147,7 @@ export function overdueReading(request: RequestDeadline, reading: SupplierReadin
 export type RequestFilter = 'awaiting' | 'answered' | 'needs_you' | 'overdue';
 
 /**
- * #4/AC-5: todo pedido enviado cai em um filtro só (o que não foi enviado, em nenhum). A ordem decide:
+ * #33/AC-5: todo pedido enviado cai em um filtro só (o que não foi enviado, em nenhum). A ordem decide:
  * sem leitura, o prazo separa `awaiting` de `overdue`; `no_reply` é `overdue`; `fulfilled` com `close`
  * é `answered`; todo o resto (inclusive `confirm_document`) precisa de uma pessoa.
  */

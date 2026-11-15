@@ -98,6 +98,21 @@ describe('#33/AC-1: a leitura aceita só a forma pedida', () => {
   it('o supplier_document só libera o número no summary quando é o citado', () => {
     expect(rejected({ supplier_document: null, next_step: 'answer_supplier' })).toMatchObject({ reason: 'number_mismatch' });
   });
+  it('recusa o supplier_document que não está na resposta, e o número dele não chega ao summary', () => {
+    expect(rejected({ supplier_document: '99999', summary: 'O fornecedor emitiu a NF-D 99999 da devolução.' })).toEqual({
+      ok: false,
+      reason: 'document_not_in_reply',
+      field: 'supplier_document',
+    });
+    expect(rejected({ supplier_document: '99999' })).toMatchObject({ reason: 'document_not_in_reply', field: 'supplier_document' });
+  });
+  it('aceita o supplier_document com espaços nas pontas quando o texto aparece na resposta', () => {
+    expect(reading({ supplier_document: ' 881 ' })).toMatchObject({ ok: true, reading: { supplierDocument: '881' } });
+  });
+  it('recusa no summary qualquer marcador {{chave}}, mesmo o do catálogo', () => {
+    expect(rejected({ summary: 'O fornecedor devolveu a nota {{nota.numero}}.' })).toEqual({ ok: false, reason: 'invalid_shape', field: 'summary' });
+    expect(rejected({ summary: 'Total {{chave.que.nao.existe}}.' })).toMatchObject({ reason: 'invalid_shape', field: 'summary' });
+  });
 });
 
 describe('#33/AC-1: o modelo não devolve no_reply para uma resposta que existe', () => {
