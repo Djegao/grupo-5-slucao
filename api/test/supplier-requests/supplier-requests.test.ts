@@ -111,10 +111,11 @@ describe('abrir o pedido para as propostas decididas', () => {
     expect(w.requests.rows.size).toBe(0);
   });
 
-  it('#156/AC-1 fornecedor sem e-mail no cadastro não ganha pedido', async () => {
+  it('#156/AC-1 fornecedor sem e-mail no cadastro não ganha pedido, mas a devolução entra na fila da #140', async () => {
     const w = world({ email: null });
     const result = await openForDecided(w.deps);
     expect(result.skipped).toEqual([{ invoiceAccessKey: ORIGIN_KEY, reason: 'no_supplier_email' }]);
+    expect([...w.queue.rows.values()]).toMatchObject([{ invoiceAccessKey: ORIGIN_KEY, status: 'pendente' }]);
   });
 });
 

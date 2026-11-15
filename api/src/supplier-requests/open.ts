@@ -35,8 +35,7 @@ export async function openPlanned(
   at: string,
 ): Promise<OpenOutcome> {
   const { invoice } = planned.decided;
-  const to = (await deps.directory.emailOf(invoice.supplierId))?.trim() ?? '';
-  if (to === '') return { kind: 'skipped', reason: 'no_supplier_email' };
+  // #156 A devolução entra na fila da #140 antes de tudo: sem e-mail do fornecedor ela ainda é emitida à mão.
   const row = await deps.queue.ensureRow(queueRequestOf(planned));
   try {
     assertDraftMatchesQueue(planned.draft, Money.ofCents(row.valueCents));
@@ -44,6 +43,8 @@ export async function openPlanned(
     if (error instanceof DomainError) return { kind: 'skipped', reason: 'queue_mismatch' };
     throw error;
   }
+  const to = (await deps.directory.emailOf(invoice.supplierId))?.trim() ?? '';
+  if (to === '') return { kind: 'skipped', reason: 'no_supplier_email' };
   const request = SupplierRequest.open({
     id: deps.ids.next(),
     createdAt: at,
