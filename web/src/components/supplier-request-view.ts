@@ -78,7 +78,8 @@ export interface SupplierReadingView {
   itemsFulfilled?: string;
   documentCited?: string;
   summary: string;
-  nextStep: SupplierNextStep;
+  /** #19 Nulo = sem próximo passo (estado 9 do wireframe, pedido já cobrado): o bloco não mostra rótulo nem botão. */
+  nextStep: SupplierNextStep | null;
   /** #157 injection_flag: o trecho em que o fornecedor tentou dar uma ordem ao agente. */
   injectionExcerpt?: string;
 }

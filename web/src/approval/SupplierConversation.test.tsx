@@ -90,6 +90,14 @@ describe("#19 SupplierConversation", () => {
     expect(onNextStep).toHaveBeenCalledWith(nextStep);
   });
 
+  it("#5/AC-4: sem próximo passo, o bloco não mostra o rótulo nem o botão (estado 9 do wireframe)", () => {
+    // #19 Estado 9, "cobrança enviada": a cobrança sai uma vez, com uma pessoa; o bloco não oferece outro passo.
+    render(<SupplierConversation conversation={{ ...noReply, status: "waitingCharged", reading: { ...noReply.reading, nextStep: null } }} onNextStep={vi.fn()} />);
+    expect(screen.queryByText("Próximo passo:")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("O fornecedor não respondeu no prazo.")).toBeTruthy();
+  });
+
   it("#5/AC-4: sem resposta, atrasado: diz que nenhuma resposta veio e o próximo passo é 'Cobrar'", () => {
     const onNextStep = vi.fn();
     render(<SupplierConversation conversation={noReply} onNextStep={onNextStep} />);
