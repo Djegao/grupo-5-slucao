@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeError, type Ask } from '../../src/claude/client.js';
+import { MAX_PER_RUN } from '../../src/claude/runner.js';
 import { DockAction, SYSTEM_ACTOR, SUPPLIER_REQUEST_OUTPUT_SCHEMA } from '../../src/domain/index.js';
 import {
   discardRequest,
@@ -10,12 +11,12 @@ import {
   redo,
   retrySend,
   selectSupplierEmail,
-  InMemorySupplierEmailSender,
+  WRITING_WINDOW_MS,
   writeDraft,
   writeDrafts,
 } from '../../src/supplier-requests/index.js';
 import { decided, ORIGIN_KEY } from '../domain/supplier-request-fixtures.js';
-import { E2_CASE, GOOD_BODY, world } from './fakes.js';
+import { E2_CASE, GOOD_BODY, InMemorySupplierEmailSender, world } from './fakes.js';
 
 const askWith = (body: unknown): Ask => (async () => body) as Ask;
 const goodAsk = askWith({ body: GOOD_BODY });
@@ -174,12 +175,84 @@ describe('o Claude escreve o texto', () => {
 
   it('#156 a rodada escreve todos os pedidos escrevendo e para no limite do Claude', async () => {
     const w = await openedWorld();
-    expect(await writeDrafts(w.deps, goodAsk)).toEqual({ drafted: 1, discarded: 0, failed: 0, stopped: false });
+    expect(await writeDrafts(w.deps, goodAsk)).toEqual({ drafted: 1, discarded: 0, failed: 0, stopped: false, failedIds: [] });
     const w2 = await openedWorld();
     const limited = (async () => {
       throw new ClaudeError('rate_limit', 'limite', 429);
     }) as Ask;
-    expect(await writeDrafts(w2.deps, limited)).toEqual({ drafted: 0, discarded: 0, failed: 1, stopped: true });
+    expect(await writeDrafts(w2.deps, limited)).toEqual({ drafted: 0, discarded: 0, failed: 1, stopped: true, failedIds: [w2.id] });
+  });
+
+  it('#156 o pedido que deixou de qualificar é descartado pelo sistema e a rodada não o deixa escrevendo', async () => {
+    const w = await openedWorld();
+    w.source.cases.clear();
+    expect(await writeDrafts(w.deps, goodAsk)).toMatchObject({ drafted: 0, discarded: 1, failed: 0 });
+    expect(w.requests.rows.get(w.id)).toMatchObject({ status: 'discarded', discardedBy: SYSTEM_ACTOR, discardReason: 'no_longer_qualifies' });
+    await writeDrafts(w.deps, goodAsk);
+    expect([...w.requests.rows.values()].filter((r) => r.status === 'writing')).toEqual([]);
+  });
+
+  it('#156 escrever um pedido que deixou de qualificar devolve o descartado', async () => {
+    const w = await openedWorld();
+    w.source.cases.clear();
+    const result = await writeDraft(w.deps, w.id, goodAsk);
+    expect(result).toMatchObject({ kind: 'ok', status: 'discarded', request: { status: 'discarded', discardReason: 'no_longer_qualifies' } });
+  });
+
+  it('#156 a rodada pergunta ao Claude no máximo `limit` pedidos', async () => {
+    const w = await openedWorld();
+    const base = w.requests.rows.get(w.id)!;
+    for (const id of ['req-b', 'req-c']) w.requests.rows.set(id, { ...base, id });
+    const asked: string[] = [];
+    const ask = (async (input: { prompt: string }) => {
+      asked.push(input.prompt);
+      throw new ClaudeError('api', 'status 500', 500);
+    }) as Ask;
+    const result = await writeDrafts(w.deps, ask, { limit: 2 });
+    expect(asked).toHaveLength(2);
+    expect(result.failed).toBe(2);
+  });
+
+  it('#156 a rodada tem o teto padrão MAX_PER_RUN por execução', async () => {
+    const w = await openedWorld();
+    const base = w.requests.rows.get(w.id)!;
+    for (let i = 0; i < MAX_PER_RUN + 5; i += 1) w.requests.rows.set(`extra-${i}`, { ...base, id: `extra-${i}` });
+    let calls = 0;
+    const ask = (async () => {
+      calls += 1;
+      throw new ClaudeError('api', 'status 500', 500);
+    }) as Ask;
+    await writeDrafts(w.deps, ask);
+    expect(calls).toBe(MAX_PER_RUN);
+  });
+
+  it('#156 o pedido que segue escrevendo além da janela é descartado como claude_unavailable, sem perguntar de novo', async () => {
+    const w = await openedWorld();
+    let calls = 0;
+    const ask = (async () => {
+      calls += 1;
+      throw new ClaudeError('api', 'status 500', 500);
+    }) as Ask;
+    await writeDrafts(w.deps, ask);
+    expect(w.requests.rows.get(w.id)?.status).toBe('writing');
+    expect(calls).toBe(1);
+    w.clock.current = new Date(w.clock.current.getTime() + WRITING_WINDOW_MS + 1000);
+    const result = await writeDrafts(w.deps, ask);
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({ discarded: 1, failed: 0 });
+    expect(w.requests.rows.get(w.id)).toMatchObject({ status: 'discarded', discardedBy: SYSTEM_ACTOR, discardReason: 'claude_unavailable' });
+  });
+
+  it('#156 a falha que não é global entra no log, sem o texto da exceção, e nos ids que falharam', async () => {
+    const w = await openedWorld();
+    const ask = (async () => {
+      throw new Error('segredo-do-provedor');
+    }) as Ask;
+    const result = await writeDrafts(w.deps, ask);
+    expect(result).toMatchObject({ failed: 1, stopped: false, failedIds: [w.id] });
+    expect(w.logs).toHaveLength(1);
+    expect(w.logs[0]).toContain(`pedido ${w.id}: falhou`);
+    expect(w.logs.join('\n')).not.toContain('segredo-do-provedor');
   });
 });
 
@@ -266,7 +339,7 @@ describe('emitir e enviar', () => {
 
   it('#156/AC-4 o pedido refeito depois do descarte reaproveita a nota já emitida', async () => {
     const w = await draftWorld();
-    // emite e falha o envio; descarta; refaz; emite de novo
+    // #156/AC-4: emite e falha o envio; descarta; refaz; emite de novo
     w.sender.failNextWith('mailbox_unavailable');
     await emitAndSend(w.deps, w.id, 'ana@jachegou.test');
     await discardRequest(w.deps, w.id, 'ana@jachegou.test', 'trocar o texto');
@@ -301,6 +374,17 @@ describe('emitir e enviar', () => {
     expect(snap.status).toBe('send_failed');
     expect(snap.sendFailure).toBe('send_error');
     expect(JSON.stringify(snap)).not.toContain('segredo');
+  });
+
+  it('#156 a porta que lança entra no log com o id do pedido, sem o texto da exceção', async () => {
+    const w = await draftWorld();
+    w.deps.sender.send = async () => {
+      throw new Error('smtp://usuario:segredo@host recusou');
+    };
+    await emitAndSend(w.deps, w.id, 'ana@jachegou.test');
+    expect(w.logs).toHaveLength(1);
+    expect(w.logs[0]).toContain(`pedido ${w.id}: envio falhou`);
+    expect(w.logs.join('\n')).not.toContain('segredo');
   });
 
   it('#156 só o rascunho emite; escrevendo, enviado ou descartado é conflito', async () => {
@@ -445,6 +529,28 @@ describe('ler para a gaveta', () => {
   });
 });
 
+describe('o envio é idempotente pelo id do pedido', () => {
+  it('#156 duas tentativas de novo ao mesmo tempo enviam um e-mail só', async () => {
+    const w = await draftWorld();
+    w.sender.failNextWith('mailbox_unavailable');
+    await emitAndSend(w.deps, w.id, 'ana@jachegou.test');
+    await Promise.all([
+      retrySend(w.deps, w.id, 'bia@jachegou.test'),
+      retrySend(w.deps, w.id, 'caio@jachegou.test'),
+    ]);
+    expect(w.sender.sent).toHaveLength(1);
+    expect(w.requests.rows.get(w.id)?.status).toBe('sent');
+  });
+
+  it('#156 o id já enviado devolve o id do provedor guardado, sem enviar de novo', async () => {
+    const sender = new InMemorySupplierEmailSender();
+    const email = { requestId: 'req-1', to: 'a@b.test', subject: 's', body: 'b', attachments: [] };
+    const first = await sender.send(email);
+    expect(await sender.send(email)).toEqual(first);
+    expect(sender.sent).toHaveLength(1);
+  });
+});
+
 describe('o canal do envio por configuração', () => {
   const mock = new InMemorySupplierEmailSender();
   const resend = new InMemorySupplierEmailSender();
@@ -461,13 +567,5 @@ describe('o canal do envio por configuração', () => {
 
   it('#156/AC-5 com a chave e sem adaptador do Resend cai no mock', () => {
     expect(selectSupplierEmail({ resendApiKey: 'k' }, { mock }).channel).toBe('mock');
-  });
-});
-
-describe('o caso que deixou de qualificar', () => {
-  it('#156 sem a decisão na fonte, o texto do Claude e a emissão são conflito', async () => {
-    const w = await openedWorld();
-    w.source.cases.clear();
-    expect(await writeDraft(w.deps, w.id, goodAsk)).toEqual({ kind: 'conflict', reason: 'no_longer_qualifies' });
   });
 });

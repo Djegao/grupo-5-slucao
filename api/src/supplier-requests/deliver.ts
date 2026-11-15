@@ -1,4 +1,5 @@
 // #156/AC-5: o envio do e-mail com a nota anexa, usado pelo "Emitir e enviar" e pelo "tentar de novo".
+import { storedError } from '../claude/runner.js';
 import type { ReturnNote, SupplierRequest } from '../domain/index.js';
 import type { SendResult, SupplierRequestDeps } from './ports.js';
 import { catalogOf, persist, type PlannedCase } from './shared.js';
@@ -27,7 +28,8 @@ export async function deliver(
         { filename: `nota-devolucao-${note.nota_id}.json`, contentType: 'application/json', content: JSON.stringify(note) },
       ],
     });
-  } catch {
+  } catch (error) {
+    deps.log(`pedido ${request.id}: envio falhou (${storedError(error, deps.secrets)})`);
     result = { ok: false, reason: SEND_ERROR };
   }
   const at = deps.clock.now().toISOString();

@@ -1,5 +1,5 @@
-// #156: as portas dos casos de uso do pedido ao fornecedor. A camada de OLTP implementa as de
-// persistência; o envio tem o mock em memória aqui e o do banco (outbox_supplier_emails) no OLTP.
+/* #156: as portas dos casos de uso do pedido ao fornecedor. A camada de OLTP implementa as de
+   persistência e o envio mock do banco (outbox_supplier_emails). */
 import type { ReturnNoteLine } from '../connectors/ports.js';
 import type {
   CheckContext,
@@ -9,7 +9,6 @@ import type {
   SupplierRequest,
   SupplierRequestChannel,
   SupplierRequestStatus,
-  SupplierRequestType,
 } from '../domain/index.js';
 
 /** #156/AC-8: o repositório do agregado. Quem grava confere o `updatedAt` lido, para duas pessoas não se pisarem. */
@@ -17,8 +16,6 @@ export interface SupplierRequestRepository {
   findById(id: string): Promise<SupplierRequest | null>;
   listByInvoice(invoiceAccessKey: string): Promise<SupplierRequest[]>;
   listByStatus(status: SupplierRequestStatus): Promise<SupplierRequest[]>;
-  /** #156/AC-8: o pedido aberto (escrevendo, rascunho ou envio falhado) deste tipo para a nota. */
-  findOpen(invoiceAccessKey: string, requestType: SupplierRequestType): Promise<SupplierRequest | null>;
   /** #156/AC-8: insere o pedido novo; `duplicate_open` quando a corrida já deixou outro aberto (unicidade no banco). */
   add(request: SupplierRequest): Promise<'saved' | 'duplicate_open'>;
   /** #156: grava só se o `updatedAt` guardado ainda é `expectedUpdatedAt`; senão `stale`. */
@@ -78,6 +75,12 @@ export type SendResult =
   | { readonly ok: false; readonly reason: string };
 
 export interface SupplierEmailSender {
+  /**
+   * #156/AC-5: idempotente pelo `requestId`: um id já enviado devolve `{ ok: true }` com o
+   * `providerMessageId` guardado e não envia outra vez. É o que deixa duas tentativas ao mesmo
+   * tempo, ou uma gravação `stale` depois do envio, enviarem um e-mail só. O OLTP guarda o
+   * `request_id` com chave única.
+   */
   send(email: SupplierEmail): Promise<SendResult>;
 }
 
@@ -117,10 +120,7 @@ export type SupplierRequestConfig = {
   /** #156: o CNPJ da Já Chegou, o emitente da nota de devolução. */
   readonly issuerCnpj: string;
   /** #156/AC-5: o canal escolhido pela configuração; fica no pedido ao abrir. */
-  readonly channel: SupplierRequestChannel;
-  /** #156: o modelo do Claude que escreve o texto; sem valor, o padrão do cliente. */
-  readonly model?: string;
-};
+  readonly channel: SupplierRequestChannel;};
 
 export type SupplierRequestDeps = {
   readonly requests: SupplierRequestRepository;
@@ -132,4 +132,8 @@ export type SupplierRequestDeps = {
   readonly clock: Clock;
   readonly ids: IdGenerator;
   readonly config: SupplierRequestConfig;
+  /** #156: o log da camada, como o do laço do Claude; leva o id do pedido e o erro redigido, nunca o texto do provedor. */
+  readonly log: (line: string) => void;
+  /** #156: valores que nunca podem aparecer no log. */
+  readonly secrets?: readonly string[];
 };

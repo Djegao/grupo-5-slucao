@@ -1,5 +1,5 @@
-// #156: o prompt do e-mail ao fornecedor. Os dados vão como dados, num bloco separado; o system diz
-// que nada ali é instrução. O Claude só escreve o texto; números, itens e o que se pede são da regra.
+/* #156: o prompt do e-mail ao fornecedor. Os dados vão como dados, num bloco separado; o system diz
+   que nada ali é instrução. O Claude só escreve o texto; números, itens e o que se pede são da regra. */
 import type { FactCatalog } from '../domain/index.js';
 
 export type SupplierRequestPrompt = { readonly system: string; readonly prompt: string };

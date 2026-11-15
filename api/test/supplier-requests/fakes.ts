@@ -10,15 +10,43 @@ import type {
   QueueRow,
   ReturnNoteEmissions,
   ReturnNoteWorkQueue,
+  SendResult,
   SupplierDirectory,
+  SupplierEmail,
+  SupplierEmailSender,
   SupplierRequestRepository,
   SupplierRequestDeps,
 } from '../../src/supplier-requests/index.js';
-import { InMemorySupplierEmailSender } from '../../src/supplier-requests/index.js';
 import { emptyContext } from '../domain/fixtures.js';
 import { decided, originInvoice, partialReturn } from '../domain/supplier-request-fixtures.js';
 
 // #156: os doubles das portas dos casos de uso: tudo em memória, sem banco, sem rede, sem o Claude.
+
+/** #156: o envio em memória: guarda o que "enviou" e é idempotente pelo `requestId`, como a porta exige. */
+export class InMemorySupplierEmailSender implements SupplierEmailSender {
+  readonly sent: SupplierEmail[] = [];
+  private readonly providerIds = new Map<string, string>();
+  private failure: string | null = null;
+
+  /** #156: a próxima chamada falha com este motivo. */
+  failNextWith(reason: string): void {
+    this.failure = reason;
+  }
+
+  async send(email: SupplierEmail): Promise<SendResult> {
+    const already = this.providerIds.get(email.requestId);
+    if (already !== undefined) return { ok: true, providerMessageId: already, channel: 'mock' };
+    if (this.failure !== null) {
+      const reason = this.failure;
+      this.failure = null;
+      return { ok: false, reason };
+    }
+    this.sent.push(email);
+    const providerMessageId = `mock-${this.sent.length}`;
+    this.providerIds.set(email.requestId, providerMessageId);
+    return { ok: true, providerMessageId, channel: 'mock' };
+  }
+}
 
 export class FakeRequests implements SupplierRequestRepository {
   readonly rows = new Map<string, SupplierRequestSnapshot>();
@@ -32,14 +60,14 @@ export class FakeRequests implements SupplierRequestRepository {
   async listByStatus(status: SupplierRequestStatus) {
     return [...this.rows.values()].filter((s) => s.status === status).map((s) => SupplierRequest.restore(s));
   }
-  async findOpen(key: string, type: SupplierRequestSnapshot['requestType']) {
+  private findOpen(key: string, type: SupplierRequestSnapshot['requestType']) {
     const hit = [...this.rows.values()].find(
       (s) => s.invoiceAccessKey === key && s.requestType === type && ['writing', 'draft', 'send_failed'].includes(s.status),
     );
     return hit ? SupplierRequest.restore(hit) : null;
   }
   async add(request: SupplierRequest) {
-    if (await this.findOpen(request.invoiceAccessKey, request.requestType)) return 'duplicate_open' as const;
+    if (this.findOpen(request.invoiceAccessKey, request.requestType)) return 'duplicate_open' as const;
     this.rows.set(request.id, request.snapshot());
     return 'saved' as const;
   }
@@ -134,6 +162,7 @@ export type World = {
   sender: InMemorySupplierEmailSender;
   source: FakeSource;
   clock: { current: Date };
+  logs: string[];
 };
 
 export function world(options: { cases?: DecidedCase[]; queueValueCents?: number; email?: string | null } = {}): World {
@@ -143,6 +172,7 @@ export function world(options: { cases?: DecidedCase[]; queueValueCents?: number
   const sender = new InMemorySupplierEmailSender();
   const source = new FakeSource(...(options.cases ?? [E2_CASE()]));
   const clock = { current: new Date('2026-11-16T12:00:00.000Z') };
+  const logs: string[] = [];
   let n = 0;
   const email = options.email === undefined ? 'fiscal@higienetotal.test' : options.email;
   const directory: SupplierDirectory = { emailOf: async (id) => (id === 'F11' ? email : null) };
@@ -155,7 +185,8 @@ export function world(options: { cases?: DecidedCase[]; queueValueCents?: number
     source,
     clock: { now: () => clock.current },
     ids: { next: () => `req-${++n}` },
+    log: (line) => logs.push(line),
     config: { issuerCnpj: '12.345.678/0001-95', channel: 'mock' },
   };
-  return { deps, requests, queue, emissions, sender, source, clock };
+  return { deps, requests, queue, emissions, sender, source, clock, logs };
 }
