@@ -255,7 +255,7 @@ describe('#156 recusa com mercadoria já entrada (decisão do grupo)', () => {
     const [request] = await listOf(w, d.key);
     expect(round.opened).toBe(1);
     expect(request).toMatchObject({ status: 'draft', asks: ['Retirar a mercadoria'] });
-    const sent = await post(w, request.id, 'emitir-e-enviar');
+    const sent = await post(w, request!.id, 'emitir-e-enviar');
     expect(sent.status).toBe(200);
     expect(((await sent.json()) as { status: string }).status).toBe('sent');
   });
