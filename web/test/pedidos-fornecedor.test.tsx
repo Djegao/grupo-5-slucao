@@ -8,40 +8,47 @@ import { fallbackContext, NAVIGATION } from "../src/shell/context";
  * wireframe aprovado em artifacts/wireframe-pedidos-fornecedor/index.html.
  *
  * Ele está VERMELHO DE PROPÓSITO: nada implementa a tela ainda. Para o `make check` e o CI seguirem
- * verdes, cada comportamento está em `it.fails`, que passa enquanto a asserção falha. A camada de
- * contrato (#21) troca `it.fails` por `it`, ao ligar a rota, a lista e a gaveta, e o esqueleto fica
- * verde. Se uma asserção passar antes disso, o `it.fails` quebra e avisa que ele testava um
- * substituto, não o comportamento.
+ * verdes, cada comportamento está em `it.fails`, que passa enquanto o teste inteiro falha, por
+ * qualquer motivo, inclusive um erro de consulta lançado. A camada de contrato (#21) troca `it.fails`
+ * por `it`, ao ligar a rota, a lista e a gaveta, e o esqueleto fica verde. O `it.fails` só quebra
+ * quando o teste inteiro passa, e então avisa que ele testava um substituto, não o comportamento.
  *
  * O formato da API vem da #157 e da camada de contrato (#21), não daqui: a única costura de dados é
- * `SOLICITACOES`, abaixo, e o ponto de fetch que a devolve. A contrato ajusta os dois.
+ * `SUPPLIER_REQUESTS`, abaixo, e o ponto de fetch que a devolve. A contrato ajusta os dois.
  */
 
-type Solicitacao = {
-  nota: string;
-  fornecedor: string;
-  solicitacao: string;
-  valor: string;
-  prazo: string;
+type SupplierRequest = {
+  invoice: string;
+  supplier: string;
+  request: string;
+  amount: string;
+  dueDate: string;
   status: "Aguardando" | "Atrasado";
 };
 
-/** O cenário: dois pedidos atrasados (e um aguardando, para o filtro inicial). Dados fictícios. */
-const SOLICITACOES: Solicitacao[] = [
-  { nota: "59738", fornecedor: "F07 Limpeza", solicitacao: "Nota de devolução", valor: "R$ 263,62", prazo: "14/11", status: "Atrasado" },
-  { nota: "40519", fornecedor: "F09 Embalagens", solicitacao: "Nota de devolução", valor: "R$ 1.540,90", prazo: "12/11", status: "Atrasado" },
-  { nota: "51877", fornecedor: "F02 Bebidas", solicitacao: "Nota de devolução", valor: "R$ 980,00", prazo: "20/11", status: "Aguardando" },
+/** #5 O cenário "cobrar um atrasado": dois pedidos atrasados e um aguardando (filtro inicial). Dados fictícios. */
+const SUPPLIER_REQUESTS: SupplierRequest[] = [
+  { invoice: "59738", supplier: "F07 Limpeza", request: "Nota de devolução", amount: "R$ 263,62", dueDate: "14/11", status: "Atrasado" },
+  { invoice: "40519", supplier: "F09 Embalagens", request: "Nota de devolução", amount: "R$ 1.540,90", dueDate: "12/11", status: "Atrasado" },
+  { invoice: "51877", supplier: "F02 Bebidas", request: "Nota de devolução", amount: "R$ 980,00", dueDate: "20/11", status: "Aguardando" },
 ];
 
 describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
-  // Costura de dados: qualquer GET de /api devolve a fixture; a proposta da gaveta é 404 como nos
-  // outros testes de rota. A camada de contrato troca isto pelo formato real.
+  // #21 Costura de dados: o GET da lista devolve `items`; a proposta da gaveta é 404 como nos outros
+  // testes de rota. A camada de contrato troca isto pelo formato real.
+  let items: SupplierRequest[] = SUPPLIER_REQUESTS;
+  let failList = false;
   const respond = async (input: RequestInfo | URL): Promise<Response> => {
     const path = String(input);
     if (path.startsWith("/api/propostas/")) return Response.json({ error: "not_found" }, { status: 404 });
-    return Response.json({ items: SOLICITACOES });
+    if (failList) throw new TypeError("network");
+    return Response.json({ items });
   };
-  beforeEach(() => vi.stubGlobal("fetch", vi.fn(respond)));
+  beforeEach(() => {
+    items = SUPPLIER_REQUESTS;
+    failList = false;
+    vi.stubGlobal("fetch", vi.fn(respond));
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   function renderRoute() {
@@ -49,7 +56,7 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     return render(<Frame context={fallbackContext("analista@barte.com")} />);
   }
 
-  it.fails("AC-5 o menu 'Contas a pagar' tem 'Pedidos ao fornecedor' depois dos itens existentes", () => {
+  it.fails("#5/AC-5 o menu 'Contas a pagar' tem 'Pedidos ao fornecedor' depois dos itens existentes", () => {
     const group = NAVIGATION.find((g) => g.key === "pagar")!;
     const last = group.items[group.items.length - 1]!;
     expect(last.label).toBe("Pedidos ao fornecedor");
@@ -62,28 +69,32 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     ]);
   });
 
-  it.fails("AC-1 a rota abre com o título, os chips com contagem e o chip Aguardando ativo", async () => {
+  it.fails("#5/AC-1 #5/AC-2 a rota abre com o título, os chips com contagem e o chip Aguardando ativo", async () => {
     renderRoute();
     expect(await screen.findByRole("heading", { name: "Pedidos ao fornecedor" })).toBeTruthy();
-    for (const chip of [/^Aguardando/, /^Atendidos/, /^Precisam de você/, /^Atrasados/]) {
-      expect(screen.getByText(chip)).toBeTruthy();
+    // Os chips são radios do filtro de situação (como em devolucoes.test.tsx), não texto solto: a
+    // célula de Status "Aguardando" da linha também casaria com getByText.
+    const aguardando = await screen.findByRole("radio", { name: /^Aguardando/ });
+    for (const chip of [/^Atendidos/, /^Precisam de você/, /^Atrasados/]) {
+      expect(screen.getByRole("radio", { name: chip })).toBeTruthy();
     }
-    expect(screen.getByText(/^Atrasados/).textContent).toMatch(/2/);
-    // Filtro inicial: Aguardando. Só a linha aguardando aparece.
+    expect(screen.getByRole("radio", { name: /^Atrasados/ }).textContent).toMatch(/2/);
+    // #5 Q3 (wireframe): o filtro inicial é Aguardando. Só a linha aguardando aparece.
+    expect(aguardando.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText("51877")).toBeTruthy();
     expect(screen.queryByText("59738")).toBeNull();
   });
 
-  it.fails("cenário: filtrar 'Atrasados' mostra os dois com Nota, Fornecedor, Solicitação, Valor, Prazo e Status, por prazo crescente", async () => {
+  it.fails("#5/AC-1 cenário: filtrar 'Atrasados' mostra os dois com Nota, Fornecedor, Solicitação, Valor, Prazo e Status, por prazo crescente", async () => {
     renderRoute();
-    fireEvent.click(await screen.findByText(/^Atrasados/));
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
 
     for (const header of ["Nota", "Fornecedor", "Solicitação", "Valor", "Prazo", "Status"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeTruthy();
     }
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows).toHaveLength(2);
-    // Prazo crescente: o mais atrasado primeiro.
+    // #5 Prazo crescente: o mais atrasado primeiro.
     const first = within(rows[0]!);
     expect(first.getByText("40519")).toBeTruthy();
     expect(first.getByText("F09 Embalagens")).toBeTruthy();
@@ -99,19 +110,61 @@ describe("#18 /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     expect(second.getByRole("button", { name: "Cobrar" })).toBeTruthy();
   });
 
-  it.fails("cenário: 'Cobrar' abre a gaveta no bloco 'Pedido ao fornecedor' com o rascunho da cobrança, sem enviar", async () => {
+  it.fails("#5/AC-3 clicar na linha abre a gaveta no bloco 'Pedido ao fornecedor' com a conversa e a leitura do agente", async () => {
     renderRoute();
-    fireEvent.click(await screen.findByText(/^Atrasados/));
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
+    const row = (await screen.findByText("59738")).closest("tr")!;
+    fireEvent.click(row);
+
+    // A gaveta do kit é achada pelo título, como em approval.test.tsx, não por role="dialog".
+    expect(await screen.findByRole("heading", { name: /Proposta da nota/ })).toBeTruthy();
+    expect(await screen.findByText("Pedido ao fornecedor")).toBeTruthy();
+    // Estado 7 do wireframe: pedido enviado, resposta do fornecedor e leitura do agente.
+    expect(screen.getByText(/Pedido enviado/)).toBeTruthy();
+    expect(screen.getByText(/Resposta do fornecedor/)).toBeTruthy();
+    expect(screen.getByText(/Leitura do agente/)).toBeTruthy();
+  });
+
+  it.fails("#5/AC-4 cenário: 'Cobrar' abre a gaveta no bloco 'Pedido ao fornecedor' com o rascunho da cobrança, sem enviar", async () => {
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
     const row = (await screen.findByText("59738")).closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Cobrar" }));
 
-    const drawer = await screen.findByRole("dialog");
-    expect(within(drawer).getByText("Pedido ao fornecedor")).toBeTruthy();
-    expect(within(drawer).getByText("Rascunho da cobrança")).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: "Enviar cobrança" })).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: "Descartar rascunho" })).toBeTruthy();
-    // A cobrança só sai no clique em enviar: nenhum POST até lá.
+    expect(await screen.findByRole("heading", { name: /Proposta da nota/ })).toBeTruthy();
+    expect(screen.getByText("Pedido ao fornecedor")).toBeTruthy();
+    expect(screen.getByText("Rascunho da cobrança")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enviar cobrança" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descartar rascunho" })).toBeTruthy();
+    // #5 A cobrança só sai no clique em enviar: nenhum POST até lá.
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [unknown, RequestInit?][];
     expect(calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  // #18 Estados desenhados no wireframe: erro, vazio e chip com contagem 0.
+  it.fails("#18 estado de erro: a lista falha, mostra 'Tentar de novo' e, ao tentar, volta a carregar a lista", async () => {
+    failList = true;
+    renderRoute();
+    expect(await screen.findByText("Não consegui carregar os pedidos ao fornecedor.")).toBeTruthy();
+    failList = false;
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    expect(await screen.findByText("51877")).toBeTruthy();
+  });
+
+  it.fails("#18 estado vazio: sem solicitações, diz o que fazer e oferece ir à Fila de aprovação", async () => {
+    items = [];
+    renderRoute();
+    expect(await screen.findByText("Nenhum pedido ao fornecedor ainda.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ir para a Fila de aprovação" })).toBeTruthy();
+  });
+
+  it.fails("#5/AC-2 chip com contagem 0: 'Atrasados 0' mostra 'Nenhum pedido atrasado' e a ação 'Ver todos'", async () => {
+    items = SUPPLIER_REQUESTS.filter((r) => r.status === "Aguardando");
+    renderRoute();
+    const atrasados = await screen.findByRole("radio", { name: /^Atrasados/ });
+    expect(atrasados.textContent).toMatch(/0/);
+    fireEvent.click(atrasados);
+    expect(await screen.findByText(/Nenhum pedido atrasado/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ver todos" })).toBeTruthy();
   });
 });
