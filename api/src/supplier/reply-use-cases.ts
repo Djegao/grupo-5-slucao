@@ -1,6 +1,6 @@
 import { filterOf, overdueReading, validateRequestText, type RequestFilter } from '../domain/index.js';
 import { catalogOf, todayIso } from './reply-catalog.js';
-import type { FollowUpMail, FollowUpMailResult, ReplyDeps, ReplyList, ReplyListRow, ReplyRequest } from './reply-ports.js';
+import type { FollowUpMail, FollowUpMailResult, FollowUpStamp, ReplyDeps, ReplyList, ReplyListRow, ReplyRequest } from './reply-ports.js';
 
 // #34: os casos de uso da leitura da resposta (#4): a varredura do prazo, o envio da cobrança e a lista.
 // #34: cada um devolve um resultado tipado que a camada da API mapeia para HTTP; aqui não há HTTP.
@@ -12,7 +12,7 @@ const SHORT_REASON = /^[a-z][a-z0-9_]{0,39}$/;
 export type SendFollowUpResult =
   | { readonly kind: 'ok'; readonly request: ReplyRequest }
   | { readonly kind: 'not_found' }
-  | { readonly kind: 'conflict'; readonly reason: 'not_no_reply' | 'no_draft' | 'already_sent' }
+  | { readonly kind: 'conflict'; readonly reason: 'not_no_reply' | 'no_draft' | 'already_sent' | 'send_in_progress' }
   | { readonly kind: 'invalid'; readonly reason: 'text_invalid' }
   | { readonly kind: 'send_failed'; readonly reason: string };
 
@@ -58,6 +58,8 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
   if (draft === null) return { kind: 'conflict', reason: 'no_draft' };
   const text = validateRequestText(draft, catalogOf(request));
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
+  // #34/AC-4: a reivindicação vem antes do e-mail; quem não a ganha não envia, e a que fica presa após o envio impede o segundo e-mail.
+  if (!(await deps.requests.claimFollowUpSend(id))) return { kind: 'conflict', reason: 'send_in_progress' };
   const result = await dispatch(deps, {
     invoiceAccessKey: request.invoiceAccessKey,
     supplierId: request.note.supplierId,
@@ -71,8 +73,10 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
     await deps.requests.recordFollowUpFailure(id, result.reason);
     return { kind: 'send_failed', reason: result.reason };
   }
-  await deps.requests.recordFollowUpSent(id, { by, at: deps.clock.now(), channel: result.channel, providerMessageId: result.providerMessageId });
-  return { kind: 'ok', request };
+  const stamp: FollowUpStamp = { by, at: deps.clock.now(), channel: result.channel, providerMessageId: result.providerMessageId };
+  // #34/AC-4: se esta gravação falhar, o e-mail já saiu e a reivindicação fica presa: melhor nenhum reenvio que um segundo e-mail.
+  await deps.requests.recordFollowUpSent(id, stamp);
+  return { kind: 'ok', request: { ...request, followUp: { ...request.followUp, sent: stamp, failure: null } } };
 }
 
 const rowOf = (r: ReplyRequest): ReplyListRow => ({

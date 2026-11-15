@@ -84,7 +84,15 @@ export interface ReplyRequestStore {
   recordReading(id: number, reading: SupplierReading): Promise<void>;
   saveFollowUpDraft(id: number, text: SupplierRequestText): Promise<void>;
   recordFollowUpRejection(id: number, reason: string): Promise<void>;
+  /**
+   * #34/AC-4: reivindica o envio da cobrança antes do e-mail sair: true para quem ganhou, false se já
+   * há envio reivindicado ou carimbado. O OLTP tem de garantir que é uma transição guardada e atômica
+   * (um UPDATE condicional por pedido), para duas chamadas ao mesmo tempo não ganharem as duas.
+   */
+  claimFollowUpSend(id: number): Promise<boolean>;
+  /** #34/AC-4: grava o motivo da falha e solta a reivindicação, para a pessoa poder tentar de novo. */
   recordFollowUpFailure(id: number, reason: string): Promise<void>;
+  /** #34/AC-4: grava o carimbo; a reivindicação fica presa depois dele, e só a falha do envio a solta. */
   recordFollowUpSent(id: number, stamp: FollowUpStamp): Promise<void>;
 }
 

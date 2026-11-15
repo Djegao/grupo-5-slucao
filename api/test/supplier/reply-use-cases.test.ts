@@ -61,6 +61,50 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
     expect(store.rows.get(7)?.followUp.sent).toEqual({ by: 'ana@jachegou.example', at: NOW, channel: 'mock', providerMessageId: 'mock-1' });
   });
 
+  it('devolve o pedido como ficou depois do envio: carimbo gravado e sem falha (#34/AC-4)', async () => {
+    const failed = replyRequest(7, { ...drafted(), followUp: { ...drafted().followUp, failure: 'mailbox_full' } });
+    const { deps } = parts([failed]);
+    const out = await createReplyUseCases(deps).sendFollowUp(7, 'ana');
+    expect(out.kind === 'ok' && out.request.followUp).toMatchObject({
+      sent: { by: 'ana', at: NOW, channel: 'mock', providerMessageId: 'mock-1' },
+      failure: null,
+    });
+  });
+
+  it('reivindica o envio antes de mandar o e-mail (#34/AC-4)', async () => {
+    const { deps, store, mailer } = parts([drafted()]);
+    await createReplyUseCases(deps).sendFollowUp(7, 'ana');
+    expect(store.calls.map((c) => c.op)).toEqual(['claimFollowUpSend', 'recordFollowUpSent']);
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it('duas chamadas ao mesmo tempo mandam um e-mail só; a outra volta como conflito (#34/AC-4)', async () => {
+    const { deps, mailer } = parts([drafted()]);
+    const useCases = createReplyUseCases(deps);
+    const results = await Promise.all([useCases.sendFollowUp(7, 'ana'), useCases.sendFollowUp(7, 'bia')]);
+    expect(results.map((r) => r.kind).sort()).toEqual(['conflict', 'ok']);
+    expect(results).toContainEqual({ kind: 'conflict', reason: 'send_in_progress' });
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it('se a gravação do carimbo falha depois do e-mail, a nova chamada não manda de novo (#34/AC-4)', async () => {
+    const { deps, store, mailer } = parts([drafted()]);
+    store.failStamp.on = true;
+    const useCases = createReplyUseCases(deps);
+    await expect(useCases.sendFollowUp(7, 'ana')).rejects.toThrow();
+    store.failStamp.on = false;
+    expect(await useCases.sendFollowUp(7, 'ana')).toEqual({ kind: 'conflict', reason: 'send_in_progress' });
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it('a falha do envio solta a reivindicação: a pessoa tenta de novo e o e-mail sai (#34/AC-4)', async () => {
+    const failing = parts([drafted()], [], fakeMailer({ ok: false, reason: 'mailbox_full' }));
+    await createReplyUseCases(failing.deps).sendFollowUp(7, 'ana');
+    expect(failing.store.claimed.has(7)).toBe(false);
+    const retry = createReplyUseCases({ ...failing.deps, mailer: fakeMailer() });
+    expect(await retry.sendFollowUp(7, 'ana')).toMatchObject({ kind: 'ok' });
+  });
+
   it('não envia a cobrança que já saiu', async () => {
     const stamp = { by: 'ana', at: NOW, channel: 'mock', providerMessageId: 'm' } as const;
     const { deps, mailer } = parts([replyRequest(7, { ...drafted(), followUp: { ...drafted().followUp, sent: stamp } })]);
@@ -114,12 +158,12 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
 });
 
 const rows = () => [
-  replyRequest(1), // aguardando: dentro do prazo
-  replyRequest(2, { reading: reading({ summary: 'Atendeu.' }) }), // atendido
+  replyRequest(1), // #34/AC-5: aguardando: dentro do prazo
+  replyRequest(2, { reading: reading({ summary: 'Atendeu.' }) }), // #34/AC-5: atendido
   replyRequest(3, { reading: reading({ replyOutcome: 'needs_information', nextStep: 'answer_supplier' }) }),
   replyRequest(4, { reading: noReply() }),
-  replyRequest(5, { dueOn: '2026-11-10' }), // enviado sem leitura depois do prazo: atrasado
-  replyRequest(6, { status: 'draft' }), // não enviado: em nenhum filtro
+  replyRequest(5, { dueOn: '2026-11-10' }), // #34/AC-5: enviado sem leitura depois do prazo: atrasado
+  replyRequest(6, { status: 'draft' }), // #34/AC-5: não enviado: em nenhum filtro
   replyRequest(7, { reading: reading({ replyOutcome: 'fulfilled', supplierDocument: '881', nextStep: 'confirm_document' }) }),
 ];
 const WITHIN = '2026-11-10';

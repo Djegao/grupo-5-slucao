@@ -89,11 +89,20 @@ export const noReply = (): SupplierReading =>
 export type StoreCall = { readonly op: string; readonly args: readonly unknown[] };
 
 /** #34/AC-2: o armazém falso grava na memória e registra cada escrita, para o teste conferir a lista inteira. */
-export type FakeStore = ReplyDeps['requests'] & { rows: Map<number, ReplyRequest>; calls: StoreCall[] };
+export type FakeStore = ReplyDeps['requests'] & {
+  rows: Map<number, ReplyRequest>;
+  calls: StoreCall[];
+  /** #34/AC-4: os pedidos com o envio da cobrança reivindicado (o que a transição guardada do OLTP faz). */
+  claimed: Set<number>;
+  /** #34/AC-4: liga a falha da gravação do carimbo, depois de o e-mail sair. */
+  failStamp: { on: boolean };
+};
 
 export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
   const map = new Map(rows.map((r) => [r.id, r]));
   const calls: StoreCall[] = [];
+  const claimed = new Set<number>();
+  const failStamp = { on: false };
   const patch = (id: number, op: string, args: unknown[], change: (r: ReplyRequest) => ReplyRequest): Promise<void> => {
     calls.push({ op, args });
     const row = map.get(id);
@@ -103,6 +112,14 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
   return {
     rows: map,
     calls,
+    claimed,
+    failStamp,
+    claimFollowUpSend: (id) => {
+      calls.push({ op: 'claimFollowUpSend', args: [id] });
+      const taken = claimed.has(id) || map.get(id)?.followUp.sent != null;
+      if (!taken) claimed.add(id);
+      return Promise.resolve(!taken);
+    },
     get: (id) => Promise.resolve(map.get(id) ?? null),
     listSent: () => Promise.resolve([...map.values()].filter((r) => r.status === 'sent')),
     recordReading: (id, r) => patch(id, 'recordReading', [id, r], (row) => ({ ...row, reading: r })),
@@ -110,28 +127,37 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
       patch(id, 'saveFollowUpDraft', [id, text], (row) => ({ ...row, followUp: { ...row.followUp, draft: text } })),
     recordFollowUpRejection: (id, reason) =>
       patch(id, 'recordFollowUpRejection', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, rejection: reason } })),
-    recordFollowUpFailure: (id, reason) =>
-      patch(id, 'recordFollowUpFailure', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, failure: reason } })),
-    recordFollowUpSent: (id, stamp: FollowUpStamp) =>
-      patch(id, 'recordFollowUpSent', [id, stamp], (row) => ({ ...row, followUp: { ...row.followUp, sent: stamp, failure: null } })),
+    recordFollowUpFailure: (id, reason) => {
+      claimed.delete(id); // #34/AC-4: a falha solta a reivindicação, para a pessoa poder tentar de novo
+      return patch(id, 'recordFollowUpFailure', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, failure: reason } }));
+    },
+    recordFollowUpSent: (id, stamp: FollowUpStamp) => {
+      if (failStamp.on) return Promise.reject(new Error('banco fora do ar'));
+      return patch(id, 'recordFollowUpSent', [id, stamp], (row) => ({ ...row, followUp: { ...row.followUp, sent: stamp, failure: null } }));
+    },
   };
 };
 
 export type FakeInbox = ReplyDeps['inbox'] & {
   status: Map<number, { state: 'pending' | 'read' | 'error'; reason: string | null }>;
   calls: StoreCall[];
+  /** #34/AC-1: liga a falha de markRead, depois de a leitura estar gravada. */
+  failMarkRead: { on: boolean };
 };
 
 export const fakeInbox = (messages: InboxMessage[]): FakeInbox => {
   const status = new Map(messages.map((m) => [m.id, { state: 'pending' as 'pending' | 'read' | 'error', reason: null as string | null }]));
   const calls: StoreCall[] = [];
+  const failMarkRead = { on: false };
   const pending = (): InboxMessage[] => messages.filter((m) => status.get(m.id)?.state === 'pending');
   return {
     status,
     calls,
+    failMarkRead,
     listPending: () => Promise.resolve(pending()),
     get: (id) => Promise.resolve(pending().find((m) => m.id === id) ?? null),
     markRead: (id) => {
+      if (failMarkRead.on) return Promise.reject(new Error('banco fora do ar'));
       calls.push({ op: 'markRead', args: [id] });
       status.set(id, { state: 'read', reason: null });
       return Promise.resolve();

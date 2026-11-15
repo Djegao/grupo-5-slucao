@@ -11,7 +11,3 @@ const TIME_ZONE = 'America/Sao_Paulo';
 
 // #34: igual a todayIso de #11 (draft.ts); unificar quando #38 entrar (ADR-005: o domínio não lê a hora).
 export const todayIso = (now: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(now);
-
-/** #34/AC-1: o pedido espera resposta se foi enviado e ainda não tem leitura, ou só a do prazo (no_reply): a resposta tardia vale. */
-export const awaitsReading = (request: ReplyRequest): boolean =>
-  request.status === 'sent' && (request.reading === null || request.reading.replyOutcome === 'no_reply');

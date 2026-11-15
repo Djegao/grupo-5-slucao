@@ -22,6 +22,7 @@ const READING_SYSTEM = [
   'Em `supplier_document`, o número do documento que o fornecedor citou, escrito como na resposta, ou null.',
   'Em `summary`, texto corrido em português, curto, sem marcador {{chave}}. Todo número do summary é um valor do catálogo ou o `supplier_document`; nunca escreva um número por extenso nem outro número.',
   'Em `next_step`, escolha close, confirm_document, answer_supplier ou follow_up.',
+  'A resposta do fornecedor vem como texto, com as quebras de linha e as aspas como estão; só `<`, `>` e `&` vêm escritos como &lt;, &gt; e &amp;. Cite o trecho assim, como você o vê.',
   DATA_RULE,
 ].join('\n');
 
@@ -67,11 +68,55 @@ const catalogData = (catalog: FactCatalog) => ({
 // #34: `<` escapado, para que um texto com `</dados>` não feche o bloco de dados (mesmo molde de dossier/prompt.ts, #68).
 const dataBlock = (data: unknown): string => ['<dados>', JSON.stringify(data, null, 2).replace(/</g, '\\u003c'), '</dados>'].join('\n');
 
+const REPLY_ESCAPES: readonly (readonly [string, string])[] = [
+  ['&', '&amp;'],
+  ['<', '&lt;'],
+  ['>', '&gt;'],
+];
+
+/** #34/AC-5: a resposta do fornecedor como o modelo a vê: só `&`, `<` e `>` escapados; quebra de linha e aspas ficam como estão. */
+const escapeReply = (text: string): string => REPLY_ESCAPES.reduce((acc, [raw, escaped]) => acc.replaceAll(raw, escaped), text);
+
+/** #34/AC-5: o inverso, na ordem contrária: `&amp;` por último, para `&amp;lt;` voltar a `&lt;` e não a `<`. */
+const unescapeReply = (text: string): string =>
+  [...REPLY_ESCAPES].reverse().reduce((acc, [raw, escaped]) => acc.replaceAll(escaped, raw), text);
+
+/**
+ * #34/AC-5: o `<dados>` da leitura: o pedido e o catálogo em JSON, e a resposta do fornecedor logo abaixo,
+ * como texto. O `<` do fornecedor sai como &lt;, então ele não fecha o bloco.
+ */
+const readingBlock = (input: ReadingContext): string =>
+  [
+    '<dados>',
+    JSON.stringify({ asks: input.asks, ...catalogData(input.catalog) }, null, 2).replace(/</g, '\\u003c'),
+    'Resposta do fornecedor:',
+    escapeReply(input.replyText),
+    '</dados>',
+  ].join('\n');
+
 /** #34/AC-1: o prompt da leitura: a resposta do fornecedor, o que pedimos e o catálogo do pedido, tudo como dado. */
 export function buildReadingPrompt(input: ReadingContext): ReplyPrompt {
-  const data = { asks: input.asks, supplierReply: input.replyText, ...catalogData(input.catalog) };
-  const prompt = ['Leia a resposta do fornecedor abaixo e devolva a leitura.', dataBlock(data)].join('\n');
+  const prompt = ['Leia a resposta do fornecedor abaixo e devolva a leitura.', readingBlock(input)].join('\n');
   return { system: READING_SYSTEM, prompt, schema: READING_SCHEMA };
+}
+
+/** #34/AC-5: o trecho como o fornecedor escreveu: o que já está na resposta fica, o escapado volta ao texto. */
+const restore = (excerpt: unknown, replyText: string): unknown =>
+  typeof excerpt !== 'string' || replyText.includes(excerpt) ? excerpt : unescapeReply(excerpt);
+
+/**
+ * #34/AC-5: o modelo cita `injection_flag` e `supplier_document` como viu a resposta, escapada; a regra os
+ * compara com o texto cru. Aqui só esses dois campos voltam ao texto do fornecedor, antes de validateReading,
+ * que segue exigindo que o trecho esteja na resposta palavra por palavra.
+ */
+export function restoreExcerpts(raw: unknown, replyText: string): unknown {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
+  const fields = Object.fromEntries(Object.entries(raw));
+  return {
+    ...fields,
+    injection_flag: restore(fields['injection_flag'], replyText),
+    supplier_document: restore(fields['supplier_document'], replyText),
+  };
 }
 
 /** #34/AC-3: o prompt da cobrança, com o catálogo do pedido; os números só saem como {{chave}}. */

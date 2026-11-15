@@ -20,7 +20,7 @@ describe('#34/AC-1: o prompt da leitura trata a resposta do fornecedor como dado
   it('escapa o < do texto, e o bloco de dados fecha uma vez só', () => {
     expect(built.prompt.match(/<dados>/g)).toHaveLength(1);
     expect(built.prompt.match(/<\/dados>/g)).toHaveLength(1);
-    expect(built.prompt).toContain('\\u003c/dados>');
+    expect(built.prompt).toContain('&lt;/dados&gt;');
   });
 
   it('o esquema pede os seis campos da leitura', () => {
