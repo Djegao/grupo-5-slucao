@@ -12,6 +12,7 @@ import {
   acceptReplyReading,
   detectInjection,
   nextStepFor,
+  outboundText,
   bucketOf,
   isOverdue,
   noReplyReading,
@@ -143,8 +144,8 @@ export async function markOverdue(deps: SupplierReplyDeps, options: { readonly l
     .filter((r) => isOverdue(r.dueOn, day));
   if (overdue.length === 0) return 0;
   const ids = overdue.map((r) => r.id);
-  const [readings, messages] = await Promise.all([deps.store.readingsOf(ids), deps.store.messagesOf(ids)]);
-  const handled = new Set([...readings.map((r) => r.request_id), ...messages.map((m) => m.request_id)]);
+  const [readings, messages, closures] = await Promise.all([deps.store.readingsOf(ids), deps.store.messagesOf(ids), deps.store.closuresOf(ids)]);
+  const handled = new Set([...readings.map((r) => r.request_id), ...messages.map((m) => m.request_id), ...closures.map((c) => c.request_id)]);
   let marked = 0;
   for (const request of overdue.filter((r) => !handled.has(r.id)).slice(0, options.limit ?? 1)) {
     await deps.store.addReading(deps.ids.next(), request.id, null, noReplyReading(request), {
@@ -200,6 +201,7 @@ export type ListItem = {
   readonly latest: ReadingView | null;
   readonly documentConfirmed: boolean;
   readonly followUpSent: boolean;
+  readonly closed: boolean;
 };
 
 export type Overview = { readonly counts: Record<ReplyBucket, number>; readonly items: ListItem[] };
@@ -225,14 +227,15 @@ export async function overview(deps: SupplierReplyDeps, filter?: ReplyBucket): P
   const sent = (await deps.requests.listByStatus('sent')).map((r) => r.snapshot());
   const ids = sent.map((r) => r.id);
   const noteIds = sent.flatMap((r) => r.attachments.map((a) => a.returnNoteId));
-  const [readings, confirmations, followUps, emissions] = ids.length
+  const [readings, confirmations, followUps, emissions, closures] = ids.length
     ? await Promise.all([
         deps.store.readingsOf(ids),
         deps.store.confirmationsOf(ids),
         deps.store.followUpsOf(ids),
         emissionsOf(deps.rest, noteIds),
+        deps.store.closuresOf(ids),
       ])
-    : [[], [], [], []];
+    : [[], [], [], [], []];
   const notes = new Map(parseRows(emissions, isEmission, 'return_note_emissions').map((e) => [e.note_id, e.note]));
   const counts: Record<ReplyBucket, number> = { aguardando: 0, atendidos: 0, precisam: 0, atrasados: 0 };
   const items: ListItem[] = [];
@@ -240,11 +243,13 @@ export async function overview(deps: SupplierReplyDeps, filter?: ReplyBucket): P
   for (const x of readings) latestBy.set(x.request_id, x); // ordenadas por read_at: fica a última
   const confirmed = new Set(confirmations.map((c) => c.reading_id));
   const followed = new Set(followUps.map((f) => f.reading_id));
+  const closedSet = new Set(closures.map((c) => c.request_id));
   for (const r of sent) {
     const latest = latestBy.get(r.id) ?? null;
     const documentConfirmed = latest !== null && confirmed.has(latest.id);
     const followUpSent = latest !== null && followed.has(latest.id);
-    const bucket = bucketOf({ latest: latest && { outcome: latest.outcome, nextStep: latest.next_step }, documentConfirmed, followUpSent });
+    const closed = closedSet.has(r.id);
+    const bucket = bucketOf({ latest: latest && { outcome: latest.outcome, nextStep: latest.next_step }, documentConfirmed, followUpSent, closed });
     counts[bucket] += 1;
     const note = r.attachments[0] ? notes.get(r.attachments[0].returnNoteId) : undefined;
     items.push({
@@ -260,6 +265,7 @@ export async function overview(deps: SupplierReplyDeps, filter?: ReplyBucket): P
       latest: latest && readingView(latest),
       documentConfirmed,
       followUpSent,
+      closed,
     });
   }
   return { counts, items: filter ? items.filter((i) => i.bucket === filter) : items };
@@ -268,24 +274,28 @@ export async function overview(deps: SupplierReplyDeps, filter?: ReplyBucket): P
 export type Conversation = {
   readonly messages: { readonly id: string; readonly from: string; readonly body: string; readonly receivedAt: string }[];
   readonly readings: ReadingView[];
-  readonly followUps: { readonly readingId: string; readonly subject: string; readonly body: string; readonly sentBy: string; readonly sentAt: string }[];
+  readonly followUps: { readonly readingId: string; readonly kind: 'follow_up' | 'answer'; readonly subject: string; readonly body: string; readonly sentBy: string; readonly sentAt: string }[];
   readonly confirmations: { readonly readingId: string; readonly confirmedBy: string; readonly confirmedAt: string }[];
+  readonly closure: { readonly note: string | null; readonly closedBy: string; readonly closedAt: string } | null;
 };
 
 /** #157 A conversa de um pedido: as respostas, as leituras do agente, as cobranças e as confirmações. */
 export async function conversationOf(deps: SupplierReplyDeps, requestId: string): Promise<Conversation> {
   const ids = [requestId];
-  const [messages, readings, followUps, confirmations] = await Promise.all([
+  const [messages, readings, followUps, confirmations, closures] = await Promise.all([
     deps.store.messagesOf(ids),
     deps.store.readingsOf(ids),
     deps.store.followUpsOf(ids),
     deps.store.confirmationsOf(ids),
+    deps.store.closuresOf(ids),
   ]);
+  const closure = closures[0];
   return {
     messages: messages.map((m) => ({ id: m.id, from: m.from_address, body: m.body, receivedAt: m.received_at })),
     readings: readings.map(readingView),
-    followUps: followUps.map((f) => ({ readingId: f.reading_id, subject: f.subject, body: f.body, sentBy: f.sent_by, sentAt: f.published_at })),
+    followUps: followUps.map((f) => ({ readingId: f.reading_id, kind: f.kind, subject: f.subject, body: f.body, sentBy: f.sent_by, sentAt: f.published_at })),
     confirmations: confirmations.map((c) => ({ readingId: c.reading_id, confirmedBy: c.confirmed_by, confirmedAt: c.confirmed_at })),
+    closure: closure ? { note: closure.note, closedBy: closure.closed_by, closedAt: closure.closed_at } : null,
   };
 }
 
@@ -294,7 +304,8 @@ export async function conversationOf(deps: SupplierReplyDeps, requestId: string)
 export type ActionResult =
   | { readonly kind: 'ok'; readonly conversation: Conversation }
   | { readonly kind: 'not_found' }
-  | { readonly kind: 'conflict'; readonly reason: 'wrong_state' | 'already_done' };
+  | { readonly kind: 'conflict'; readonly reason: 'wrong_state' | 'already_done' }
+  | { readonly kind: 'invalid'; readonly reason: 'empty_or_too_long' };
 
 async function latestOf(deps: SupplierReplyDeps, requestId: string) {
   const request = await deps.requests.findById(requestId);
@@ -308,27 +319,76 @@ export async function confirmDocument(deps: SupplierReplyDeps, requestId: string
   const found = await latestOf(deps, requestId);
   if (!found) return { kind: 'not_found' };
   const { latest, conversation } = found;
+  if (conversation.closure) return { kind: 'conflict', reason: 'already_done' };
   if (!latest || latest.nextStep !== 'confirm_document') return { kind: 'conflict', reason: 'wrong_state' };
   if (conversation.confirmations.some((c) => c.readingId === latest.id)) return { kind: 'conflict', reason: 'already_done' };
   await deps.store.addConfirmation({ id: deps.ids.next(), request_id: requestId, reading_id: latest.id, confirmed_by: by, confirmed_at: deps.clock.now().toISOString() });
   return { kind: 'ok', conversation: await conversationOf(deps, requestId) };
 }
 
-/** #157/AC-2 A cobrança só sai com uma pessoa: grava o envio na caixa de saída mock das cobranças. */
-export async function sendFollowUp(deps: SupplierReplyDeps, requestId: string, by: string): Promise<ActionResult> {
+/**
+ * #157/AC-2 A cobrança só sai com uma pessoa: grava o envio na caixa de saída mock. A pessoa pode editar o texto;
+ * o destinatário, o assunto e o que pedimos ficam como a regra escreveu.
+ */
+export async function sendFollowUp(deps: SupplierReplyDeps, requestId: string, by: string, text?: unknown): Promise<ActionResult> {
   const found = await latestOf(deps, requestId);
   if (!found) return { kind: 'not_found' };
   const { latest, conversation } = found;
+  if (conversation.closure) return { kind: 'conflict', reason: 'already_done' };
   if (!latest || !latest.followUpDraft) return { kind: 'conflict', reason: 'wrong_state' };
   if (conversation.followUps.some((f) => f.readingId === latest.id)) return { kind: 'conflict', reason: 'already_done' };
+  const body = text === undefined ? latest.followUpDraft.body : outboundText(text);
+  if (body === null) return { kind: 'invalid', reason: 'empty_or_too_long' };
   await deps.store.addFollowUp({
     request_id: requestId,
     reading_id: latest.id,
+    kind: 'follow_up',
     to_address: latest.followUpDraft.to,
     subject: latest.followUpDraft.subject,
-    body: latest.followUpDraft.body,
+    body,
     provider_message_id: `mock-${deps.ids.next()}`,
     sent_by: by,
+  });
+  return { kind: 'ok', conversation: await conversationOf(deps, requestId) };
+}
+
+/** #157 A resposta da pessoa a quem pediu informação: o texto é dela, e só sai com o clique. */
+export async function answerSupplier(deps: SupplierReplyDeps, requestId: string, by: string, text: unknown): Promise<ActionResult> {
+  const found = await latestOf(deps, requestId);
+  if (!found) return { kind: 'not_found' };
+  const { latest, conversation, request } = found;
+  if (conversation.closure) return { kind: 'conflict', reason: 'already_done' };
+  if (!latest || latest.nextStep !== 'answer_supplier') return { kind: 'conflict', reason: 'wrong_state' };
+  if (conversation.followUps.some((f) => f.readingId === latest.id)) return { kind: 'conflict', reason: 'already_done' };
+  const body = outboundText(text);
+  if (body === null) return { kind: 'invalid', reason: 'empty_or_too_long' };
+  await deps.store.addFollowUp({
+    request_id: requestId,
+    reading_id: latest.id,
+    kind: 'answer',
+    to_address: request.to,
+    subject: `Re: ${request.subject}`,
+    body,
+    provider_message_id: `mock-${deps.ids.next()}`,
+    sent_by: by,
+  });
+  return { kind: 'ok', conversation: await conversationOf(deps, requestId) };
+}
+
+/** #157/AC-3 A pessoa encerra o caso (atendido ou resolvido por fora). Só ela encerra; o agente nunca. */
+export async function closeCase(deps: SupplierReplyDeps, requestId: string, by: string, note?: unknown): Promise<ActionResult> {
+  const found = await latestOf(deps, requestId);
+  if (!found) return { kind: 'not_found' };
+  const { latest, conversation } = found;
+  if (conversation.closure) return { kind: 'conflict', reason: 'already_done' };
+  const cleanNote = typeof note === 'string' && note.trim() !== '' ? note.trim().slice(0, 500) : null;
+  await deps.store.addClosure({
+    id: deps.ids.next(),
+    request_id: requestId,
+    reading_id: latest?.id ?? null,
+    note: cleanNote,
+    closed_by: by,
+    closed_at: deps.clock.now().toISOString(),
   });
   return { kind: 'ok', conversation: await conversationOf(deps, requestId) };
 }
@@ -339,8 +399,8 @@ export type SupplierRepliesRound = { readonly overdue: number; readonly read: nu
 
 /**
  * #157 A rodada: marca os atrasados (sem Claude) e, se `ask` vem, lê 1 resposta. Conta de subrequests: atrasados
- * 1 (vencidos, até 50) + 2 (leituras e respostas deles) + 1 gravação = 4; ler: 4 para achar a próxima, o pedido 1,
- * a Messages API 1 e a gravação 1 = 7. No máximo 11, fixo.
+ * 1 (vencidos) + 3 (leituras, respostas e encerramentos deles) + 1 gravação = 5; ler: 4 para achar a próxima, o
+ * pedido 1, a Messages API 1 e a gravação 1 = 7. No máximo 12, fixo.
  */
 export async function runSupplierRepliesRound(deps: SupplierReplyDeps, ask: Ask | undefined): Promise<SupplierRepliesRound> {
   let overdue = 0;

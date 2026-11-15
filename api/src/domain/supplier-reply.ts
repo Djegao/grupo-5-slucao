@@ -186,12 +186,24 @@ export type ReplyBucket = 'aguardando' | 'atendidos' | 'precisam' | 'atrasados';
 export function bucketOf(state: {
   readonly latest: { readonly outcome: ReplyOutcome; readonly nextStep: NextStep } | null;
   readonly documentConfirmed: boolean;
+  /** #157 A pessoa já mandou a cobrança ou a resposta da última leitura. */
   readonly followUpSent: boolean;
+  /** #157 A pessoa encerrou o caso. */
+  readonly closed?: boolean;
 }): ReplyBucket {
   const { latest } = state;
+  if (state.closed) return 'atendidos';
   if (latest === null) return 'aguardando';
   if (state.documentConfirmed || latest.nextStep === 'close') return 'atendidos';
   if (latest.outcome === 'no_reply') return state.followUpSent ? 'aguardando' : 'atrasados';
-  if (latest.nextStep === 'follow_up' && state.followUpSent) return 'aguardando';
+  if ((latest.nextStep === 'follow_up' || latest.nextStep === 'answer_supplier') && state.followUpSent) return 'aguardando';
   return 'precisam';
+}
+
+/** #157 O texto que a pessoa escreve ou edita (cobrança, resposta): não vazio e com teto. */
+export const MAX_OUTBOUND_TEXT = 5000;
+export function outboundText(text: unknown): string | null {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  return trimmed === '' || trimmed.length > MAX_OUTBOUND_TEXT ? null : trimmed;
 }

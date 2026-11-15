@@ -95,6 +95,14 @@ tables:
     projection: none
     refusal: trigger
 
+  # #157 O encerramento do caso pela pessoa. Um por pedido.
+  supplier_request_closures:
+    mode: append-only
+    history: none
+    tenant: none
+    projection: none
+    refusal: trigger
+
   # #157/AC-2 A caixa de saída mock da cobrança: um envio por leitura, só com uma pessoa.
   outbox_supplier_follow_ups:
     mode: append-only

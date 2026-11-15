@@ -8,8 +8,13 @@
  *        200 { conversation: { messages[], readings[], followUps[], confirmations[] } }
  *   POST /api/pedidos-fornecedor/:id/confirmar-documento   sem corpo   (AC-3: só a pessoa fecha o "atendeu")
  *        200 { conversation } · 404 · 409 { error: 'conflict', reason: 'wrong_state' | 'already_done' }
- *   POST /api/pedidos-fornecedor/:id/cobrar                sem corpo   (AC-2: a cobrança só sai com a pessoa)
- *        200 { conversation } · 404 · 409
+ *   POST /api/pedidos-fornecedor/:id/cobrar                { text? }   (AC-2: a cobrança só sai com a pessoa)
+ *        200 { conversation } · 404 · 409 · 422 { error: 'invalid', reason: 'empty_or_too_long' }
+ *        Sem `text`, sai o rascunho da regra; com ele, o texto editado (para, assunto e o que pedimos ficam travados).
+ *   POST /api/pedidos-fornecedor/:id/responder             { text }    (a pessoa responde a quem pediu informação)
+ *        200 { conversation } · 404 · 409 · 422
+ *   POST /api/pedidos-fornecedor/:id/encerrar              { note? }   (só a pessoa encerra o caso)
+ *        200 { conversation } · 404 · 409 { reason: 'already_done' }
  *
  * ListItem: id, invoiceAccessKey, invoiceNumber, supplierId, requestType, valueCents (centavos ou null), dueOn,
  * sentAt, bucket, latest (a última leitura ou null), documentConfirmed, followUpSent.
@@ -19,6 +24,8 @@ import { SupabaseRestError, type SupabaseRest } from '../connectors/supabase-res
 import type { Env } from '../env.js';
 import type { ReplyBucket } from '../domain/index.js';
 import {
+  answerSupplier,
+  closeCase,
   confirmDocument,
   conversationOf,
   overview,
@@ -30,16 +37,27 @@ import type { Identity } from './access.js';
 import type { SupplierRequestsDeps } from './supplier-requests.js';
 
 const LIST = '/api/pedidos-fornecedor/lista';
-const ITEM = /^\/api\/pedidos-fornecedor\/([A-Za-z0-9_-]{1,64})\/(conversa|confirmar-documento|cobrar)$/;
+const ITEM = /^\/api\/pedidos-fornecedor\/([A-Za-z0-9_-]{1,64})\/(conversa|confirmar-documento|cobrar|responder|encerrar)$/;
 const BUCKETS: readonly ReplyBucket[] = ['aguardando', 'atendidos', 'precisam', 'atrasados'];
 const bucketFrom = (value: string | null): ReplyBucket | undefined => BUCKETS.find((b) => b === value);
 
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}, headers?: HeadersInit) =>
   Response.json({ error, ...extra }, { status, headers });
 
+/** #157 Corpo JSON malformado vale corpo vazio, como nas rotas da #156. */
+async function bodyOf(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const body: unknown = await request.json();
+    return typeof body === 'object' && body !== null && !Array.isArray(body) ? { ...body } : {};
+  } catch {
+    return {};
+  }
+}
+
 const answer = (result: ActionResult): Response => {
   if (result.kind === 'not_found') return fail(404, 'not_found');
   if (result.kind === 'conflict') return fail(409, 'conflict', { reason: result.reason });
+  if (result.kind === 'invalid') return fail(422, 'invalid', { reason: result.reason });
   return Response.json({ conversation: result.conversation });
 };
 
@@ -80,7 +98,10 @@ export async function supplierReplyRoutes(
       return Response.json({ conversation: await conversationOf(deps, id) });
     }
     if (action === 'confirmar-documento') return answer(await confirmDocument(deps, id, by ?? ''));
-    return answer(await sendFollowUp(deps, id, by ?? ''));
+    const body = await bodyOf(request);
+    if (action === 'responder') return answer(await answerSupplier(deps, id, by ?? '', body.text));
+    if (action === 'encerrar') return answer(await closeCase(deps, id, by ?? '', body.note));
+    return answer(await sendFollowUp(deps, id, by ?? '', body.text));
   } catch (error) {
     const correlationId = crypto.randomUUID();
     if (error instanceof SupabaseRestError) {

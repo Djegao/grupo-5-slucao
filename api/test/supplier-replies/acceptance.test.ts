@@ -137,3 +137,40 @@ describe('#157 resposta do fornecedor: aceite', () => {
     expect((await listOf(w)).items[0]?.latest).toMatchObject({ supplierDocument: 'NF-D 77', nextStep: 'confirm_document' });
   });
 });
+
+describe('#157 a pessoa edita a cobrança, responde e encerra', () => {
+  it('#157/AC-2 a cobrança sai com o texto que a pessoa editou; vazio dá 422 e nada sai', async () => {
+    const { w, request, deps } = await sentWorld();
+    await markOverdue(deps(LATER));
+    const empty = await w.call(`/api/pedidos-fornecedor/${request.id}/cobrar`, 'POST', { text: '   ' });
+    expect(empty.status).toBe(422);
+    expect(w.fake.rows('outbox_supplier_follow_ups')).toHaveLength(0);
+    const sent = await w.call(`/api/pedidos-fornecedor/${request.id}/cobrar`, 'POST', { text: 'Olá, ainda aguardamos a retirada. Obrigado.' });
+    expect(sent.status).toBe(200);
+    expect(w.fake.rows('outbox_supplier_follow_ups')).toMatchObject([
+      { kind: 'follow_up', body: 'Olá, ainda aguardamos a retirada. Obrigado.', to_address: request.to, subject: expect.stringMatching(/^Lembrete: /) },
+    ]);
+  });
+
+  it('#157 quem pediu informação recebe a resposta da pessoa, e o pedido volta a aguardar', async () => {
+    const { w, request, deps } = await sentWorld();
+    await receiveReply(deps(), request.id, request.to, 'Qual o número do pedido de compra?');
+    await readReplies(deps(), readingAsk({ reply_outcome: 'needs_information', summary: 'Pede o número do pedido.' }));
+    expect((await w.call(`/api/pedidos-fornecedor/${request.id}/cobrar`, 'POST')).status).toBe(409);
+    const res = await w.call(`/api/pedidos-fornecedor/${request.id}/responder`, 'POST', { text: 'O pedido é o OC-2026-1234.' });
+    expect(res.status).toBe(200);
+    expect(w.fake.rows('outbox_supplier_follow_ups')).toMatchObject([{ kind: 'answer', subject: expect.stringMatching(/^Re: /), sent_by: ANALYST }]);
+    expect((await listOf(w)).items[0]?.bucket).toBe('aguardando');
+    expect((await w.call(`/api/pedidos-fornecedor/${request.id}/responder`, 'POST', { text: 'de novo' })).status).toBe(409);
+  });
+
+  it('#157/AC-3 só a pessoa encerra; depois de encerrado, nada mais sai e o atraso não volta', async () => {
+    const { w, request, deps } = await sentWorld();
+    const closed = await w.call(`/api/pedidos-fornecedor/${request.id}/encerrar`, 'POST', { note: 'Resolvido por telefone.' });
+    expect(closed.status).toBe(200);
+    expect(w.fake.rows('supplier_request_closures')).toMatchObject([{ closed_by: ANALYST, note: 'Resolvido por telefone.' }]);
+    expect((await listOf(w)).items[0]).toMatchObject({ bucket: 'atendidos', closed: true });
+    expect((await w.call(`/api/pedidos-fornecedor/${request.id}/encerrar`, 'POST')).status).toBe(409);
+    expect(await markOverdue(deps(LATER))).toBe(0);
+  });
+});

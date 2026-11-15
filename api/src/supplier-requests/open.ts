@@ -9,7 +9,7 @@ import {
   type SupplierRequestSnapshot,
 } from '../domain/index.js';
 import type { DecidedCase, SupplierRequestDeps } from './ports.js';
-import { planCase, queueRequestOf, subjectOf, type PlannedCase } from './shared.js';
+import { planCase, queueRequestOf, subjectOf, type PlannedCase, loadPlanned } from './shared.js';
 
 export type SkipReason =
   | 'not_qualifying'
@@ -86,6 +86,17 @@ async function openOne(deps: SupplierRequestDeps, decided: DecidedCase, existing
  * com tudo já aberto, lê e não grava nada. Cada caso é independente; o que não qualifica, não tem
  * e-mail, não fecha com a fila ou já tem pedido fica de fora, com o motivo.
  */
+/**
+ * #156 A devolução entra na fila da #140 na hora da decisão (aprovar ou alterar), sem esperar o Cron. Idempotente:
+ * a varredura do Cron depois só confere. Devolve se a nota tem devolução a publicar.
+ */
+export async function queueReturnForDecision(deps: SupplierRequestDeps, invoiceAccessKey: string): Promise<boolean> {
+  const planned = await loadPlanned(deps, invoiceAccessKey);
+  if (!planned) return false;
+  await deps.queue.ensureRow(queueRequestOf(planned));
+  return true;
+}
+
 export async function openForDecided(deps: SupplierRequestDeps, options: OpenForDecidedOptions = {}): Promise<OpenForDecidedResult> {
   const opened: string[] = [];
   const skipped: OpenForDecidedResult['skipped'][number][] = [];

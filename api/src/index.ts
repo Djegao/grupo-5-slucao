@@ -4,6 +4,7 @@ import { createAccessVerifier, fetchJwksOverNetwork } from "./http/access";
 import { route, type RouterDeps } from "./http/router";
 import { MemoryApprovalStore } from "./approval/store";
 import { SupabaseApprovalStore } from "./approval/supabase-store";
+import { queueReturnForDecision, supabaseSupplierRequestDeps, supplierRequestOptionsFromEnv } from "./supplier-requests/index";
 import { SupabaseRest } from "./connectors/supabase-rest";
 import { supabaseConnectors } from "./connectors/supabase-connectors";
 import { loadDossierContext } from "./dossier/context";
@@ -47,6 +48,9 @@ function approvalDeps(env: Env) {
     // #176 A unidade de estoque do receber parcial vem do fator de caixa do cadastro.
     products: () => captureDeps.registry.listProducts(),
     timeline: new SupabaseTimelineSource(rest, new SupabaseDossierSource(rest)),
+    // #156 A devolução da decisão entra na fila da #140 na hora; o Cron só confere depois.
+    returnQueue: (key: string) =>
+      queueReturnForDecision(supabaseSupplierRequestDeps(rest, supplierRequestOptionsFromEnv(env, (line) => console.log(line))), key),
     dossier: {
       source: new SupabaseDossierSource(rest),
       context: (key: string) => loadDossierContext(captureDeps, key),

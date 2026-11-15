@@ -7,6 +7,7 @@ import {
   editBody,
   emitAndSend,
   openForDecided,
+  queueReturnForDecision,
   readSupplierRequests,
   redo,
   retrySend,
@@ -619,5 +620,21 @@ describe('#156 a varredura do Cron tem custo constante', () => {
     await openForDecided(w.deps, { limit: 1 });
     expect(w.requests.listByInvoicesCalls).toBe(2);
     expect(perInvoice).toBe(0);
+  });
+});
+
+describe('#156 a devolução entra na fila na hora da decisão', () => {
+  it('a decisão E2 publica a devolução na fila da #140, uma vez só', async () => {
+    const w = world();
+    expect(await queueReturnForDecision(w.deps, ORIGIN_KEY)).toBe(true);
+    expect(await queueReturnForDecision(w.deps, ORIGIN_KEY)).toBe(true);
+    expect(w.queue.publishes).toBe(1);
+    expect([...w.queue.rows.values()]).toMatchObject([{ invoiceAccessKey: ORIGIN_KEY, status: 'pendente' }]);
+  });
+
+  it('nota sem decisão que devolve não publica nada', async () => {
+    const w = world({ cases: [] });
+    expect(await queueReturnForDecision(w.deps, ORIGIN_KEY)).toBe(false);
+    expect(w.queue.publishes).toBe(0);
   });
 });

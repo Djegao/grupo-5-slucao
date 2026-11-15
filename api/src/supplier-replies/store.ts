@@ -8,6 +8,7 @@ export const INBOX = 'inbox_supplier_messages';
 export const READINGS = 'supplier_reply_readings';
 export const CONFIRMATIONS = 'supplier_document_confirmations';
 export const FOLLOW_UPS = 'outbox_supplier_follow_ups';
+export const CLOSURES = 'supplier_request_closures';
 
 export type InboxMessage = {
   readonly id: string;
@@ -37,6 +38,7 @@ export type ConfirmationRow = { readonly request_id: string; readonly reading_id
 export type FollowUpRow = {
   readonly request_id: string;
   readonly reading_id: string;
+  readonly kind: 'follow_up' | 'answer';
   readonly subject: string;
   readonly body: string;
   readonly provider_message_id: string;
@@ -78,12 +80,22 @@ const isConfirmation = shaped<ConfirmationRow>({
 const isFollowUp = shaped<FollowUpRow>({
   request_id: isString,
   reading_id: isString,
+  kind: oneOf('follow_up', 'answer'),
   subject: isString,
   body: isString,
   provider_message_id: isString,
   sent_by: isString,
   published_at: isString,
 } satisfies Shape<FollowUpRow>);
+
+export type ClosureRow = { readonly request_id: string; readonly reading_id: string | null; readonly note: string | null; readonly closed_by: string; readonly closed_at: string };
+const isClosure = shaped<ClosureRow>({
+  request_id: isString,
+  reading_id: nullable(isString),
+  note: nullable(isString),
+  closed_by: isString,
+  closed_at: isString,
+} satisfies Shape<ClosureRow>);
 
 export const draftOf = (row: ReadingRow): FollowUpDraft | null => {
   const d = row.follow_up_draft;
@@ -180,6 +192,16 @@ export class SupplierReplyStore {
     return chunked(requestIds, async (chunk) =>
       parseRows(await this.rest.select(FOLLOW_UPS, { filters: { request_id: inList(chunk) }, order: 'published_at' }), isFollowUp, FOLLOW_UPS),
     );
+  }
+
+  async closuresOf(requestIds: readonly string[]): Promise<ClosureRow[]> {
+    return chunked(requestIds, async (chunk) =>
+      parseRows(await this.rest.select(CLOSURES, { filters: { request_id: inList(chunk) } }), isClosure, CLOSURES),
+    );
+  }
+
+  async addClosure(row: ClosureRow & { readonly id: string }): Promise<void> {
+    await this.rest.insert(CLOSURES, [row], { onConflict: 'request_id', ignoreDuplicates: true });
   }
 
   async addMessage(message: InboxMessage, attachments: readonly unknown[] = []): Promise<void> {

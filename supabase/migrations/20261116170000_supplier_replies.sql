@@ -68,13 +68,30 @@ create table public.outbox_supplier_follow_ups (
   subject text not null,
   body text not null,
   provider_message_id text not null,
+  -- #157 follow_up: a cobrança; answer: a resposta da pessoa a quem pediu informação. Uma das duas por leitura.
+  kind text not null default 'follow_up',
   sent_by text not null,
   published_at timestamptz not null default now(),
   constraint outbox_supplier_follow_ups_pkey primary key (id),
   constraint outbox_supplier_follow_ups_reading_key unique (reading_id),
   constraint outbox_supplier_follow_ups_provider_message_id_key unique (provider_message_id),
   constraint outbox_supplier_follow_ups_request_fkey foreign key (request_id) references public.supplier_requests (id),
-  constraint outbox_supplier_follow_ups_reading_fkey foreign key (reading_id) references public.supplier_reply_readings (id)
+  constraint outbox_supplier_follow_ups_reading_fkey foreign key (reading_id) references public.supplier_reply_readings (id),
+  constraint outbox_supplier_follow_ups_kind_check check (kind in ('follow_up', 'answer'))
+);
+
+-- #157/AC-3 A pessoa encerra o caso (atendido, ou resolvido fora daqui). Um encerramento por pedido.
+create table public.supplier_request_closures (
+  id text not null,
+  request_id text not null,
+  reading_id text,
+  note text,
+  closed_by text not null,
+  closed_at timestamptz not null,
+  constraint supplier_request_closures_pkey primary key (id),
+  constraint supplier_request_closures_request_key unique (request_id),
+  constraint supplier_request_closures_request_fkey foreign key (request_id) references public.supplier_requests (id),
+  constraint supplier_request_closures_reading_fkey foreign key (reading_id) references public.supplier_reply_readings (id)
 );
 create index outbox_supplier_follow_ups_request_idx on public.outbox_supplier_follow_ups (request_id);
 
@@ -88,6 +105,9 @@ create trigger supplier_reply_readings_refuse_change
 create trigger supplier_document_confirmations_refuse_change
   before update or delete on public.supplier_document_confirmations
   for each row execute function public.refuse_row_change();
+create trigger supplier_request_closures_refuse_change
+  before update or delete on public.supplier_request_closures
+  for each row execute function public.refuse_row_change();
 create trigger outbox_supplier_follow_ups_refuse_change
   before update or delete on public.outbox_supplier_follow_ups
   for each row execute function public.refuse_row_change();
@@ -96,5 +116,6 @@ alter table public.inbox_supplier_messages enable row level security;
 alter table public.supplier_reply_readings enable row level security;
 alter table public.supplier_document_confirmations enable row level security;
 alter table public.outbox_supplier_follow_ups enable row level security;
+alter table public.supplier_request_closures enable row level security;
 revoke truncate on public.inbox_supplier_messages, public.supplier_reply_readings,
-  public.supplier_document_confirmations, public.outbox_supplier_follow_ups from anon, authenticated, service_role;
+  public.supplier_document_confirmations, public.outbox_supplier_follow_ups, public.supplier_request_closures from anon, authenticated, service_role;

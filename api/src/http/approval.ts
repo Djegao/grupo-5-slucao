@@ -39,6 +39,11 @@ export interface ApprovalDeps {
   storeOutbox?: StoreActionOutbox;
   /** #211 Os horários da linha do tempo da nota. Sem ele, `timeline` vai vazia. */
   timeline?: TimelineSource;
+  /**
+   * #156 A devolução da decisão que devolve (E1, E2, E3) entra na fila da #140 na hora, depois de gravar a decisão.
+   * Sem ele, ou se falha, o Cron publica na próxima rodada.
+   */
+  returnQueue?: (invoiceAccessKey: string) => Promise<unknown>;
 }
 
 /** #68: a fonte do dossiê e o contexto da nota, para conferir os números contra o banco. */
@@ -303,6 +308,14 @@ async function publishDecision(deps: ApprovalDeps, key: string, file: CaseFile):
     // #43 Só campos nomeados no log: a mensagem do erro pode trazer o corpo da resposta do PostgREST.
     const status = e instanceof SupabaseRestError ? ` (HTTP ${e.status})` : '';
     console.error(`#43 ação na doca da nota ${key} não publicada agora${status}; a varredura do Cron publica depois`);
+  }
+  if (!deps.returnQueue) return;
+  try {
+    await deps.returnQueue(key);
+  } catch (e) {
+    // #156 Só campos nomeados no log, como no #43.
+    const status = e instanceof SupabaseRestError ? ` (HTTP ${e.status})` : '';
+    console.error(`#156 devolução da nota ${key} não entrou na fila agora${status}; a varredura do Cron publica depois`);
   }
 }
 
