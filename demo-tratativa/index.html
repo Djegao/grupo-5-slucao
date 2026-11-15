@@ -58,6 +58,34 @@
       .notice.error { background: #fdecea; color: var(--err); }
       .notice.info { background: #eef2ff; color: var(--accent); }
       .history { margin-top: 8px; color: var(--muted); font-size: 14px; }
+      /* #157 abas e lista "Pedidos ao fornecedor" */
+      .list-title { margin: 18px 0 0; }
+      .tabs { display: flex; gap: 4px; margin: 16px 0 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+      .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 8px 12px; color: var(--muted); white-space: nowrap; }
+      .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+      .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 8px; }
+      .chips button { border-radius: 999px; padding: 4px 12px; font-size: 14px; }
+      .chips button[aria-pressed="true"] { background: #eef2ff; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+      .chips .n { font-variant-numeric: tabular-nums; margin-left: 4px; }
+      table.list tbody tr { cursor: pointer; }
+      table.list tbody tr:hover, table.list tbody tr.open { background: #f3f5fb; }
+      table.list button.link { border: none; background: none; padding: 0; color: var(--accent); font-weight: 600; text-decoration: underline; }
+      table.list button.small { padding: 2px 8px; font-size: 13px; margin-left: 4px; }
+      .status { white-space: nowrap; }
+      .flag { color: var(--err); font-weight: 600; }
+      .alert { background: #fdecea; color: var(--err); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+      .alert q { font-style: italic; }
+      .reading { border-left: 3px solid var(--accent); padding: 4px 0 4px 10px; margin: 8px 0; }
+      .msg { margin: 8px 0; }
+      @media (max-width: 600px) {
+        table.list thead { display: none; }
+        table.list, table.list tbody, table.list tr, table.list td { display: block; width: 100%; }
+        table.list tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
+        table.list td { border: none; padding: 2px 4px; text-align: left; }
+        table.list td::before { content: attr(data-label) ": "; color: var(--muted); font-size: 13px; }
+        table.list td.num { text-align: left; }
+        .status { white-space: normal; }
+      }
     </style>
   </head>
   <body>
@@ -71,6 +99,12 @@
       </header>
       <p id="mode" class="mode" hidden>Modo demonstração: API falsa em memória, dados fictícios. Nada é emitido nem enviado de verdade.</p>
 
+      <nav class="tabs" role="tablist" aria-label="Vistas">
+        <button id="tab-pedido" role="tab" aria-selected="true" aria-controls="view-pedido" data-view="pedido">Pedido</button>
+        <button id="tab-lista" role="tab" aria-selected="false" aria-controls="view-lista" data-view="lista">Pedidos ao fornecedor</button>
+      </nav>
+
+      <section id="view-pedido" role="tabpanel" aria-labelledby="tab-pedido">
       <form id="form">
         <label for="key">Nota (chave de acesso)</label>
         <input id="key" inputmode="numeric" autocomplete="off" maxlength="60" placeholder="44 dígitos" />
@@ -80,6 +114,12 @@
 
       <div id="notice" class="notice" role="alert" hidden></div>
       <main id="main"></main>
+      </section>
+
+      <section id="view-lista" role="tabpanel" aria-labelledby="tab-lista" hidden>
+        <div id="lista-notice" class="notice" role="alert" hidden></div>
+        <div id="lista"></div>
+      </section>
     </div>
     <script type="module" src="./app.js"></script>
   </body>

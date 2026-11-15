@@ -1,6 +1,8 @@
 // #156 Página "Tratativa com o fornecedor" (demonstração). Segue o wireframe aprovado: a analista cola a chave da
 // nota, a página mostra o pedido ao fornecedor mais recente e oferece só as ações que o estado permite.
 // Com `?mock=1` (ou aberta direto do disco) usa a API falsa de mock-api.js; senão chama o Worker na mesma origem.
+// #157 Segunda vista, "Pedidos ao fornecedor" (aba no topo ou `?vista=lista`): os pedidos enviados por status, a
+// conversa de cada um e o próximo passo (confirmar o documento citado ou cobrar), sempre com o clique de uma pessoa.
 import { createMockApi, DEMO_KEY } from './mock-api.js';
 
 const params = new URLSearchParams(location.search);
@@ -384,6 +386,434 @@ $('main').addEventListener('input', (event) => {
   if (event.target.id === 'text') state.draftText = event.target.value;
 });
 
+// ---------- #157 vista "Pedidos ao fornecedor" ----------
+
+const BUCKETS = [
+  ['aguardando', 'Aguardando'],
+  ['atendidos', 'Atendidos'],
+  ['precisam', 'Precisam de você'],
+  ['atrasados', 'Atrasados'],
+];
+
+const REQUEST_TYPE = {
+  return_note: 'Nota de devolução',
+  cancel_invoice: 'Cancelamento da nota',
+  deliver_missing: 'Entrega do faltante',
+  purchase_order_number: 'Número do pedido',
+  registry_data: 'Dados cadastrais',
+  notice: 'Aviso',
+};
+
+// Só para a demonstração: o `ListItem` traz o código do fornecedor, não o nome.
+const SUPPLIER_NAME = { F02: 'Padaria', F03: 'Mercearia', F07: 'Limpeza', F08: 'Embalagens', F09: 'Frios', F11: 'Higiene', F14: 'Hortifruti' };
+const supplierName = (id) => (SUPPLIER_NAME[id] ? `${id} ${SUPPLIER_NAME[id]}` : id);
+
+const OUTCOME = {
+  fulfilled: 'Atendeu',
+  partially_fulfilled: 'Atendeu em parte',
+  refused: 'Recusou',
+  needs_information: 'Pediu informação',
+  no_reply: 'Sem resposta',
+};
+
+const NEXT_STEP = {
+  close: 'encerrar',
+  confirm_document: 'confirmar o documento citado',
+  answer_supplier: 'responder ao fornecedor',
+  follow_up: 'cobrar o fornecedor',
+};
+
+const REPLY_CONFLICT = {
+  wrong_state: 'Este passo não vale mais: o pedido mudou. Recarregamos a situação atual.',
+  already_done: 'Isso já foi feito, talvez por outra pessoa. Recarregamos a situação atual.',
+};
+
+const REPLY_BUSY = { 'confirmar-documento': 'Confirmando…', cobrar: 'Enviando cobrança…' };
+
+const when = (iso) => (iso ? `${dayMonth(iso)} às ${hourMinute(iso)}` : '');
+
+const board = {
+  phase: 'idle', // idle | loading | ready | offline | auth
+  filter: null, // null = todos
+  counts: null,
+  items: [],
+  openId: null,
+  openItem: null,
+  conv: null, // { phase: 'loading' | 'ready' | 'error', conversation, request }
+  reviewing: false,
+  busy: null,
+  notice: null,
+};
+
+let view = 'pedido';
+
+function setView(next, { updateUrl = true } = {}) {
+  view = next;
+  for (const name of ['pedido', 'lista']) {
+    $(`tab-${name}`).setAttribute('aria-selected', String(name === next));
+    $(`view-${name}`).hidden = name !== next;
+  }
+  if (updateUrl) {
+    const url = new URL(location.href);
+    if (next === 'lista') url.searchParams.set('vista', 'lista');
+    else url.searchParams.delete('vista');
+    window.history.replaceState(null, '', url);
+  }
+  if (next === 'lista') loadBoard({ quiet: board.phase === 'ready' });
+}
+
+async function loadBoard({ quiet = false } = {}) {
+  if (!quiet) {
+    board.phase = 'loading';
+    drawBoard();
+  }
+  let res;
+  try {
+    res = await api('GET', `/api/pedidos-fornecedor/lista${board.filter ? `?filtro=${encodeURIComponent(board.filter)}` : ''}`);
+  } catch {
+    res = { status: 0, body: {} };
+  }
+  if (res.status === 200) {
+    board.phase = 'ready';
+    board.counts = res.body.counts ?? null;
+    board.items = res.body.items ?? [];
+    const fresh = board.items.find((i) => i.id === board.openId);
+    if (fresh) board.openItem = fresh;
+  } else if (res.status === 400) {
+    board.filter = null;
+    board.notice = { kind: 'error', text: 'Filtro desconhecido; mostrando todos.' };
+    return loadBoard({ quiet });
+  } else if (res.status === 401 || res.status === 403) {
+    board.phase = 'auth';
+  } else {
+    board.phase = 'offline';
+  }
+  drawBoard();
+}
+
+async function openRow(id, { review = false } = {}) {
+  const item = board.items.find((i) => i.id === id);
+  if (!item) return;
+  board.openId = id;
+  board.openItem = item;
+  board.reviewing = review;
+  board.conv = { phase: 'loading' };
+  board.notice = null;
+  drawBoard();
+  await loadConversation();
+  $('panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function closePanel() {
+  board.openId = null;
+  board.openItem = null;
+  board.conv = null;
+  board.reviewing = false;
+}
+
+async function loadConversation() {
+  const id = board.openId;
+  const item = board.openItem;
+  if (!id) return;
+  let conv;
+  let req = null;
+  try {
+    [conv, req] = await Promise.all([
+      api('GET', `/api/pedidos-fornecedor/${encodeURIComponent(id)}/conversa`),
+      api('GET', `/api/pedidos-fornecedor?nota=${encodeURIComponent(item.invoiceAccessKey)}`).catch(() => null),
+    ]);
+  } catch {
+    conv = { status: 0, body: {} };
+  }
+  if (board.openId !== id) return; // a pessoa abriu outro pedido enquanto carregava
+  if (conv.status === 200) {
+    const request = req?.status === 200 ? (req.body.requests ?? []).find((r) => r.id === id) ?? null : null;
+    board.conv = { phase: 'ready', conversation: conv.body.conversation, request };
+  } else if (conv.status === 404) {
+    board.notice = { kind: 'error', text: 'Este pedido não existe mais.' };
+    closePanel();
+  } else if (conv.status === 401 || conv.status === 403) {
+    board.phase = 'auth';
+  } else {
+    board.conv = { phase: 'error' };
+  }
+  drawBoard();
+}
+
+async function actBoard(action) {
+  const id = board.openId;
+  if (!id || board.busy) return;
+  board.busy = action;
+  board.notice = null;
+  drawBoard();
+  let res;
+  try {
+    res = await api('POST', `/api/pedidos-fornecedor/${encodeURIComponent(id)}/${action}`);
+  } catch {
+    res = { status: 0, body: {} };
+  }
+  board.busy = null;
+  board.reviewing = false;
+
+  if (res.status === 200) {
+    board.conv = { ...board.conv, phase: 'ready', conversation: res.body.conversation };
+    board.notice = {
+      kind: 'info',
+      text: action === 'cobrar' ? 'Cobrança enviada. O pedido volta a aguardar a resposta.' : 'Documento confirmado. O pedido foi para Atendidos.',
+    };
+    return loadBoard({ quiet: true });
+  }
+  if (res.status === 409) {
+    board.notice = { kind: 'error', text: REPLY_CONFLICT[res.body.reason] ?? 'O pedido mudou. Recarregamos a situação atual.' };
+    await loadBoard({ quiet: true });
+    return loadConversation();
+  }
+  if (res.status === 404) {
+    board.notice = { kind: 'error', text: 'Este pedido não existe mais.' };
+    closePanel();
+    return loadBoard({ quiet: true });
+  }
+  if (res.status === 401 || res.status === 403) {
+    board.phase = 'auth';
+    return drawBoard();
+  }
+  // rede ou 5xx: a ação pode ter acontecido (o backend não repete), então confere antes de liberar de novo.
+  board.notice = { kind: 'info', text: 'A ação pode ter sido feita. Conferindo o estado…' };
+  await loadBoard({ quiet: true });
+  return loadConversation();
+}
+
+function drawBoard() {
+  const notice = $('lista-notice');
+  notice.hidden = !board.notice;
+  notice.className = `notice ${board.notice?.kind ?? ''}`;
+  notice.textContent = board.notice?.text ?? '';
+  $('lista').innerHTML = boardPage();
+}
+
+function boardPage() {
+  switch (board.phase) {
+    case 'idle':
+    case 'loading':
+      return `<div class="card skeleton" aria-busy="true"><p class="muted">Buscando os pedidos enviados…</p></div>`;
+    case 'auth':
+      return `<div class="card"><p>Sua sessão expirou: entre de novo.</p><button data-board="reload">Tentar de novo</button></div>`;
+    case 'offline':
+      return `<div class="card"><p>Não foi possível falar com o servidor.</p><button data-board="reload">Tentar de novo</button></div>`;
+    default:
+      return `<h2 class="list-title">Pedidos ao fornecedor</h2>${chips()}${table()}${panel()}`;
+  }
+}
+
+function chips() {
+  const counts = board.counts ?? {};
+  const items = BUCKETS.map(
+    ([key, label]) =>
+      `<button data-filter="${key}" aria-pressed="${board.filter === key}">${esc(label)}<span class="n">${Number(counts[key] ?? 0)}</span></button>`,
+  ).join('');
+  return `<div class="chips" role="group" aria-label="Filtrar por status">${items}</div>`;
+}
+
+function table() {
+  if (!board.items.length) {
+    return `<p class="muted">${board.filter ? 'Nenhum pedido nesta aba.' : 'Nenhum pedido enviado ao fornecedor ainda.'}</p>`;
+  }
+  const rows = board.items.map(row).join('');
+  return `<table class="list">
+    <thead><tr><th>Nota</th><th>Fornecedor</th><th>Pedido</th><th class="num">Valor</th><th>Prazo</th><th>Status</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+function row(i) {
+  const open = i.id === board.openId;
+  return `<tr data-row="${esc(i.id)}" class="${open ? 'open' : ''}">
+    <td data-label="Nota"><button class="link" data-row-open="${esc(i.id)}" aria-expanded="${open}">${esc(i.invoiceNumber ?? '—')}</button></td>
+    <td data-label="Fornecedor">${esc(supplierName(i.supplierId))}</td>
+    <td data-label="Pedido">${esc(REQUEST_TYPE[i.requestType] ?? i.requestType)}</td>
+    <td data-label="Valor" class="num">${i.valueCents == null ? '—' : esc(brl(i.valueCents))}</td>
+    <td data-label="Prazo">${esc(dayMonth(i.dueOn))}</td>
+    <td data-label="Status" class="status">${statusCell(i)}</td>
+  </tr>`;
+}
+
+function statusCell(i) {
+  const l = i.latest;
+  const doc = l?.supplierDocument ? `: ${esc(l.supplierDocument)}` : '';
+  let text;
+  if (i.bucket === 'atrasados') {
+    text = `⏰ Atrasado <button class="small" data-row-cobrar="${esc(i.id)}" ${board.busy ? 'disabled' : ''}>Cobrar</button>`;
+  } else if (!l) text = 'Aguardando resposta';
+  else if (i.documentConfirmed || l.nextStep === 'close') text = `<span class="ok">✓ Atendeu${doc}</span>`;
+  else if (l.nextStep === 'confirm_document') text = `✓ Atendeu${doc} · <span class="warn">confirmar</span>`;
+  else if (l.outcome === 'needs_information') text = '? Pediu informação';
+  else if (i.followUpSent) text = '↻ Cobrado · aguardando';
+  else if (l.outcome === 'refused') text = '✕ Recusou';
+  else text = esc(OUTCOME[l.outcome] ?? l.outcome);
+  const flag = l?.injectionFlag ? `<br><span class="flag">⚠ Ordem escondida na resposta</span>` : '';
+  return text + flag;
+}
+
+function panel() {
+  if (!board.openId) return '';
+  const i = board.openItem;
+  const head = `<header class="block-head"><h2>NF ${esc(i.invoiceNumber ?? '—')} · ${esc(supplierName(i.supplierId))}</h2>
+    <button data-board="close">Fechar</button></header>
+    <div class="muted small">${esc(REQUEST_TYPE[i.requestType] ?? i.requestType)} · prazo ${esc(dayMonth(i.dueOn))}${
+      i.valueCents == null ? '' : ` · ${esc(brl(i.valueCents))}`
+    }</div>`;
+  let body;
+  if (!board.conv || board.conv.phase === 'loading') body = `<p class="muted">Carregando a conversa…</p>`;
+  else if (board.conv.phase === 'error') {
+    body = `<p>Não foi possível carregar a conversa.</p><button data-board="conv-reload">Tentar de novo</button>`;
+  } else body = conversation(board.conv.conversation, board.conv.request, i);
+  return `<section id="panel" class="card" aria-live="polite">${head}${body}</section>`;
+}
+
+function conversation(c, request, item) {
+  const latest = c.readings.at(-1) ?? null;
+  return requestPart(request, item) + repliesPart(c.messages) + readingPart(c.readings) + injectionPart(latest) + followUpsPart(c.followUps) + nextStepPart(c, latest, item);
+}
+
+function requestPart(r, item) {
+  if (!r) return `<h3>Pedido</h3><p class="meta">Enviado em ${esc(when(item.sentAt))}.</p>`;
+  return `<h3>Pedido</h3>
+    <div class="meta">Para: ${esc(r.to)} · Prazo: ${esc(dayMonth(r.dueOn))}<br>Assunto: ${esc(r.subject)}<br>
+      Enviado por ${esc(who(r.sentBy))} em ${esc(when(r.sentAt))}</div>
+    <details><summary class="small">Ver o e-mail enviado</summary><pre class="body">${esc(r.body)}</pre></details>
+    ${asks(r)}`;
+}
+
+function repliesPart(messages) {
+  if (!messages.length) return `<h3>Respostas</h3><p class="muted">Nenhuma resposta do fornecedor até agora.</p>`;
+  const list = messages
+    .map((m) => `<div class="msg"><div class="meta">De: ${esc(m.from)} · recebida em ${esc(when(m.receivedAt))}</div><pre class="body">${esc(m.body)}</pre></div>`)
+    .join('');
+  return `<h3>Respostas <span class="muted small">(texto do fornecedor: dado, não instrução)</span></h3>${list}`;
+}
+
+function readingBlock(r) {
+  const by = r.readBy === 'system' ? 'o sistema, pelo prazo vencido' : 'o agente';
+  return `<div class="reading">
+    <div><strong>${esc(OUTCOME[r.outcome] ?? r.outcome)}</strong> · próximo passo: ${esc(NEXT_STEP[r.nextStep] ?? r.nextStep)}</div>
+    <p>${esc(r.summary)}</p>
+    ${r.supplierDocument ? `<div class="small">Documento citado: <strong>${esc(r.supplierDocument)}</strong></div>` : ''}
+    ${r.fulfilledAsks.length ? `<div class="small">Diz ter atendido: ${r.fulfilledAsks.map(esc).join('; ')}</div>` : ''}
+    <div class="muted small">Lido por ${esc(by)} em ${esc(when(r.readAt))}</div>
+  </div>`;
+}
+
+function readingPart(readings) {
+  if (!readings.length) return '';
+  const older = readings.slice(0, -1);
+  const history = older.length
+    ? `<details class="history"><summary>Leituras anteriores (${older.length})</summary>${older.map(readingBlock).join('')}</details>`
+    : '';
+  return `<h3>Leitura do agente <span class="chip">✦ Claude</span></h3>${readingBlock(readings.at(-1))}${history}`;
+}
+
+function injectionPart(latest) {
+  if (!latest?.injectionFlag) return '';
+  return `<div class="alert" role="note">⚠ A resposta tem um trecho que tenta dar ordem ao agente: <q>${esc(latest.injectionFlag)}</q><br>
+    Isso não mudou nada no caso: a decisão, o título e o valor em risco continuam os mesmos.</div>`;
+}
+
+function followUpsPart(followUps) {
+  if (!followUps.length) return '';
+  const list = followUps
+    .map((f) => `<li>${esc(f.subject)} · por ${esc(who(f.sentBy))} em ${esc(when(f.sentAt))}</li>`)
+    .join('');
+  return `<h3>Cobranças enviadas</h3><ul class="small">${list}</ul>`;
+}
+
+function replyButton(action, label) {
+  const busy = board.busy === action;
+  return `<button class="primary" data-reply-act="${action}" ${board.busy ? 'disabled' : ''}>${busy ? REPLY_BUSY[action] : esc(label)}</button>`;
+}
+
+function nextStepPart(c, latest, item) {
+  if (!latest) {
+    return `<p class="muted">Aguardando a resposta do fornecedor até ${esc(dayMonth(item.dueOn))}. Nada a fazer agora.</p>`;
+  }
+  const confirmation = c.confirmations.find((x) => x.readingId === latest.id);
+  if (confirmation) {
+    return `<p class="ok">✓ Documento confirmado por ${esc(who(confirmation.confirmedBy))} em ${esc(when(confirmation.confirmedAt))}.</p>`;
+  }
+  const followUp = c.followUps.find((x) => x.readingId === latest.id);
+  if (followUp) {
+    return `<p class="ok">✓ Cobrança enviada por ${esc(who(followUp.sentBy))} em ${esc(when(followUp.sentAt))}. Aguardando a resposta.</p>`;
+  }
+  if (latest.nextStep === 'confirm_document') {
+    const doc = latest.supplierDocument ? `o documento ${esc(latest.supplierDocument)}` : 'o que o fornecedor diz ter feito';
+    return `<p class="small">O agente não fecha o "atendeu" sozinho: confira ${doc} antes de confirmar.</p>
+      <div class="actions"><span class="grow"></span>${replyButton('confirmar-documento', 'Confirmar documento')}</div>`;
+  }
+  if (latest.followUpDraft) {
+    if (!board.reviewing) {
+      return `<div class="actions"><span class="grow"></span><button class="primary" data-board="review" ${board.busy ? 'disabled' : ''}>Cobrar</button></div>`;
+    }
+    const d = latest.followUpDraft;
+    return `<h3>Rascunho da cobrança <span class="muted small">— revise antes de enviar</span></h3>
+      <div class="meta">Para: ${esc(d.to)}<br>Assunto: ${esc(d.subject)}</div>
+      <pre class="body">${esc(d.body)}</pre>
+      <div class="asks"><span class="muted small">O que pedimos 🔒</span><ul>${d.asks.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>
+      <div class="actions"><button data-board="cancel-review" ${board.busy ? 'disabled' : ''}>Cancelar</button><span class="grow"></span>
+        ${replyButton('cobrar', 'Enviar cobrança')}</div>`;
+  }
+  if (latest.nextStep === 'answer_supplier') {
+    return `<p class="small">Próximo passo: responder ao fornecedor pelo e-mail. Esta demonstração não envia a resposta.</p>`;
+  }
+  return '';
+}
+
+document.querySelector('.tabs').addEventListener('click', (event) => {
+  const tab = event.target.closest('button[data-view]');
+  if (tab && tab.dataset.view !== view) setView(tab.dataset.view);
+});
+
+$('lista').addEventListener('click', (event) => {
+  const el = event.target.closest('button');
+  if (el) {
+    if (el.disabled) return;
+    const d = el.dataset;
+    if (d.filter) {
+      board.filter = board.filter === d.filter ? null : d.filter;
+      board.notice = null;
+      return loadBoard({ quiet: true });
+    }
+    if (d.rowCobrar) return openRow(d.rowCobrar, { review: true });
+    if (d.rowOpen) return d.rowOpen === board.openId ? (closePanel(), drawBoard()) : openRow(d.rowOpen);
+    if (d.replyAct) return actBoard(d.replyAct);
+    if (d.board === 'close') {
+      closePanel();
+      return drawBoard();
+    }
+    if (d.board === 'reload') return loadBoard();
+    if (d.board === 'conv-reload') {
+      board.conv = { phase: 'loading' };
+      drawBoard();
+      return loadConversation();
+    }
+    if (d.board === 'review') {
+      board.reviewing = true;
+      return drawBoard();
+    }
+    if (d.board === 'cancel-review') {
+      board.reviewing = false;
+      return drawBoard();
+    }
+    return;
+  }
+  const tr = event.target.closest('tr[data-row]');
+  if (tr && !event.target.closest('#panel')) {
+    const id = tr.dataset.row;
+    if (id === board.openId) {
+      closePanel();
+      return drawBoard();
+    }
+    return openRow(id);
+  }
+});
+
 // ---------- início ----------
 
 (async () => {
@@ -398,4 +828,5 @@ $('main').addEventListener('input', (event) => {
   state.key = initial.replace(/\D/g, '');
   draw();
   if (state.key) load();
+  if (params.get('vista') === 'lista') setView('lista', { updateUrl: false });
 })();
