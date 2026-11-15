@@ -77,3 +77,4 @@ tables:
 # outbox_return_notes, outbox_store_actions, claude_suggestions, exceptions, automation_runs.
 # A #156 lê proposals, approvals, invoices e escreve em outbox_return_notes pelos caminhos da #59 e
 # da #140, sem mudar o modo de nenhuma delas.
+# #156 ADR-003: o índice proposals_state_idx em proposals é comum, sem CONCURRENTLY (docs/adr/ADR-003-indice-simples-em-proposals.md).

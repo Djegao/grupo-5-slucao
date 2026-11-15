@@ -1,5 +1,5 @@
-// #156/AC-5: o envio mock do e-mail ao fornecedor: grava em outbox_supplier_emails e devolve o id do envio.
-// Idempotente por request_id: reenviar o mesmo pedido devolve o provider_message_id guardado.
+/* #156/AC-5: o envio mock do e-mail ao fornecedor: grava em outbox_supplier_emails e devolve o id do envio.
+ * Idempotente por request_id: reenviar o mesmo pedido devolve o provider_message_id guardado. */
 import { isString, parseOne, shaped, type Shape } from '../connectors/guards.js';
 import { SupabaseRestError, type SupabaseRest } from '../connectors/supabase-rest.js';
 import type { SendResult, SupplierEmail, SupplierEmailSender } from './ports.js';

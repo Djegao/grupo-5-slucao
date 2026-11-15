@@ -13,9 +13,9 @@ import { FakePostgrest } from '../support/fake-postgrest.js';
 import { GOOD_BODY, world } from './fakes.js';
 import { ORIGIN_KEY } from '../domain/supplier-request-fixtures.js';
 
-// #156 Os adaptadores do OLTP contra o PostgREST falso. Não há pista de banco real neste repositório:
-// o fake não executa trigger, check, índice único parcial nem sequência; ele imita o 409 do índice
-// parcial, o on_conflict, o PATCH condicional e a rota rpc (ver supabase/persistence/supplier-requests.md).
+/* #156 Os adaptadores do OLTP contra o PostgREST falso. Não há pista de banco real neste repositório:
+ * o fake não executa trigger, check, índice único parcial nem sequência; ele imita o 409 do índice
+ * parcial, o on_conflict, o PATCH condicional e a rota rpc (ver supabase/persistence/supplier-requests.md). */
 
 const rigged = (seed: Record<string, Record<string, unknown>[]> = {}) => {
   const fake = new FakePostgrest(seed);
@@ -61,28 +61,28 @@ const SENT: SupplierRequestSnapshot = {
 };
 
 const NOTE: ReturnNote = {
-  nota_id: 'ND-0012',
-  chave: '35261174055489000148559000000000121000000019',
-  numero: 12,
-  serie: 900,
-  emitente: '12.345.678/0001-95',
-  fornecedor_id: 'F11',
-  destino: 'CD-01',
-  data_emissao: '2026-11-16',
-  nota_referenciada: ORIGIN_KEY,
-  natureza: 'devolucao',
-  itens: [
+  nota_id: 'ND-0012', // ADR-001
+  chave: '35261174055489000148559000000000121000000019', // ADR-001
+  numero: 12, // ADR-001
+  serie: 900, // ADR-001
+  emitente: '12.345.678/0001-95', // ADR-001
+  fornecedor_id: 'F11', // ADR-001
+  destino: 'CD-01', // ADR-001
+  data_emissao: '2026-11-16', // ADR-001
+  nota_referenciada: ORIGIN_KEY, // ADR-001
+  natureza: 'devolucao', // ADR-001
+  itens: [ // ADR-001
     {
-      codigo_fornecedor: 'F11-001',
-      sku: 'SKU-2001',
-      descricao: 'Shampoo 350 ml',
-      quantidade: 40,
-      unidade: 'UN',
-      preco_unitario: 54.08,
-      valor: 2163.2,
+      codigo_fornecedor: 'F11-001', // ADR-001
+      sku: 'SKU-2001', // ADR-001
+      descricao: 'Shampoo 350 ml', // ADR-001
+      quantidade: 40, // ADR-001
+      unidade: 'UN', // ADR-001
+      preco_unitario: 54.08, // ADR-001
+      valor: 2163.2, // ADR-001
     },
   ],
-  valor_total: 2163.2,
+  valor_total: 2163.2, // ADR-001
 };
 
 describe('#156 rpc do cliente PostgREST', () => {
@@ -138,7 +138,7 @@ describe('#156 SupplierRequestRepository sobre supplier_requests', () => {
     expect(await repo.add(opened('req-1'))).toBe('saved');
     expect(await repo.add(opened('req-2'))).toBe('duplicate_open');
     expect(fake.rows('supplier_requests')).toHaveLength(1);
-    // enviado não bloqueia: o refazer entra
+    // #156 enviado não bloqueia: o refazer entra
     fake.rows('supplier_requests')[0]!.status = 'sent';
     expect(await repo.add(opened('req-3'))).toBe('saved');
   });
@@ -188,7 +188,7 @@ describe('#156 SupplierRequestRepository sobre supplier_requests', () => {
     const spied = supabaseSupplierRequestRepository(spy);
     await spied.findById('req-1');
     await spied.save(request, before);
-    const body = JSON.parse(sentBodies[0]!) as Record<string, unknown>;
+    const body: unknown = JSON.parse(sentBodies[0]!);
     for (const fixed of ['id', 'created_at', 'created_by', 'invoice_access_key', 'supplier_id', 'request_type', 'to_address', 'subject', 'asks', 'channel', 'version']) {
       expect(body).not.toHaveProperty(fixed);
     }
@@ -209,7 +209,7 @@ describe('#156 SupplierRequestRepository sobre supplier_requests', () => {
     const repo = supabaseSupplierRequestRepository(rest);
     await repo.add(opened());
     const request = (await repo.findById('req-1'))!;
-    fake.rows('supplier_requests')[0]!.version = 2; // outra pessoa gravou no mesmo milissegundo
+    fake.rows('supplier_requests')[0]!.version = 2; // #156 outra pessoa gravou no mesmo milissegundo
     request.discard('bia@jachegou.test', '2026-11-16T14:00:00.000Z', 'x');
     expect(await repo.save(request, request.snapshot().createdAt)).toBe('stale');
   });

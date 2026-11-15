@@ -1,5 +1,5 @@
-// #156: o repositório do pedido ao fornecedor sobre supplier_requests, pelo PostgREST. Cada chamada é uma
-// requisição, e portanto uma transação; a versão e o histórico são do banco (triggers), não do adaptador.
+/* #156: o repositório do pedido ao fornecedor sobre supplier_requests, pelo PostgREST. Cada chamada é uma
+ * requisição, e portanto uma transação; a versão e o histórico são do banco (triggers), não do adaptador. */
 import {
   arrayOf,
   isInteger,

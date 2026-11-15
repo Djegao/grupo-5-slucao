@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// #156 Verificação estática das migrações do pedido ao fornecedor. Não há pista de banco real neste
-// repositório: isto confere o texto das migrações contra o desenho (supabase/persistence/supplier-requests.md),
-// não o comportamento do Postgres.
+/* #156 Verificação estática das migrações do pedido ao fornecedor. Não há pista de banco real neste
+ * repositório: isto confere o texto das migrações contra o desenho (supabase/persistence/supplier-requests.md),
+ * não o comportamento do Postgres. */
 
 const DIR = new URL('../../../supabase/migrations/', import.meta.url);
 const sql = (prefix: string): string => {

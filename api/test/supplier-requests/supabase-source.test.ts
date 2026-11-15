@@ -94,7 +94,7 @@ describe('#156 composição de SupplierRequestDeps', () => {
   it('monta as portas sobre o mesmo cliente, escolhe o canal pela configuração e abre o pedido da rodada', async () => {
     const { fake, rest } = await decidedWorld();
     const { proposal } = decide(fake, 'E3');
-    // o preço da linha devolvida tem de existir na nota de origem; o contato do fornecedor vem do cadastro
+    // #156 o preço da linha devolvida tem de existir na nota de origem; o contato do fornecedor vem do cadastro
     const invoice = fake.rows('invoices').find((i) => i.access_key === proposal.invoice_access_key)!;
     fake.rows('supplier_contacts').push({ supplier_id: invoice.supplier_id, email: 'fiscal@f01.fornecedor.test' });
     const logs: string[] = [];
