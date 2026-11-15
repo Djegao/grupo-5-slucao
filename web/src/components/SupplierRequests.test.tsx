@@ -272,7 +272,10 @@ describe("#20 SupplierRequests: cobrar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
     await screen.findByText(/Cobrança enviada por você/);
     fireEvent.click(chip(/^Aguardando/));
-    fireEvent.click(screen.getByText("40519", { selector: "td *" }) === null ? document.body : rowOf("59738"));
+    // #5/AC-4 Fecha a gaveta antes: `openRow` no id que já está aberto devolve o estado como está, e não reabriria nada.
+    fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
+    expect(screen.queryByRole("region", { name: "Pedido ao fornecedor" })).toBeNull();
+    fireEvent.click(rowOf("59738"));
     expect(screen.getByText("Aguardando (cobrado)")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
   });

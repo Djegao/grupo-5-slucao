@@ -92,7 +92,9 @@ function withFlow(state: ScreenState, flow: FollowUpFlow): ScreenState {
   return state.drawer ? { ...state, drawer: { ...state.drawer, followUp: flow } } : state;
 }
 
+/** #5/AC-4 Uma cobrança só sai uma vez por sessão e com uma pessoa: o id já cobrado não abre rascunho de novo (estado 9 do wireframe). */
 function openFollowUp(state: ScreenState, id: string): ScreenState {
+  if (id in state.charged) return state;
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
   if (flow && (flow.phase.phase === "sending" || flow.phase.phase === "sent")) return state;
   return { ...state, drawer: { requestId: id, block: "supplierRequest", followUp: { phase: { phase: "review" }, editing: false, body: null } } };

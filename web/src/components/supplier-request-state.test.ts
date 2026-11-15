@@ -148,6 +148,12 @@ describe("#20 fluxo da cobrança", () => {
 });
 
 describe("#20 a linha depois da cobrança", () => {
+  it("#5/AC-4: um pedido já cobrado não abre o rascunho de novo na sessão", () => {
+    const sent = run([{ type: "openFollowUp", id: "r-late" }, { type: "sendStarted" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }]);
+    const closed = run([{ type: "close" }], sent);
+    expect(run([{ type: "openFollowUp", id: "r-late" }], closed)).toEqual(closed);
+  });
+
   it("#5/AC-2: a atrasada cobrada passa a Aguardando com o novo prazo e sai de Atrasados: 2 viram 1, Aguardando 1 vira 2 (Q7)", () => {
     const input = [row("a", "late", "2026-11-12"), row("b", "late", "2026-11-14"), row("c", "waiting", "2026-11-20")];
     const after = applyCharges(input, { a: { dueOn: "2026-11-20", sentOn: "2026-11-15" } });
