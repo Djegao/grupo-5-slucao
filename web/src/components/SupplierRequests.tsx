@@ -78,7 +78,7 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
   async function sendFollowUp(row: SupplierRequestRow): Promise<void> {
     if (!flow || flow.phase.phase === "sending" || flow.phase.phase === "sent") return;
     const draft = currentDraft(draftOf(row), flow);
-    dispatch({ type: "sendStarted" });
+    dispatch({ type: "sendStarted", id: row.id });
     let result: SendResult;
     try {
       result = await send(row, draft);

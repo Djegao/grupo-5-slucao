@@ -26,7 +26,7 @@ function run(actions: ScreenAction[], from: ScreenState = INITIAL_STATE): Screen
 
 describe("#20 chips, contagens e linhas", () => {
   it("#5/AC-2: o estado começa no chip Aguardando, sem gaveta e sem cobrança feita (Q3)", () => {
-    expect(INITIAL_STATE).toEqual({ filter: "waiting", drawer: null, charged: {} });
+    expect(INITIAL_STATE).toEqual({ filter: "waiting", drawer: null, charged: {}, sending: [] });
   });
 
   it("#5/AC-2: a contagem de cada chip segue o mapa de situação para chip (Q2): precisam de você junta confirmar, parcial, informação e recusa", () => {
@@ -98,42 +98,42 @@ describe("#20 fluxo da cobrança", () => {
   });
 
   it("#5/AC-4: enviar vai de revisar a enviando, e um segundo envio durante o envio não muda nada", () => {
-    const sending = run([{ type: "sendStarted" }], review);
+    const sending = run([{ type: "sendStarted", id: "r-late" }], review);
     expect(sending.drawer?.followUp?.phase).toEqual({ phase: "sending" });
-    expect(run([{ type: "sendStarted" }], sending)).toEqual(sending);
+    expect(run([{ type: "sendStarted", id: "r-late" }], sending)).toEqual(sending);
   });
 
   it("#5/AC-4: enviando trava a edição e o descarte", () => {
-    const sending = run([{ type: "edit" }, { type: "sendStarted" }], review);
+    const sending = run([{ type: "edit" }, { type: "sendStarted", id: "r-late" }], review);
     expect(run([{ type: "changeBody", body: "x" }, { type: "discard" }, { type: "edit" }], sending)).toEqual(sending);
   });
 
   it("#5/AC-4: envio feito vai a enviado e a linha muda de situação com o novo prazo (estado 9 do wireframe)", () => {
-    const sent = run([{ type: "sendStarted" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15", sentTime: "10:12" }], review);
+    const sent = run([{ type: "sendStarted", id: "r-late" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15", sentTime: "10:12" }], review);
     expect(sent.drawer?.followUp?.phase).toEqual({ phase: "sent", sentOn: "2026-11-15", sentTime: "10:12" });
     expect(sent.charged).toEqual({ "r-late": { dueOn: "2026-11-20", sentOn: "2026-11-15", sentTime: "10:12" } });
   });
 
   it("#5/AC-4: envio feito sem horário não inventa um", () => {
-    const sent = run([{ type: "sendStarted" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }], review);
+    const sent = run([{ type: "sendStarted", id: "r-late" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }], review);
     expect(sent.drawer?.followUp?.phase).toEqual({ phase: "sent", sentOn: "2026-11-15" });
   });
 
   it("#5/AC-4: se a gaveta já tinha sido fechada, o envio que termina ainda marca a cobrança e não abre nada", () => {
-    const sent = run([{ type: "sendStarted" }, { type: "close" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }], review);
+    const sent = run([{ type: "sendStarted", id: "r-late" }, { type: "close" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }], review);
     expect(sent.drawer).toBeNull();
     expect(Object.keys(sent.charged)).toEqual(["r-late"]);
   });
 
   it("#5/AC-4: envio falho guarda o motivo, mantém o rascunho e a situação, e tentar de novo volta a enviando", () => {
-    const failed = run([{ type: "edit" }, { type: "changeBody", body: "Texto" }, { type: "sendStarted" }, { type: "sendFailed", id: "r-late", failure: "mailRefused" }], review);
+    const failed = run([{ type: "edit" }, { type: "changeBody", body: "Texto" }, { type: "sendStarted", id: "r-late" }, { type: "sendFailed", id: "r-late", failure: "mailRefused" }], review);
     expect(failed.drawer?.followUp).toEqual({ phase: { phase: "failed", failure: "mailRefused" }, editing: true, body: "Texto" });
     expect(failed.charged).toEqual({});
-    expect(run([{ type: "sendStarted" }], failed).drawer?.followUp?.phase).toEqual({ phase: "sending" });
+    expect(run([{ type: "sendStarted", id: "r-late" }], failed).drawer?.followUp?.phase).toEqual({ phase: "sending" });
   });
 
   it("#5/AC-4: o resultado de um envio de outro pedido não mexe na fase do que está aberto", () => {
-    const sending = run([{ type: "sendStarted" }], review);
+    const sending = run([{ type: "sendStarted", id: "r-late" }], review);
     expect(run([{ type: "sendFailed", id: "other", failure: "unknown" }], sending)).toEqual(sending);
   });
 
@@ -142,14 +142,33 @@ describe("#20 fluxo da cobrança", () => {
   });
 
   it("#5/AC-4: 'Cobrar' de novo com o envio em curso não reinicia o rascunho", () => {
-    const sending = run([{ type: "sendStarted" }], review);
+    const sending = run([{ type: "sendStarted", id: "r-late" }], review);
     expect(run([{ type: "openFollowUp", id: "r-late" }], sending)).toEqual(sending);
+  });
+});
+
+describe("#20 cobrança em envio com a gaveta fechada", () => {
+  it("#5/AC-4: fechar a gaveta durante o envio não libera 'Cobrar': o mesmo id não abre outro rascunho até o envio falhar", () => {
+    const closed = run([{ type: "openFollowUp", id: "r-late" }, { type: "sendStarted", id: "r-late" }, { type: "close" }]);
+    expect(closed.sending).toEqual(["r-late"]);
+    expect(run([{ type: "openFollowUp", id: "r-late" }], closed)).toEqual(closed);
+
+    const failed = run([{ type: "sendFailed", id: "r-late", failure: "mailRefused" }], closed);
+    expect(failed.sending).toEqual([]);
+    expect(failed.drawer).toBeNull();
+    expect(run([{ type: "openFollowUp", id: "r-late" }], failed).drawer?.followUp?.phase).toEqual({ phase: "review" });
+  });
+
+  it("#5/AC-4: o envio que termina bem tira o id de 'em envio' e o move para cobrados, com a gaveta aberta ou não", () => {
+    const sent = run([{ type: "openFollowUp", id: "r-late" }, { type: "sendStarted", id: "r-late" }, { type: "close" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }]);
+    expect(sent.sending).toEqual([]);
+    expect(Object.keys(sent.charged)).toEqual(["r-late"]);
   });
 });
 
 describe("#20 a linha depois da cobrança", () => {
   it("#5/AC-4: um pedido já cobrado não abre o rascunho de novo na sessão", () => {
-    const sent = run([{ type: "openFollowUp", id: "r-late" }, { type: "sendStarted" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }]);
+    const sent = run([{ type: "openFollowUp", id: "r-late" }, { type: "sendStarted", id: "r-late" }, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-20", sentOn: "2026-11-15" }]);
     const closed = run([{ type: "close" }], sent);
     expect(run([{ type: "openFollowUp", id: "r-late" }], closed)).toEqual(closed);
   });

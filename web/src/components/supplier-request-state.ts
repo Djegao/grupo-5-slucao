@@ -66,10 +66,12 @@ export interface ScreenState {
   filter: SupplierFilterValue;
   drawer: DrawerState | null;
   charged: Record<string, ChargedRequest>;
+  /** #5/AC-4 Os ids com cobrança em envio: seguem na lista com a gaveta fechada, até o envio acabar (#20). */
+  sending: string[];
 }
 
 /** #5/AC-2 A lista abre com o chip Aguardando (Q3). */
-export const INITIAL_STATE: ScreenState = { filter: "waiting", drawer: null, charged: {} };
+export const INITIAL_STATE: ScreenState = { filter: "waiting", drawer: null, charged: {}, sending: [] };
 
 export type ScreenAction =
   | { type: "filter"; filter: SupplierFilterValue }
@@ -79,7 +81,7 @@ export type ScreenAction =
   | { type: "edit" }
   | { type: "changeBody"; body: string }
   | { type: "discard" }
-  | { type: "sendStarted" }
+  | { type: "sendStarted"; id: string }
   | { type: "sendSucceeded"; id: string; dueOn: string; sentOn: string; sentTime?: string }
   | { type: "sendFailed"; id: string; failure: FollowUpFailure };
 
@@ -92,9 +94,9 @@ function withFlow(state: ScreenState, flow: FollowUpFlow): ScreenState {
   return state.drawer ? { ...state, drawer: { ...state.drawer, followUp: flow } } : state;
 }
 
-/** #5/AC-4 Uma cobrança só sai uma vez por sessão e com uma pessoa: o id já cobrado não abre rascunho de novo (estado 9 do wireframe). */
+/** #5/AC-4 Uma cobrança só sai uma vez por sessão e com uma pessoa: o id já cobrado, ou com envio em curso, não abre rascunho de novo (estado 9 do wireframe). */
 function openFollowUp(state: ScreenState, id: string): ScreenState {
-  if (id in state.charged) return state;
+  if (id in state.charged || state.sending.includes(id)) return state;
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
   if (flow && (flow.phase.phase === "sending" || flow.phase.phase === "sent")) return state;
   return { ...state, drawer: { requestId: id, block: "supplierRequest", followUp: { phase: { phase: "review" }, editing: false, body: null } } };
@@ -104,15 +106,25 @@ function sendSucceeded(state: ScreenState, action: Extract<ScreenAction, { type:
   const { id, dueOn, sentOn, sentTime } = action;
   const time = sentTime === undefined ? {} : { sentTime };
   const charged = { ...state.charged, [id]: { dueOn, sentOn, ...time } };
+  const sending = state.sending.filter((sendingId) => sendingId !== id);
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
-  if (!state.drawer || !flow) return { ...state, charged };
-  return { ...state, charged, drawer: { ...state.drawer, followUp: { ...flow, phase: { phase: "sent", sentOn, ...time } } } };
+  if (!state.drawer || !flow) return { ...state, charged, sending };
+  return { ...state, charged, sending, drawer: { ...state.drawer, followUp: { ...flow, phase: { phase: "sent", sentOn, ...time } } } };
 }
 
+/** #5/AC-4 A falha libera o id em envio mesmo com a gaveta fechada; o motivo só entra no rascunho que ainda está aberto (#20). */
 function sendFailed(state: ScreenState, id: string, failure: FollowUpFailure): ScreenState {
+  const released = state.sending.includes(id) ? { ...state, sending: state.sending.filter((sendingId) => sendingId !== id) } : state;
+  const flow = released.drawer?.requestId === id ? released.drawer.followUp : null;
+  if (!flow || flow.phase.phase !== "sending") return released;
+  return withFlow(released, { ...flow, phase: { phase: "failed", failure } });
+}
+
+/** #5/AC-4 O envio começa só no rascunho aberto do próprio pedido, e o id entra na lista de envios em curso (#20). */
+function sendStarted(state: ScreenState, id: string): ScreenState {
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
-  if (!flow || flow.phase.phase !== "sending") return state;
-  return withFlow(state, { ...flow, phase: { phase: "failed", failure } });
+  if (!isOpenForChange(flow)) return state;
+  return { ...withFlow(state, { ...flow, phase: { phase: "sending" } }), sending: [...state.sending, id] };
 }
 
 /** #5/AC-4 A edição do rascunho toca só o texto; enviar vai de revisar a enviando e então a enviado ou falho, sem pular fase. */
@@ -135,7 +147,7 @@ export function screenReducer(state: ScreenState, action: ScreenAction): ScreenS
     case "discard":
       return state.drawer && flow && flow.phase.phase !== "sending" ? { ...state, drawer: { ...state.drawer, followUp: null } } : state;
     case "sendStarted":
-      return isOpenForChange(flow) ? withFlow(state, { ...flow, phase: { phase: "sending" } }) : state;
+      return sendStarted(state, action.id);
     case "sendSucceeded":
       return sendSucceeded(state, action);
     case "sendFailed":

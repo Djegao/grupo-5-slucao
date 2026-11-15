@@ -221,6 +221,17 @@ describe("#20 SupplierRequests: cobrar", () => {
     expect(screen.getByText("20/11")).toBeTruthy();
   });
 
+  it("#5/AC-4: fechar a gaveta com o envio em curso e cobrar de novo na linha não abre outro rascunho nem envia outra vez", () => {
+    const { send } = renderScreen({ send: vi.fn<Send>(() => deferred<SendResult>().promise) });
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
+    fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
+    clickCobrar("59738");
+    expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it("#5/AC-4: descartar fecha o rascunho, mantém a gaveta no bloco e a linha segue Atrasado", () => {
     const { send } = renderScreen();
     chooseLate();
