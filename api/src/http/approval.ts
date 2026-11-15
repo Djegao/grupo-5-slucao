@@ -12,9 +12,24 @@ import type { Env } from '../env.js';
 import type { Identity } from './access.js';
 import type { CheckContext, Invoice, Product } from '../domain/index.js';
 import type { AuditedField } from '../domain/invoice-audit.js';
-import { dossierField, dossierReadFailed, type DossierField } from '../dossier/proposal-field.js';
+import {
+  dossierField,
+  dossierGenerating,
+  dossierReadFailed,
+  type ProposalDossierField,
+} from '../dossier/proposal-field.js';
+import { generateOnDemand, type OnDemandDeps } from '../dossier/on-demand.js';
+import {
+  inFlight,
+  triggerOf,
+  LIMIT_WINDOW_MS,
+  MAX_REQUESTS_PER_WINDOW,
+  IN_FLIGHT_MS,
+  type DossierRequests,
+} from '../dossier/requests.js';
+import { needsDossier } from '../claude/tasks/dossier.js';
 import { readDossier } from '../dossier/read-dossier.js';
-import type { DossierSource } from '../dossier/source.js';
+import { ACCESS_KEY, type DossierSource } from '../dossier/source.js';
 import type { DockActionOutbox, StoreActionOutbox } from '../connectors/ports.js';
 import { SupabaseRestError } from '../connectors/supabase-rest.js';
 import { publishApprovedDockAction } from '../dock/publish-approved-dock-action.js';
@@ -50,9 +65,18 @@ export interface ApprovalDeps {
 export interface DossierDeps {
   source: DossierSource;
   context: (invoiceAccessKey: string) => Promise<CheckContext>;
+  /** #130 Os pedidos da gaveta. Sem ele, o pedido responde 503 e o GET não mostra `generating`. */
+  requests?: DossierRequests;
+  /** #130 O que a geração sob demanda usa além dos pedidos e do contexto: o banco e o Claude. */
+  onDemand?: Omit<OnDemandDeps, 'requests' | 'context' | 'now'>;
+  /** #130 Relógio das janelas de 5 min e de 1 h. */
+  now?: () => Date;
 }
 
-const PROPOSAL_PATH = /^\/api\/propostas\/([^/]+)(?:\/(aprovar|alterar))?$/;
+/** #130 Agenda o trabalho que segue depois da resposta (o waitUntil do Worker). */
+export type Defer = (work: Promise<unknown>) => void;
+
+const PROPOSAL_PATH = /^\/api\/propostas\/([^/]+)(?:\/(aprovar|alterar|dossie))?$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** O dia de hoje no fuso de Brasília, onde a Já Chegou paga. */
@@ -69,6 +93,7 @@ export async function approvalRoutes(
   identity: Identity,
   env: Env,
   deps: ApprovalDeps,
+  defer: Defer = (work) => void work,
 ): Promise<Response | null> {
   const { pathname, searchParams } = new URL(request.url);
   const directory = approverDirectory(env.APPROVER_LEVELS);
@@ -91,6 +116,7 @@ export async function approvalRoutes(
     return error(400, 'chave_invalida');
   }
   const action = match[2];
+  if (action === 'dossie') return only(request, 'POST', () => requestDossier(deps, key, identity, defer));
   if (!action) {
     return only(request, 'GET', () =>
       proposalDetail(deps.store, key, identity, directory, deps.dossier, deps.products, deps.timeline, deps.engine),
@@ -279,8 +305,10 @@ function stockQuantity(
  * ler não derruba a proposta (#38/AC-4): vira `read_failed` e fica no log só com a chave e a mensagem.
  * O contexto da nota só é carregado quando há sugestão `ok`; sem linha, fica `pending` sem lê-lo.
  */
-async function proposalDossier(key: string, file: CaseFile, dossier?: DossierDeps): Promise<DossierField> {
+async function proposalDossier(key: string, file: CaseFile, dossier?: DossierDeps): Promise<ProposalDossierField> {
   if (!dossier) return dossierField(null);
+  const generating = await openRequest(key, dossier);
+  if (generating) return dossierGenerating(generating.requested_by, generating.requested_at, triggerOf(generating));
   try {
     return dossierField(
       await readDossier({
@@ -294,6 +322,51 @@ async function proposalDossier(key: string, file: CaseFile, dossier?: DossierDep
     console.error(`#68 dossiê da nota ${key} não lido: ${e instanceof Error ? e.message : String(e)}`);
     return dossierReadFailed();
   }
+}
+
+/** #130 O pedido da gaveta em andamento. Um erro ao ler os pedidos não derruba a proposta: segue sem ele. */
+async function openRequest(key: string, dossier: DossierDeps) {
+  if (!dossier.requests || !ACCESS_KEY.test(key)) return undefined;
+  const now = (dossier.now ?? (() => new Date()))();
+  try {
+    return inFlight(await dossier.requests.since(key, new Date(now.getTime() - IN_FLIGHT_MS)), now);
+  } catch (e) {
+    console.error(`#130 pedidos do dossiê da nota ${key} não lidos: ${e instanceof Error ? e.name : 'erro'}`);
+    return undefined;
+  }
+}
+
+/**
+ * #130 AC-2 e AC-6: a pessoa pede o dossiê na gaveta. 202 e a geração segue depois da resposta; 409 com uma
+ * geração em andamento; 429 com MAX_REQUESTS_PER_WINDOW pedidos na última hora. O token do Claude fica no Worker
+ * (AC-7): a resposta leva só o estado do pedido.
+ */
+async function requestDossier(deps: ApprovalDeps, key: string, identity: Identity, defer: Defer): Promise<Response> {
+  if (!ACCESS_KEY.test(key)) return error(400, 'chave_invalida');
+  const dossier = deps.dossier;
+  if (!dossier?.requests || !dossier.onDemand) return error(503, 'indisponivel', 'O dossiê sob demanda não está ligado');
+  if (!identity.email) return error(403, 'sem_email', 'O Access não informou o e-mail de quem pede');
+  const file = await deps.store.find(key);
+  if (!file || !needsDossier(file)) return error(404, 'not_found');
+  const now = (dossier.now ?? (() => new Date()))();
+  const recent = await dossier.requests.since(key, new Date(now.getTime() - LIMIT_WINDOW_MS));
+  if (inFlight(recent, now)) return error(409, 'em_andamento', 'O Claude já está escrevendo este dossiê');
+  // #130 #38 O limite é dos pedidos da pessoa: a linha do evento não conta.
+  if (recent.filter((r) => triggerOf(r) === 'on_demand').length >= MAX_REQUESTS_PER_WINDOW) {
+    return error(429, 'limite', 'Muitos pedidos para esta proposta. Tente de novo em alguns minutos.');
+  }
+  const requestedAt = now.toISOString();
+  const requestId = await dossier.requests.open({ input_key: key, requested_by: identity.email, requested_at: requestedAt });
+  defer(
+    generateOnDemand(
+      { ...dossier.onDemand, requests: dossier.requests, context: dossier.context, now: dossier.now },
+      { invoiceAccessKey: key, invoice: file.invoice, requestedBy: identity.email, requestedAt, requestId },
+    ),
+  );
+  return Response.json(
+    { status: 'generating', trigger: 'on_demand', requested_by: identity.email, requested_at: requestedAt },
+    { status: 202 },
+  );
 }
 
 /** AC-7 a AC-11: aprovar ou alterar, com o nível de quem passou pelo Access. */

@@ -48,7 +48,7 @@ describe('#63 proposta no Cron, depois da conferência', () => {
     const first = await proposeChecked(deps);
     const second = await proposeChecked(deps);
     expect(first.proposed).toBe(80);
-    expect(second).toEqual({ proposed: 0, approvedByRule: 0 });
+    expect(second).toEqual({ proposed: 0, approvedByRule: 0, awaitingApproval: [] });
     expect(fake.rows('proposals')).toHaveLength(80);
     expect(fake.rows('titles')).toHaveLength(80);
     expect(fake.rows('invoices').every((r) => r.state === 'com_proposta' || r.state === 'decidida')).toBe(true);
@@ -71,6 +71,16 @@ describe('#63 proposta no Cron, depois da conferência', () => {
     const nf080 = awaiting.find((f) => f.invoice.accessKey === NF080);
     expect(nf080).toMatchObject({ route: { level: 'diretoria', line: 2 } });
     expect(awaiting.every((f) => f.proposal.level !== 'regra')).toBe(true);
+  });
+
+  it('#38 AC-1: a NF-080 (acima da regra) sai em awaitingApproval; a NF-036 (regra) não sai', async () => {
+    const { deps } = await captured();
+    const result = await proposeChecked(deps);
+    const keys = result.awaitingApproval.map((i) => i.accessKey);
+    expect(keys).toContain(NF080);
+    expect(keys).not.toContain(NF036);
+    // #38 AC-1: exatamente as que a régua encaminhou a uma pessoa, nunca as que ela aprovou sozinha.
+    expect(result.awaitingApproval.length).toBeLessThan(result.proposed);
   });
 });
 

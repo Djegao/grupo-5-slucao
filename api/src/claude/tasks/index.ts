@@ -1,4 +1,6 @@
 // Registro das tarefas do Claude (#66, #171): uma linha por tarefa. O laço, a tabela e o Cron servem a todas.
+// #38 O dossiê não entra aqui: é reativo, disparado pelo próprio tick quando a proposta nasce (dossier/event.ts),
+// sem rodada agendada — uma tarefa deste laço, ao contrário, só roda relendo o que ficou pendente a cada rodada.
 import type { SupabaseRest } from '../../connectors/supabase-rest.js';
 import type { ClaudeTask } from '../task.js';
 import { SupabaseAuditReads } from '../../connectors/audit-reads.js';
