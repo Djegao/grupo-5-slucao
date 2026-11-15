@@ -54,6 +54,9 @@ export type SupplierRequestSnapshot = {
   readonly id: string;
   readonly createdAt: string;
   readonly createdBy: string;
+  /** #156: quando e por quem o pedido mudou pela última vez; ao abrir, quando e por quem foi aberto. */
+  readonly updatedAt: string;
+  readonly updatedBy: string;
   readonly invoiceAccessKey: string;
   readonly supplierId: string;
   readonly requestType: SupplierRequestType;
@@ -167,6 +170,8 @@ export class SupplierRequest {
       sendFailure: s.sendFailure,
       model: s.model,
       draftedAt: s.draftedAt,
+      updatedAt: s.updatedAt,
+      updatedBy: s.updatedBy,
       editedBy: s.editedBy,
       editedAt: s.editedAt,
       sentBy: s.sentBy,
@@ -184,6 +189,8 @@ export class SupplierRequest {
     if (props.to.trim() === '') throw new DomainError('SupplierRequest: o fornecedor não tem e-mail no cadastro');
     return new SupplierRequest({
       ...props,
+      updatedAt: props.createdAt,
+      updatedBy: props.createdBy,
       body: null,
       attachments: [],
       dueOn: null,
@@ -223,6 +230,12 @@ export class SupplierRequest {
     });
   }
 
+  get updatedAt(): string {
+    return this.data.updatedAt;
+  }
+  get updatedBy(): string {
+    return this.data.updatedBy;
+  }
   get status(): SupplierRequestStatus {
     return this.data.status;
   }
@@ -279,7 +292,7 @@ export class SupplierRequest {
    */
   acceptDraft(raw: unknown, catalog: FactCatalog, meta: DraftMeta): 'draft' | 'discarded' {
     this.assertStatus(['writing'], 'aceitar o texto do Claude');
-    const body = typeof raw === 'object' && raw !== null ? (raw as { body?: unknown }).body : undefined;
+    const body = typeof raw === 'object' && raw !== null && 'body' in raw ? raw.body : undefined;
     if (typeof body !== 'string' || body.trim() === '') {
       this.discardBySystem('invalid_shape', meta.draftedAt);
       return 'discarded';
@@ -288,7 +301,16 @@ export class SupplierRequest {
       this.discardBySystem('number_mismatch', meta.draftedAt);
       return 'discarded';
     }
-    this.data = { ...this.data, status: 'draft', body, model: meta.model, draftedAt: meta.draftedAt, dueOn: meta.dueOn };
+    this.data = {
+      ...this.data,
+      status: 'draft',
+      body,
+      model: meta.model,
+      draftedAt: meta.draftedAt,
+      dueOn: meta.dueOn,
+      updatedBy: SYSTEM_ACTOR,
+      updatedAt: meta.draftedAt,
+    };
     return 'draft';
   }
 
@@ -313,11 +335,11 @@ export class SupplierRequest {
     if (before.size !== after.size || [...before].some((k) => !after.has(k))) {
       throw new DomainError('SupplierRequest: os números do e-mail são travados; os marcadores não mudam');
     }
-    this.data = { ...this.data, body: text, editedBy: by, editedAt: at };
+    this.data = { ...this.data, body: text, editedBy: by, editedAt: at, updatedBy: by, updatedAt: at };
   }
 
   /** #156/AC-4: anexa a nota de devolução emitida, uma só vez. Reemitir não gera outra. */
-  attachReturnNote(note: ReturnNote): void {
+  attachReturnNote(note: ReturnNote, by: string, at: string): void {
     this.assertStatus(['draft', 'send_failed'], 'anexar a nota de devolução');
     if (this.data.attachments.some((a) => a.kind === 'return_note')) {
       throw new DomainError('SupplierRequest: a nota de devolução já está anexa');
@@ -327,7 +349,12 @@ export class SupplierRequest {
       notaId: note.nota_id,
       filename: `nota-devolucao-${note.nota_id}.json`,
     });
-    this.data = { ...this.data, attachments: Object.freeze([...this.data.attachments, attachment]) };
+    this.data = {
+      ...this.data,
+      attachments: Object.freeze([...this.data.attachments, attachment]),
+      updatedBy: by,
+      updatedAt: at,
+    };
   }
 
   /** #156/AC-5: o envio feito; de `draft`, ou de `send_failed` na nova tentativa, sem reemitir. */
@@ -343,23 +370,33 @@ export class SupplierRequest {
       sentBy: by,
       sentAt: at,
       providerMessageId,
+      updatedBy: by,
+      updatedAt: at,
     };
   }
 
   /** #156: o envio falhou; a nota segue emitida e o motivo fica registrado. */
-  markSendFailed(reason: string): void {
+  markSendFailed(reason: string, by: string, at: string): void {
     this.assertStatus(['draft', 'send_failed'], 'registrar a falha do envio');
-    this.data = { ...this.data, status: 'send_failed', sendFailure: reason };
+    this.data = { ...this.data, status: 'send_failed', sendFailure: reason, updatedBy: by, updatedAt: at };
   }
 
   /** #156: a pessoa descarta o pedido, escrevendo, em rascunho ou com o envio falhado. */
   discard(by: string, at: string, reason: string): void {
     this.assertStatus(['writing', 'draft', 'send_failed'], 'descartar');
-    this.data = { ...this.data, status: 'discarded', discardedBy: by, discardedAt: at, discardReason: reason };
+    this.data = { ...this.data, status: 'discarded', discardedBy: by, discardedAt: at, discardReason: reason, updatedBy: by, updatedAt: at };
   }
 
   private discardBySystem(reason: DraftDiscardReason, at: string): void {
-    this.data = { ...this.data, status: 'discarded', discardedBy: SYSTEM_ACTOR, discardedAt: at, discardReason: reason };
+    this.data = {
+      ...this.data,
+      status: 'discarded',
+      discardedBy: SYSTEM_ACTOR,
+      discardedAt: at,
+      discardReason: reason,
+      updatedBy: SYSTEM_ACTOR,
+      updatedAt: at,
+    };
   }
 
   private assertStatus(allowed: readonly SupplierRequestStatus[], action: string): void {

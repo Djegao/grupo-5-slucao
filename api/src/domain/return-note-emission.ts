@@ -14,7 +14,7 @@ export type KitItem = {
   readonly quantidade: number; // ADR-001
   readonly unidade: string; // ADR-001
   readonly preco_unitario: number; // ADR-001
-  readonly valor: number;
+  readonly valor: number; // ADR-001
 };
 
 const reais = (m: Money): number => m.cents / 100;
@@ -27,7 +27,7 @@ const kitItem = (l: ReturnedLine): KitItem =>
     quantidade: l.quantity.amount, // ADR-001
     unidade: l.quantity.unit, // ADR-001
     preco_unitario: reais(l.unitPrice), // ADR-001
-    valor: reais(l.value),
+    valor: reais(l.value), // ADR-001
   });
 
 /** #156/AC-2: o rascunho: só as linhas devolvidas, com o preço da nota de origem. */

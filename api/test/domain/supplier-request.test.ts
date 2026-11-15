@@ -12,6 +12,7 @@ import {
   isOpenStatus,
   planReturnNote,
   type FactCatalog,
+  type SupplierRequestStatus,
 } from '../../src/domain/index.js';
 import { emptyContext } from './fixtures.js';
 import { decided, originInvoice, partialReturn } from './supplier-request-fixtures.js';
@@ -49,6 +50,15 @@ const drafted = (): SupplierRequest => {
   r.acceptDraft({ body: GOOD_BODY }, catalog(), META);
   return r;
 };
+
+const note = () =>
+  emitReturnNote(buildReturnNoteDraft(originInvoice(), planFor()), {
+    queueRowId: 7,
+    sequence: 12,
+    issuedOn: '2026-11-16',
+    issuerCnpj: '12.345.678/0001-90',
+    existing: null,
+  });
 
 describe('pedido ao fornecedor: nascimento e rascunho', () => {
   it('#156/AC-1 nasce com identidade, quando e por quem foi aberto', () => {
@@ -157,15 +167,6 @@ describe('pedido ao fornecedor: edição do corpo', () => {
 });
 
 describe('pedido ao fornecedor: descarte, emissão e envio', () => {
-  const note = () =>
-    emitReturnNote(buildReturnNoteDraft(originInvoice(), planFor()), {
-      queueRowId: 7,
-      sequence: 12,
-      issuedOn: '2026-11-16',
-      issuerCnpj: '12.345.678/0001-90',
-      existing: null,
-    });
-
   it('#156 a pessoa descarta o rascunho: por quem, quando e por quê', () => {
     const r = drafted();
     r.discard('ana', '2026-11-16T12:05:00.000Z', 'fornecedor errado');
@@ -177,8 +178,8 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
 
   it('#156 descarta também o envio falhado: a nota segue emitida e anexa', () => {
     const r = drafted();
-    r.attachReturnNote(note());
-    r.markSendFailed('provedor fora do ar');
+    r.attachReturnNote(note(), 'ana', DRAFTED_AT);
+    r.markSendFailed('provedor fora do ar', 'ana', DRAFTED_AT);
     r.discard('ana', '2026-11-16T15:00:00.000Z', 'fornecedor trocado');
     expect(r.status).toBe('discarded');
     expect(r.discardedBy).toBe('ana');
@@ -193,21 +194,21 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
     w.discard('ana', DRAFTED_AT, 'não vale');
     expect(w.status).toBe('discarded');
     const s = drafted();
-    s.attachReturnNote(note());
+    s.attachReturnNote(note(), 'ana', DRAFTED_AT);
     s.markSent('ana', DRAFTED_AT, 'msg-1');
     expect(() => s.discard('ana', DRAFTED_AT, 'x')).toThrow(InvalidTransitionError);
   });
 
   it('#156/AC-4 emitida a nota, anexa ao pedido; uma só vez', () => {
     const r = drafted();
-    r.attachReturnNote(note());
+    r.attachReturnNote(note(), 'ana', DRAFTED_AT);
     expect(r.attachments).toEqual([{ kind: 'return_note', notaId: 'ND-0012', filename: 'nota-devolucao-ND-0012.json' }]);
-    expect(() => r.attachReturnNote(note())).toThrow(DomainError);
+    expect(() => r.attachReturnNote(note(), 'ana', DRAFTED_AT)).toThrow(DomainError);
   });
 
   it('#156/AC-5 o envio registra quem, quando e o id do provedor', () => {
     const r = drafted();
-    r.attachReturnNote(note());
+    r.attachReturnNote(note(), 'ana', DRAFTED_AT);
     r.markSent('ana', '2026-11-16T13:40:00.000Z', 'mock-123');
     expect(r.status).toBe('sent');
     expect(r.sentBy).toBe('ana');
@@ -222,8 +223,8 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
 
   it('#156 envio que falha guarda o motivo e a nota segue emitida; tentar de novo envia', () => {
     const r = drafted();
-    r.attachReturnNote(note());
-    r.markSendFailed('provedor fora do ar');
+    r.attachReturnNote(note(), 'ana', DRAFTED_AT);
+    r.markSendFailed('provedor fora do ar', 'ana', DRAFTED_AT);
     expect(r.status).toBe('send_failed');
     expect(r.sendFailure).toBe('provedor fora do ar');
     expect(r.attachments).toHaveLength(1);
@@ -233,7 +234,7 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
   });
 
   it('#156 não envia nem falha o que está escrevendo ou descartado', () => {
-    expect(() => writing().markSendFailed('x')).toThrow(InvalidTransitionError);
+    expect(() => writing().markSendFailed('x', 'ana', DRAFTED_AT)).toThrow(InvalidTransitionError);
     const d = drafted();
     d.discard('ana', DRAFTED_AT, 'x');
     expect(() => d.markSent('ana', DRAFTED_AT, 'm')).toThrow(InvalidTransitionError);
@@ -241,18 +242,54 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
 
   it('#156 o pedido vira dado e volta dele sem perder nada', () => {
     const r = drafted();
-    r.attachReturnNote(note());
+    r.attachReturnNote(note(), 'ana', DRAFTED_AT);
     const copy = SupplierRequest.restore(r.snapshot());
     expect(copy.snapshot()).toEqual(r.snapshot());
     expect(copy.status).toBe('draft');
   });
 });
 
+describe('carimbo de atualização', () => {
+  const T1 = '2026-11-16T12:30:00.000Z';
+  const T2 = '2026-11-16T13:00:00.000Z';
+  const stamp = (r: SupplierRequest) => [r.snapshot().updatedBy, r.snapshot().updatedAt];
+
+  it('#156 ao abrir, atualizado é quando e por quem foi aberto', () => {
+    expect(stamp(writing())).toEqual(['ana', DRAFTED_AT]);
+  });
+
+  it('#156 aceitar o texto carimba o sistema no instante do rascunho', () => {
+    expect(stamp(drafted())).toEqual(['system', DRAFTED_AT]);
+  });
+
+  it('#156 o descarte pela validação do texto carimba o sistema', () => {
+    const r = writing();
+    r.acceptDraft({ body: 'tem 40 soltos' }, catalog(), META);
+    expect(stamp(r)).toEqual(['system', DRAFTED_AT]);
+  });
+
+  it('#156 editar, anexar, falhar, enviar e descartar carimbam quem e quando', () => {
+    const r = drafted();
+    r.editBody(GOOD_BODY, catalog(), 'bia', T1);
+    expect(stamp(r)).toEqual(['bia', T1]);
+    r.attachReturnNote(note(), 'caio', T2);
+    expect(stamp(r)).toEqual(['caio', T2]);
+    r.markSendFailed('fora do ar', 'dani', T1);
+    expect(stamp(r)).toEqual(['dani', T1]);
+    r.markSent('eva', T2, 'm-1');
+    expect(stamp(r)).toEqual(['eva', T2]);
+    const d = drafted();
+    d.discard('fabi', T1, 'x');
+    expect(stamp(d)).toEqual(['fabi', T1]);
+  });
+});
+
 describe('pedido aberto por nota de origem', () => {
   it('#156/AC-8 aberto é escrevendo, rascunho ou envio falhado', () => {
-    expect(['writing', 'draft', 'send_failed'].every((s) => isOpenStatus(s as never))).toBe(true);
-    expect(isOpenStatus('sent')).toBe(false);
-    expect(isOpenStatus('discarded')).toBe(false);
+    const open: readonly SupplierRequestStatus[] = ['writing', 'draft', 'send_failed'];
+    const notOpen: readonly SupplierRequestStatus[] = ['sent', 'discarded'];
+    expect(open.every((s) => isOpenStatus(s))).toBe(true);
+    expect(notOpen.some((s) => isOpenStatus(s))).toBe(false);
   });
 
   it('#156/AC-8 nota de origem com pedido aberto do mesmo tipo não ganha outro', () => {
