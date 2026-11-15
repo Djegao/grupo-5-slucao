@@ -90,6 +90,21 @@ describe('devolução da proposta decidida: returnNoteFor', () => {
     expect(note?.reason).toBe('E3 quantidade menor na nota 9999: devolução da diferença');
   });
 
+  it('#1/AC-1 #6/AC-1: linha alterada em UN contra item de CX sai na unidade da nota (12 UN, fator 6, dá 2 CX)', () => {
+    const action = DockAction.partial([{ sku: 'F08-002', quantity: Quantity.of(12, 'UN'), disposition: 'devolver' }]);
+    const note = returnNoteFor(invoice, decision('E3', action, { state: 'alterada' }), null, [box]);
+    expect(lines(note)).toEqual([['F08-002', 2, 'CX']]);
+  });
+
+  it('#1/AC-1 #6/AC-1: linha em unidade diferente da nota sem fator de caixa é pulada, como na recusa', () => {
+    const action = DockAction.partial([
+      { sku: 'F08-002', quantity: Quantity.of(12, 'UN'), disposition: 'devolver' },
+      { sku: 'SKU-1', quantity: Quantity.of(5, 'UN'), disposition: 'devolver' },
+    ]);
+    const note = returnNoteFor(invoice, decision('E3', action), null, []);
+    expect(lines(note)).toEqual([['F08-001', 5, 'UN']]);
+  });
+
   it('#1/AC-1 #6/AC-1: a alterada também é decidida e vale a ação atual', () => {
     const action = DockAction.partial([{ sku: 'SKU-1', quantity: Quantity.of(5, 'UN'), disposition: 'devolver' }]);
     const note = returnNoteFor(invoice, decision('E3', action, { state: 'alterada' }), null, []);

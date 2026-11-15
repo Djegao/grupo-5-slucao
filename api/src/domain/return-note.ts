@@ -1,10 +1,10 @@
 import type { ReturnNote } from './checks/e3-quantidade-menor.js';
 import type { Classification } from './classification.js';
-import type { Product, Receipt, ReceiptItem } from './context.js';
+import type { Product, Receipt } from './context.js';
 import type { PartialLine } from './dock-action.js';
 import type { InvoiceItem, InvoiceView } from './invoice.js';
 import type { Proposal } from './proposal.js';
-import { Quantity } from './quantity.js';
+import { Quantity, type Unit } from './quantity.js';
 
 export type { ReturnNote };
 
@@ -40,10 +40,14 @@ function partialLines(decision: ReturnDecision): readonly PartialLine[] {
   return [];
 }
 
-function fromPartial(invoice: InvoiceView, decision: ReturnDecision): ReturnNote | null {
+function fromPartial(invoice: InvoiceView, decision: ReturnDecision, products: readonly Product[]): ReturnNote | null {
   const lines = partialLines(decision).flatMap((line) => {
     const item = invoice.items.find((i) => keyOf(i) === line.sku);
-    return item === undefined ? [] : [{ supplierCode: item.supplierCode, quantity: line.quantity }];
+    if (item === undefined) return [];
+    // #1/AC-1: a linha sai sempre na unidade do item da nota, pelo mesmo caminho da recusa; linha em
+    // outra unidade sem fator de caixa é pulada de propósito, como lá (não há como convertê-la).
+    const amount = inItemUnit(line.quantity, item.quantity.unit, boxFactorOf(invoice, item, products));
+    return amount === null ? [] : [{ supplierCode: item.supplierCode, quantity: Quantity.of(amount, item.quantity.unit) }];
   });
   if (lines.length === 0) return null;
   return { invoiceAccessKey: invoice.accessKey, lines, reason: reasonOf(decision.classification, invoice, 'partial') };
@@ -57,16 +61,15 @@ function boxFactorOf(invoice: InvoiceView, item: InvoiceItem, products: readonly
 }
 
 /**
- * #1/AC-4: o recebido na unidade do item da nota. A conversão é proporcional e exata, sem arredondar:
+ * #1/AC-1 e AC-4: a quantidade (recebida ou da linha da ação) na unidade do item da nota. A conversão é proporcional e exata, sem arredondar:
  * 7 UN com fator 6 em item de CX dá 7/6 CX, porque a fila de #140 valora a linha por quantidade x
  * preço unitário da nota, e assim o valor devolvido fecha. Linha recebida sem fator de caixa (ausente
  * ou inválido) é pulada de propósito: não há como convertê-la para a unidade da nota.
  */
-function inItemUnit(received: ReceiptItem, item: InvoiceItem, factor: number): number | null {
-  const unit = item.quantity.unit;
-  if (received.quantity.unit === unit) return received.quantity.amount;
+function inItemUnit(quantity: Quantity, unit: Unit, factor: number): number | null {
+  if (quantity.unit === unit) return quantity.amount;
   if (!Number.isSafeInteger(factor) || factor <= 0) return null;
-  return unit === 'UN' ? received.quantity.amount * factor : received.quantity.amount / factor;
+  return unit === 'UN' ? quantity.amount * factor : quantity.amount / factor;
 }
 
 /** #1/AC-4: o que entrou do código do fornecedor, na unidade do primeiro item da nota com o código. */
@@ -74,7 +77,7 @@ function receivedOf(invoice: InvoiceView, item: InvoiceItem, receipt: Receipt, p
   const factor = boxFactorOf(invoice, item, products);
   return receipt.items
     .filter((r) => r.supplierCode === item.supplierCode)
-    .reduce((sum, r) => sum + (inItemUnit(r, item, factor) ?? 0), 0);
+    .reduce((sum, r) => sum + (inItemUnit(r.quantity, item.quantity.unit, factor) ?? 0), 0);
 }
 
 function fromRefusal(
@@ -114,7 +117,7 @@ export function returnNoteFor(
   if (decision.state !== 'aprovada' && decision.state !== 'alterada') return null;
   if (WITHOUT_RETURN.includes(decision.classification)) return null;
   const action = decision.dockAction;
-  if (action.kind === 'receber_parcial') return fromPartial(invoice, decision);
+  if (action.kind === 'receber_parcial') return fromPartial(invoice, decision, products);
   if (action.kind === 'recusar') return fromRefusal(invoice, decision, receipt, products);
   return null;
 }
