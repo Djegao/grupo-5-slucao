@@ -110,7 +110,7 @@ describe('a emissão mock da nota de devolução', () => {
 });
 
 // #10/AC-1: o kit nomeia os campos em português (data/kit/notas.json); o domínio os nomeia em inglês.
-// O mapeamento para o JSON do kit é da borda, não do domínio.
+// #10: o mapeamento para o JSON do kit é da borda, não do domínio.
 const KIT_NOTE_FIELDS = {
   nota_id: 'noteId',
   chave: 'accessKey',

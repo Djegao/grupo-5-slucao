@@ -4,10 +4,10 @@ import type { InvoiceItem, InvoiceView } from './invoice.js';
 import { Money } from './money.js';
 import type { Unit } from './quantity.js';
 
-// #10: a nota de devolução no formato das notas do kit (data/kit/notas.json), montada pela regra a
-// Os campos têm o nome em inglês, par a par com os do kit (ADR-002 só mantém em português o valor `devolucao`
-// da natureza); o mapeamento para o JSON do kit é da borda. O dinheiro sai em reais, derivado dos centavos exatos de `Money`.
-// centavos exatos de `Money`.
+// #10: a nota de devolução no formato das notas do kit (data/kit/notas.json), montada pela regra.
+// #10: os campos têm o nome em inglês, par a par com os do kit (ADR-002 só mantém em português o valor
+// #10: `devolucao` da natureza); o mapeamento para o JSON do kit é da borda. O dinheiro sai em reais,
+// #10: derivado dos centavos exatos de `Money`.
 
 /** #10: a linha da fila (`outbox_return_notes.payload.lines`): o que voltou, na unidade da nota. */
 export type ReturnQueueLine = { readonly supplierCode: string; readonly amount: number; readonly unit: Unit };

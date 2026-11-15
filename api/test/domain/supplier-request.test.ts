@@ -33,7 +33,7 @@ const drafted = (): SupplierRequest => {
 const inState = (status: RequestStatus): SupplierRequest => {
   const r = drafted();
   if (status === 'sent') r.markSent();
-  if (status === 'send_failed') r.markSendFailed();
+  if (status === 'send_failed') r.markSendFailed('SMTP fora do ar');
   if (status === 'discarded') r.discard('motivo');
   return r;
 };
@@ -150,25 +150,36 @@ describe('o ciclo do pedido', () => {
     sent.markSent();
     expect(sent.status).toBe('sent');
     const failed = drafted();
-    failed.markSendFailed();
+    failed.markSendFailed('SMTP fora do ar');
     expect(failed.status).toBe('send_failed');
     const discarded = drafted();
     discarded.discard('número fora do catálogo');
     expect(discarded.status).toBe('discarded');
   });
 
-  it('#10/AC-5 de send_failed volta a sent, e só a sent', () => {
+  it('#10/AC-5 de send_failed vai a sent, e o descarte continua recusado', () => {
     const request = inState('send_failed');
     request.markSent();
     expect(request.status).toBe('sent');
     expect(() => inState('send_failed').discard('x')).toThrow(InvalidTransitionError);
   });
 
-  it('#10/AC-5 um reenvio que falha de novo se registra: continua send_failed', () => {
+  it('#10/AC-5 um reenvio que falha de novo se registra: continua send_failed, com o motivo novo', () => {
     const request = inState('send_failed');
-    request.markSendFailed();
+    request.markSendFailed('caixa do fornecedor cheia');
     expect(request.status).toBe('send_failed');
+    expect(request.sendFailureReason).toBe('caixa do fornecedor cheia');
     expect(request.isOpen).toBe(true);
+  });
+
+  it('#10/AC-5 cada falha do envio registra o motivo, em campo próprio, e recusa motivo vazio', () => {
+    const request = drafted();
+    expect(request.sendFailureReason).toBeNull();
+    expect(() => request.markSendFailed('  ')).toThrow(DomainError);
+    expect(request.status).toBe('draft');
+    request.markSendFailed('SMTP fora do ar');
+    expect(request.sendFailureReason).toBe('SMTP fora do ar');
+    expect(request.discardReason).toBeNull();
   });
 
   it('#10/AC-5 o pedido leva a identidade que o chamador deu, no rascunho e no recusado', () => {
@@ -182,10 +193,10 @@ describe('o ciclo do pedido', () => {
   it('#10/AC-5 recusa toda outra transição, sem mudar o estado', () => {
     const attempts: readonly [RequestStatus, (r: SupplierRequest) => void][] = [
       ['sent', (r) => r.markSent()],
-      ['sent', (r) => r.markSendFailed()],
+      ['sent', (r) => r.markSendFailed('x')],
       ['sent', (r) => r.discard('x')],
       ['discarded', (r) => r.markSent()],
-      ['discarded', (r) => r.markSendFailed()],
+      ['discarded', (r) => r.markSendFailed('x')],
       ['discarded', (r) => r.discard('x')],
     ];
     for (const [from, act] of attempts) {
@@ -219,6 +230,13 @@ describe('o ciclo do pedido', () => {
     const second = issueReturnNote(request.note, { sequence: 2, issuedOn: '2026-11-12' });
     expect(() => request.recordIssuance(second)).toThrow(DomainError);
     expect(request.issuedNote?.noteId).toBe('ND-1');
+  });
+
+  it('#10/AC-5 só um rascunho registra a emissão: descartado nunca emite', () => {
+    const request = inState('discarded');
+    const issued = issueReturnNote(request.note, { sequence: 1, issuedOn: '2026-11-12' });
+    expect(() => request.recordIssuance(issued)).toThrow(InvalidTransitionError);
+    expect(request.issuedNote).toBeNull();
   });
 
   it('#10/AC-5 só registra a emissão da nota que o próprio pedido monta', () => {

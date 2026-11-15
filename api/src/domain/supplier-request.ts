@@ -6,8 +6,8 @@ import { Money } from './money.js';
 import type { IssuedReturnNote, ReturnNoteDraft } from './return-note-document.js';
 
 // #10: o pedido ao fornecedor (#2): o rascunho que o agente de tratativa monta, a pessoa revisa e o envio
-// fecha. A nota (itens e totais) é da regra; o Claude escreve só assunto, corpo e a lista do que
-// pedimos, e todo número desses textos é um {{chave}} do catálogo de fatos (contrato de dossier.ts).
+// #10: fecha. A nota (itens e totais) é da regra; o Claude escreve só assunto, corpo e a lista do que
+// #10: pedimos, e todo número desses textos é um {{chave}} do catálogo de fatos (contrato de dossier.ts).
 
 export type RequestType = 'return_note'; // #10
 export type RequestStatus = 'draft' | 'sent' | 'send_failed' | 'discarded'; // #10
@@ -134,6 +134,7 @@ export class SupplierRequest {
   private currentBody: string;
   private currentStatus: RequestStatus;
   private reason: string | null;
+  private failureReason: string | null = null;
   private issued: IssuedReturnNote | null = null;
 
   private constructor(props: DraftProps, status: RequestStatus, reason: string | null) {
@@ -177,12 +178,18 @@ export class SupplierRequest {
     return this.issued;
   }
 
+  /** #10/AC-5: o motivo da última falha do envio, ou null enquanto nenhuma houve; não é o do descarte. */
+  get sendFailureReason(): string | null {
+    return this.failureReason;
+  }
+
   get isOpen(): boolean {
     return isOpenRequestStatus(this.currentStatus);
   }
 
-  /** #10/AC-5: a emissão acontece uma vez só; o reenvio usa a nota já registrada. */
+  /** #10/AC-5: a emissão acontece uma vez só, e só de um rascunho; o reenvio usa a nota já registrada. */
   recordIssuance(issued: IssuedReturnNote): void {
+    this.assertFrom(['draft'], 'registrar a emissão');
     if (this.issued !== null) throw new DomainError('Pedido: a nota já foi emitida; reenviar não emite outra');
     if (!sameNote(this.note, issued)) throw new DomainError('Pedido: a nota emitida não é a nota deste pedido');
     this.issued = issued;
@@ -193,9 +200,12 @@ export class SupplierRequest {
     this.currentStatus = 'sent';
   }
 
-  markSendFailed(): void {
+  /** #10/AC-5: cada falha do envio registra o motivo; o reenvio que falha de novo troca o motivo. */
+  markSendFailed(reason: string): void {
     this.assertFrom(['draft', 'send_failed'], 'registrar a falha do envio');
+    if (reason.trim() === '') throw new DomainError('Pedido: a falha do envio registra o motivo');
     this.currentStatus = 'send_failed';
+    this.failureReason = reason;
   }
 
   discard(reason: string): void {
