@@ -1,6 +1,6 @@
 # ADR-003: Índice simples em `proposals`, sem CONCURRENTLY
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-11-15
 
 ## Context
@@ -9,7 +9,7 @@ O pedido ao fornecedor (#156) lê as propostas decididas por `state in (aprovada
 
 ## Decision
 
-A migração cria o índice comum, com `create index if not exists`, sem `CONCURRENTLY`. A trava de escrita em `proposals` dura o tempo de construir um índice de cerca de 80 linhas. O dono da migração aceita esta decisão; até lá o status é `proposed`.
+A migração cria o índice comum, com `create index if not exists`, sem `CONCURRENTLY`. A trava de escrita em `proposals` dura o tempo de construir um índice de cerca de 80 linhas. O dono da migração aceita esta decisão; o status é `accepted`.
 
 ## Consequences
 
