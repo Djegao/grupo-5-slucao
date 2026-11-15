@@ -3,6 +3,8 @@
 // Com `?mock=1` (ou aberta direto do disco) usa a API falsa de mock-api.js; senão chama o Worker na mesma origem.
 // #157 Segunda vista, "Pedidos ao fornecedor" (aba no topo ou `?vista=lista`): os pedidos enviados por status, a
 // conversa de cada um e o próximo passo (confirmar o documento citado ou cobrar), sempre com o clique de uma pessoa.
+// A cobrança sai com o texto que a pessoa revisou (para, assunto e o que pedimos ficam travados); a resposta a quem
+// pediu informação é escrita por ela; e só ela encerra o caso.
 import { createMockApi, DEMO_KEY } from './mock-api.js';
 
 const params = new URLSearchParams(location.search);
@@ -428,7 +430,22 @@ const REPLY_CONFLICT = {
   already_done: 'Isso já foi feito, talvez por outra pessoa. Recarregamos a situação atual.',
 };
 
-const REPLY_BUSY = { 'confirmar-documento': 'Confirmando…', cobrar: 'Enviando cobrança…' };
+const REPLY_BUSY = {
+  'confirmar-documento': 'Confirmando…',
+  cobrar: 'Enviando cobrança…',
+  responder: 'Enviando resposta…',
+  encerrar: 'Encerrando…',
+};
+
+const REPLY_DONE = {
+  'confirmar-documento': 'Documento confirmado. O pedido foi para Atendidos.',
+  cobrar: 'Cobrança enviada. O pedido volta a aguardar a resposta.',
+  responder: 'Resposta enviada. O pedido volta a aguardar o fornecedor.',
+  encerrar: 'Caso encerrado. O pedido foi para Atendidos.',
+};
+
+const TEXT_INVALID = 'O texto não pode ficar vazio nem passar de 5.000 caracteres.';
+const MAX_TEXT = 5000;
 
 const when = (iso) => (iso ? `${dayMonth(iso)} às ${hourMinute(iso)}` : '');
 
@@ -440,7 +457,9 @@ const board = {
   openId: null,
   openItem: null,
   conv: null, // { phase: 'loading' | 'ready' | 'error', conversation, request }
-  reviewing: false,
+  reviewing: false, // revisando a cobrança ou escrevendo a resposta
+  text: null, // o texto que a pessoa está editando (cobrança ou resposta); sobrevive aos redesenhos
+  closeNote: '',
   busy: null,
   notice: null,
 };
@@ -497,6 +516,8 @@ async function openRow(id, { review = false } = {}) {
   board.openId = id;
   board.openItem = item;
   board.reviewing = review;
+  board.text = null;
+  board.closeNote = '';
   board.conv = { phase: 'loading' };
   board.notice = null;
   drawBoard();
@@ -509,6 +530,8 @@ function closePanel() {
   board.openItem = null;
   board.conv = null;
   board.reviewing = false;
+  board.text = null;
+  board.closeNote = '';
 }
 
 async function loadConversation() {
@@ -540,27 +563,48 @@ async function loadConversation() {
   drawBoard();
 }
 
+/** O corpo de cada ação: a cobrança e a resposta levam o texto da pessoa; o encerramento, a nota opcional. */
+function bodyFor(action) {
+  if (action === 'cobrar' || action === 'responder') return board.text === null ? {} : { text: board.text };
+  if (action === 'encerrar') return board.closeNote.trim() ? { note: board.closeNote.trim() } : {};
+  return {};
+}
+
 async function actBoard(action) {
   const id = board.openId;
   if (!id || board.busy) return;
+  if (action === 'encerrar' && !window.confirm('Encerrar este caso? Depois disso, nenhuma cobrança ou resposta sai por aqui.')) return;
+  const field = $('reply-text');
+  if ((action === 'cobrar' || action === 'responder') && field) board.text = field.value;
+  if ((action === 'cobrar' || action === 'responder') && board.text !== null) {
+    const t = board.text.trim();
+    if (!t || t.length > MAX_TEXT) {
+      board.notice = { kind: 'error', text: TEXT_INVALID };
+      return drawBoard(); // fica na edição com o texto da pessoa
+    }
+  }
   board.busy = action;
   board.notice = null;
   drawBoard();
   let res;
   try {
-    res = await api('POST', `/api/pedidos-fornecedor/${encodeURIComponent(id)}/${action}`);
+    res = await api('POST', `/api/pedidos-fornecedor/${encodeURIComponent(id)}/${action}`, bodyFor(action));
   } catch {
     res = { status: 0, body: {} };
   }
   board.busy = null;
+
+  if (res.status === 422) {
+    board.notice = { kind: 'error', text: TEXT_INVALID };
+    return drawBoard(); // mantém a revisão aberta e o texto da pessoa
+  }
   board.reviewing = false;
+  board.text = null;
+  if (res.status === 200) board.closeNote = '';
 
   if (res.status === 200) {
     board.conv = { ...board.conv, phase: 'ready', conversation: res.body.conversation };
-    board.notice = {
-      kind: 'info',
-      text: action === 'cobrar' ? 'Cobrança enviada. O pedido volta a aguardar a resposta.' : 'Documento confirmado. O pedido foi para Atendidos.',
-    };
+    board.notice = { kind: 'info', text: REPLY_DONE[action] ?? 'Feito.' };
     return loadBoard({ quiet: true });
   }
   if (res.status === 409) {
@@ -640,12 +684,13 @@ function statusCell(i) {
   const l = i.latest;
   const doc = l?.supplierDocument ? `: ${esc(l.supplierDocument)}` : '';
   let text;
-  if (i.bucket === 'atrasados') {
+  if (i.closed) text = '<span class="ok">■ Encerrado</span>';
+  else if (i.bucket === 'atrasados') {
     text = `⏰ Atrasado <button class="small" data-row-cobrar="${esc(i.id)}" ${board.busy ? 'disabled' : ''}>Cobrar</button>`;
   } else if (!l) text = 'Aguardando resposta';
   else if (i.documentConfirmed || l.nextStep === 'close') text = `<span class="ok">✓ Atendeu${doc}</span>`;
   else if (l.nextStep === 'confirm_document') text = `✓ Atendeu${doc} · <span class="warn">confirmar</span>`;
-  else if (l.outcome === 'needs_information') text = '? Pediu informação';
+  else if (l.outcome === 'needs_information') text = i.followUpSent ? '↻ Respondido · aguardando' : '? Pediu informação';
   else if (i.followUpSent) text = '↻ Cobrado · aguardando';
   else if (l.outcome === 'refused') text = '✕ Recusou';
   else text = esc(OUTCOME[l.outcome] ?? l.outcome);
@@ -671,7 +716,7 @@ function panel() {
 
 function conversation(c, request, item) {
   const latest = c.readings.at(-1) ?? null;
-  return requestPart(request, item) + repliesPart(c.messages) + readingPart(c.readings) + injectionPart(latest) + followUpsPart(c.followUps) + nextStepPart(c, latest, item);
+  return requestPart(request, item) + repliesPart(c.messages) + readingPart(c.readings) + injectionPart(latest) + followUpsPart(c.followUps) + closurePart(c.closure) + nextStepPart(c, latest, item) + closeCasePart(c);
 }
 
 function requestPart(r, item) {
@@ -719,10 +764,38 @@ function injectionPart(latest) {
 
 function followUpsPart(followUps) {
   if (!followUps.length) return '';
-  const list = followUps
-    .map((f) => `<li>${esc(f.subject)} · por ${esc(who(f.sentBy))} em ${esc(when(f.sentAt))}</li>`)
-    .join('');
-  return `<h3>Cobranças enviadas</h3><ul class="small">${list}</ul>`;
+  const block = (f) => `<div class="msg"><div class="meta">${f.kind === 'answer' ? 'Resposta' : 'Cobrança'}: ${esc(f.subject)} · por ${esc(who(f.sentBy))} em ${esc(when(f.sentAt))}</div>
+    <pre class="body">${esc(f.body)}</pre></div>`;
+  const followUpsSent = followUps.filter((f) => f.kind !== 'answer');
+  const answers = followUps.filter((f) => f.kind === 'answer');
+  return (
+    (followUpsSent.length ? `<h3>Cobranças enviadas</h3>${followUpsSent.map(block).join('')}` : '') +
+    (answers.length ? `<h3>Respostas enviadas ao fornecedor</h3>${answers.map(block).join('')}` : '')
+  );
+}
+
+function closurePart(closure) {
+  if (!closure) return '';
+  const by = who(closure.closedBy);
+  const head = by === 'você' ? `Encerrado por você às ${hourMinute(closure.closedAt)}` : `Encerrado por ${by} em ${when(closure.closedAt)}`;
+  return `<p class="ok">■ ${esc(head)}.${closure.note ? `<br><span class="small">Nota: ${esc(closure.note)}</span>` : ''}</p>`;
+}
+
+/** Encerrar o caso: a qualquer momento enquanto não está encerrado, sempre por uma pessoa. */
+function closeCasePart(c) {
+  if (c.closure) return '';
+  const busy = board.busy === 'encerrar';
+  return `<div class="actions">
+    <label class="small grow">Nota ao encerrar (opcional)
+      <textarea id="close-note" rows="2" maxlength="500" ${board.busy ? 'disabled' : ''}>${esc(board.closeNote)}</textarea></label>
+    <button class="quiet" data-reply-act="encerrar" ${board.busy ? 'disabled' : ''}>${busy ? REPLY_BUSY.encerrar : 'Encerrar caso'}</button>
+  </div>`;
+}
+
+function editor(id, fallback) {
+  const value = board.text ?? fallback;
+  return `<textarea id="${id}" rows="10" ${board.busy ? 'disabled' : ''}>${esc(value)}</textarea>
+    <div class="muted small">${value.trim().length.toLocaleString('pt-BR')} / 5.000 caracteres</div>`;
 }
 
 function replyButton(action, label) {
@@ -731,6 +804,7 @@ function replyButton(action, label) {
 }
 
 function nextStepPart(c, latest, item) {
+  if (c.closure) return '';
   if (!latest) {
     return `<p class="muted">Aguardando a resposta do fornecedor até ${esc(dayMonth(item.dueOn))}. Nada a fazer agora.</p>`;
   }
@@ -740,7 +814,8 @@ function nextStepPart(c, latest, item) {
   }
   const followUp = c.followUps.find((x) => x.readingId === latest.id);
   if (followUp) {
-    return `<p class="ok">✓ Cobrança enviada por ${esc(who(followUp.sentBy))} em ${esc(when(followUp.sentAt))}. Aguardando a resposta.</p>`;
+    const what = followUp.kind === 'answer' ? 'Resposta enviada' : 'Cobrança enviada';
+    return `<p class="ok">✓ ${what} por ${esc(who(followUp.sentBy))} em ${esc(when(followUp.sentAt))}. Aguardando a resposta.</p>`;
   }
   if (latest.nextStep === 'confirm_document') {
     const doc = latest.supplierDocument ? `o documento ${esc(latest.supplierDocument)}` : 'o que o fornecedor diz ter feito';
@@ -752,15 +827,28 @@ function nextStepPart(c, latest, item) {
       return `<div class="actions"><span class="grow"></span><button class="primary" data-board="review" ${board.busy ? 'disabled' : ''}>Cobrar</button></div>`;
     }
     const d = latest.followUpDraft;
-    return `<h3>Rascunho da cobrança <span class="muted small">— revise antes de enviar</span></h3>
-      <div class="meta">Para: ${esc(d.to)}<br>Assunto: ${esc(d.subject)}</div>
-      <pre class="body">${esc(d.body)}</pre>
+    return `<h3>Rascunho da cobrança <span class="muted small">— revise e ajuste o texto antes de enviar</span></h3>
+      <div class="meta">Para: ${esc(d.to)} 🔒<br>Assunto: ${esc(d.subject)} 🔒</div>
+      <label class="small" for="reply-text">Texto da cobrança</label>
+      ${editor('reply-text', d.body)}
       <div class="asks"><span class="muted small">O que pedimos 🔒</span><ul>${d.asks.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>
       <div class="actions"><button data-board="cancel-review" ${board.busy ? 'disabled' : ''}>Cancelar</button><span class="grow"></span>
         ${replyButton('cobrar', 'Enviar cobrança')}</div>`;
   }
   if (latest.nextStep === 'answer_supplier') {
-    return `<p class="small">Próximo passo: responder ao fornecedor pelo e-mail. Esta demonstração não envia a resposta.</p>`;
+    if (!board.reviewing) {
+      return `<div class="actions"><span class="grow"></span><button class="primary" data-board="review" ${board.busy ? 'disabled' : ''}>Responder ao fornecedor</button></div>`;
+    }
+    const r = board.conv.request;
+    const lastFrom = c.messages.at(-1)?.from;
+    const to = r?.to ?? lastFrom ?? '';
+    const subject = r ? `Re: ${r.subject}` : 'Re: o pedido enviado';
+    return `<h3>Responder ao fornecedor <span class="muted small">— o texto é seu e só sai com o clique</span></h3>
+      <div class="meta">Para: ${esc(to)} 🔒<br>Assunto: ${esc(subject)} 🔒</div>
+      <label class="small" for="reply-text">Sua resposta</label>
+      ${editor('reply-text', '')}
+      <div class="actions"><button data-board="cancel-review" ${board.busy ? 'disabled' : ''}>Cancelar</button><span class="grow"></span>
+        ${replyButton('responder', 'Enviar resposta')}</div>`;
   }
   return '';
 }
@@ -799,6 +887,8 @@ $('lista').addEventListener('click', (event) => {
     }
     if (d.board === 'cancel-review') {
       board.reviewing = false;
+      board.text = null;
+      board.notice = null;
       return drawBoard();
     }
     return;
@@ -812,6 +902,16 @@ $('lista').addEventListener('click', (event) => {
     }
     return openRow(id);
   }
+});
+
+// O texto em edição fica no estado: a lista se redesenha inteira depois de cada ação.
+$('lista').addEventListener('input', (event) => {
+  if (event.target.id === 'reply-text') {
+    board.text = event.target.value;
+    const counter = event.target.nextElementSibling;
+    if (counter) counter.textContent = `${board.text.trim().length.toLocaleString('pt-BR')} / 5.000 caracteres`;
+  }
+  if (event.target.id === 'close-note') board.closeNote = event.target.value;
 });
 
 // ---------- início ----------

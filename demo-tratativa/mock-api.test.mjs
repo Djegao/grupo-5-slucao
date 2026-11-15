@@ -173,4 +173,84 @@ test('#157 bucketOf segue a regra do domínio', () => {
   assert.equal(bucketOf({ latest: r('no_reply', 'follow_up'), documentConfirmed: false, followUpSent: true }), 'aguardando');
   assert.equal(bucketOf({ latest: r('refused', 'follow_up'), documentConfirmed: false, followUpSent: true }), 'aguardando');
   assert.equal(bucketOf({ latest: r('needs_information', 'answer_supplier'), documentConfirmed: false, followUpSent: false }), 'precisam');
+  assert.equal(bucketOf({ latest: r('needs_information', 'answer_supplier'), documentConfirmed: false, followUpSent: true }), 'aguardando');
+});
+
+test('#157 bucketOf: caso encerrado vai sempre para atendidos', () => {
+  const r = (outcome, nextStep) => ({ outcome, nextStep });
+  assert.equal(bucketOf({ latest: null, documentConfirmed: false, followUpSent: false, closed: true }), 'atendidos');
+  assert.equal(bucketOf({ latest: r('no_reply', 'follow_up'), documentConfirmed: false, followUpSent: false, closed: true }), 'atendidos');
+  assert.equal(bucketOf({ latest: r('refused', 'follow_up'), documentConfirmed: false, followUpSent: false, closed: true }), 'atendidos');
+  assert.equal(bucketOf({ latest: r('refused', 'follow_up'), documentConfirmed: false, followUpSent: false, closed: false }), 'precisam');
+});
+
+const conversa = async (api, id) => (await api.call('GET', `/api/pedidos-fornecedor/${id}/conversa`)).body.conversation;
+
+test('#157/AC-2 cobrar com o texto editado guarda o texto da pessoa; para e assunto ficam os do rascunho', async () => {
+  const api = createMockApi();
+  const draft = (await overview(api)).items.find((i) => i.id === 'pf_0101').latest.followUpDraft;
+  const text = 'Olá.\n\nSeguimos sem resposta; por favor retirem o item até sexta.\n\nObrigado.';
+  const res = await api.call('POST', '/api/pedidos-fornecedor/pf_0101/cobrar', { text: `  ${text}  ` });
+  assert.equal(res.status, 200);
+  const [sent] = res.body.conversation.followUps;
+  assert.equal(sent.body, text);
+  assert.equal(sent.kind, 'follow_up');
+  assert.equal(sent.subject, draft.subject);
+});
+
+test('#157 cobrar com texto vazio ou longo demais dá 422 e nada sai', async () => {
+  const api = createMockApi();
+  const invalid = { status: 422, body: { error: 'invalid', reason: 'empty_or_too_long' } };
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0101/cobrar', { text: '   ' }), invalid);
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0101/cobrar', { text: 'x'.repeat(5001) }), invalid);
+  assert.equal((await conversa(api, 'pf_0101')).followUps.length, 0);
+  // o que não saiu ainda pode sair
+  assert.equal((await api.call('POST', '/api/pedidos-fornecedor/pf_0101/cobrar', { text: 'x'.repeat(5000) })).status, 200);
+});
+
+test('#157 responder só vale para quem pediu informação; depois vai para aguardando e a segunda dá 409', async () => {
+  const api = createMockApi();
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0101/responder', { text: 'Oi' }), {
+    status: 409,
+    body: { error: 'conflict', reason: 'wrong_state' },
+  });
+  assert.equal((await api.call('POST', '/api/pedidos-fornecedor/pf_0103/responder', { text: 'Oi' })).status, 409);
+  assert.equal((await api.call('POST', '/api/pedidos-fornecedor/pf_0102/responder', { text: '' })).status, 422);
+  assert.equal((await api.call('POST', '/api/pedidos-fornecedor/pf_0102/responder', {})).status, 422);
+
+  const res = await api.call('POST', '/api/pedidos-fornecedor/pf_0102/responder', { text: 'A loja foi a LJ-004, entrega em 10/11.' });
+  assert.equal(res.status, 200);
+  const [answer] = res.body.conversation.followUps;
+  assert.equal(answer.kind, 'answer');
+  assert.equal(answer.subject, 'Re: NF 43002 · número do pedido de compra');
+  assert.equal(answer.body, 'A loja foi a LJ-004, entrega em 10/11.');
+  const item = (await overview(api)).items.find((i) => i.id === 'pf_0102');
+  assert.equal(item.bucket, 'aguardando');
+  assert.equal(item.followUpSent, true);
+  const again = await api.call('POST', '/api/pedidos-fornecedor/pf_0102/responder', { text: 'De novo' });
+  assert.deepEqual(again, { status: 409, body: { error: 'conflict', reason: 'already_done' } });
+});
+
+test('#157 encerrar leva para atendidos; encerrar de novo ou cobrar depois dá 409 already_done', async () => {
+  const api = createMockApi();
+  assert.equal((await conversa(api, 'pf_0101')).closure, null);
+  const res = await api.call('POST', '/api/pedidos-fornecedor/pf_0101/encerrar', { note: '  resolvido por telefone  ' });
+  assert.equal(res.status, 200);
+  const { closure } = res.body.conversation;
+  assert.equal(closure.note, 'resolvido por telefone');
+  assert.equal(closure.closedBy, 'analista@jachegou.test');
+  assert.ok(closure.closedAt);
+  const item = (await overview(api)).items.find((i) => i.id === 'pf_0101');
+  assert.equal(item.bucket, 'atendidos');
+  assert.equal(item.closed, true);
+
+  const done = { status: 409, body: { error: 'conflict', reason: 'already_done' } };
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0101/encerrar'), done);
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0101/cobrar'), done);
+
+  // sem nota também encerra, mesmo sem leitura (no prazo)
+  const quiet = await api.call('POST', '/api/pedidos-fornecedor/pf_0106/encerrar');
+  assert.equal(quiet.body.conversation.closure.note, null);
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0102/encerrar', {}).then((r) => r.status), 200);
+  assert.deepEqual(await api.call('POST', '/api/pedidos-fornecedor/pf_0102/responder', { text: 'Oi' }), done);
 });

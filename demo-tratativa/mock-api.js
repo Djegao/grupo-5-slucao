@@ -109,12 +109,21 @@ function emittedNote() {
 const BUCKETS = ['aguardando', 'atendidos', 'precisam', 'atrasados'];
 
 /** #157 A mesma regra de `bucketOf` em api/src/domain/supplier-reply.ts. */
-export function bucketOf({ latest, documentConfirmed, followUpSent }) {
+export function bucketOf({ latest, documentConfirmed, followUpSent, closed = false }) {
+  if (closed) return 'atendidos';
   if (latest === null) return 'aguardando';
   if (documentConfirmed || latest.nextStep === 'close') return 'atendidos';
   if (latest.outcome === 'no_reply') return followUpSent ? 'aguardando' : 'atrasados';
-  if (latest.nextStep === 'follow_up' && followUpSent) return 'aguardando';
+  if ((latest.nextStep === 'follow_up' || latest.nextStep === 'answer_supplier') && followUpSent) return 'aguardando';
   return 'precisam';
+}
+
+/** #157 O mesmo `outboundText` do domínio: o texto que a pessoa escreve ou edita, não vazio e com teto. */
+export const MAX_OUTBOUND_TEXT = 5000;
+function outboundText(text) {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  return trimmed === '' || trimmed.length > MAX_OUTBOUND_TEXT ? null : trimmed;
 }
 
 /** #157 O mesmo texto de `followUpDraftFor` em api/src/domain/supplier-reply.ts. */
@@ -246,6 +255,7 @@ function seededRequest(seed) {
 
 const json = (status, body) => ({ status, body });
 const conflict = (reason) => json(409, { error: 'conflict', reason });
+const invalid = () => json(422, { error: 'invalid', reason: 'empty_or_too_long' });
 
 /**
  * Cria a API falsa. `scenario` escolhe como a demo começa:
@@ -282,7 +292,8 @@ export function createMockApi({ scenario = 'draft', writingMs = 6000 } = {}) {
   // #157 Os pedidos enviados de exemplo e o que já aconteceu com cada um.
   const messages = []; // { requestId, id, from, body, receivedAt }
   const readings = []; // { requestId, ...ReadingView }
-  const followUps = []; // { requestId, readingId, subject, body, sentBy, sentAt }
+  const followUps = []; // { requestId, readingId, kind: 'follow_up' | 'answer', subject, body, sentBy, sentAt }
+  const closures = new Map(); // id → { note, closedBy, closedAt }
   const confirmations = []; // { requestId, readingId, confirmedBy, confirmedAt }
   const values = new Map(); // id → valueCents (no Worker vem da nota de devolução emitida)
   for (const seed of SEEDS) {
@@ -326,12 +337,14 @@ export function createMockApi({ scenario = 'draft', writingMs = 6000 } = {}) {
     readings: readings.filter((x) => x.requestId === id).map(strip),
     followUps: followUps.filter((f) => f.requestId === id).map(strip),
     confirmations: confirmations.filter((c) => c.requestId === id).map(strip),
+    closure: closures.has(id) ? clone(closures.get(id)) : null,
   });
 
   const listItem = (r) => {
     const latest = latestOf(r.id);
     const documentConfirmed = latest !== null && confirmations.some((c) => c.readingId === latest.id);
     const followUpSent = latest !== null && followUps.some((f) => f.readingId === latest.id);
+    const closed = closures.has(r.id);
     const total = r.returnNote?.state === 'emitted' ? r.returnNote.note.valor_total : null;
     return {
       id: r.id,
@@ -342,10 +355,11 @@ export function createMockApi({ scenario = 'draft', writingMs = 6000 } = {}) {
       valueCents: typeof total === 'number' ? Math.round(total * 100) : values.get(r.id) ?? null,
       dueOn: r.dueOn,
       sentAt: r.sentAt,
-      bucket: bucketOf({ latest, documentConfirmed, followUpSent }),
+      bucket: bucketOf({ latest, documentConfirmed, followUpSent, closed }),
       latest: latest && strip(latest),
       documentConfirmed,
       followUpSent,
+      closed,
     };
   };
 
@@ -359,17 +373,40 @@ export function createMockApi({ scenario = 'draft', writingMs = 6000 } = {}) {
   const replyActions = {
     'confirmar-documento'(r) {
       const latest = latestOf(r.id);
+      if (closures.has(r.id)) return conflict('already_done');
       if (!latest || latest.nextStep !== 'confirm_document') return conflict('wrong_state');
       if (confirmations.some((c) => c.readingId === latest.id)) return conflict('already_done');
       confirmations.push({ requestId: r.id, readingId: latest.id, confirmedBy: ME, confirmedAt: now() });
       return json(200, { conversation: conversationOf(r.id) });
     },
-    cobrar(r) {
+    // Sem `text`, sai o rascunho da regra; com ele, o texto editado (para, assunto e o que pedimos ficam travados).
+    cobrar(r, body) {
       const latest = latestOf(r.id);
+      if (closures.has(r.id)) return conflict('already_done');
       if (!latest || !latest.followUpDraft) return conflict('wrong_state');
       if (followUps.some((f) => f.readingId === latest.id)) return conflict('already_done');
       const d = latest.followUpDraft;
-      followUps.push({ requestId: r.id, readingId: latest.id, subject: d.subject, body: d.body, sentBy: ME, sentAt: now() });
+      const text = body.text === undefined ? d.body : outboundText(body.text);
+      if (text === null) return invalid();
+      followUps.push({ requestId: r.id, readingId: latest.id, kind: 'follow_up', subject: d.subject, body: text, sentBy: ME, sentAt: now() });
+      return json(200, { conversation: conversationOf(r.id) });
+    },
+    // A resposta da pessoa a quem pediu informação: o texto é dela.
+    responder(r, body) {
+      const latest = latestOf(r.id);
+      if (closures.has(r.id)) return conflict('already_done');
+      if (!latest || latest.nextStep !== 'answer_supplier') return conflict('wrong_state');
+      if (followUps.some((f) => f.readingId === latest.id)) return conflict('already_done');
+      const text = outboundText(body.text);
+      if (text === null) return invalid();
+      followUps.push({ requestId: r.id, readingId: latest.id, kind: 'answer', subject: `Re: ${r.subject}`, body: text, sentBy: ME, sentAt: now() });
+      return json(200, { conversation: conversationOf(r.id) });
+    },
+    // Só a pessoa encerra o caso.
+    encerrar(r, body) {
+      if (closures.has(r.id)) return conflict('already_done');
+      const note = typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim().slice(0, 500) : null;
+      closures.set(r.id, { note, closedBy: ME, closedAt: now() });
       return json(200, { conversation: conversationOf(r.id) });
     },
   };
@@ -471,7 +508,7 @@ export function createMockApi({ scenario = 'draft', writingMs = 6000 } = {}) {
       if (filter !== null && !BUCKETS.includes(filter)) return json(400, { error: 'invalid_filter' });
       return json(200, clone(overview(filter ?? undefined)));
     }
-    const reply = url.pathname.match(/^\/api\/pedidos-fornecedor\/([A-Za-z0-9_-]{1,64})\/(conversa|confirmar-documento|cobrar)$/);
+    const reply = url.pathname.match(/^\/api\/pedidos-fornecedor\/([A-Za-z0-9_-]{1,64})\/(conversa|confirmar-documento|cobrar|responder|encerrar)$/);
     if (reply) {
       const wanted = reply[2] === 'conversa' ? 'GET' : 'POST';
       if (method !== wanted) return json(405, { error: 'method_not_allowed' });
@@ -479,7 +516,7 @@ export function createMockApi({ scenario = 'draft', writingMs = 6000 } = {}) {
       if (!r) return json(404, { error: 'not_found' });
       if (reply[2] === 'conversa') return json(200, { conversation: conversationOf(r.id) });
       if (r.status !== 'sent') return json(404, { error: 'not_found' });
-      return replyActions[reply[2]](r);
+      return replyActions[reply[2]](r, body ?? {});
     }
     const match = url.pathname.match(/^\/api\/pedidos-fornecedor\/([^/]+)\/([a-z-]+)$/);
     if (!match || !actions[match[2]]) return json(404, { error: 'not_found' });

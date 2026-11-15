@@ -35,6 +35,15 @@ que nada mudou no caso). O botão do próximo passo:
 - **Cobrar** (`follow_up`, também na linha dos atrasados): mostra o rascunho da cobrança para revisar e só envia com
   **Enviar cobrança**. O pedido volta a Aguardando.
 
+- **Responder ao fornecedor** (`answer_supplier`): abre um campo para a pessoa escrever a resposta e só envia com
+  **Enviar resposta** (assunto `Re: <assunto do pedido>`). A resposta aparece na conversa e o pedido volta a Aguardando.
+- **Encerrar caso** (botão discreto, a qualquer momento enquanto o caso não está encerrado): pede confirmação e aceita
+  uma nota opcional. O pedido vai para Atendidos, a conversa mostra "Encerrado por você às hh:mm" e a lista,
+  "■ Encerrado"; depois disso nenhuma ação sai (409 `already_done`).
+
+Na cobrança, o texto do rascunho vem num campo editável; para, assunto e o que pedimos ficam travados (🔒). Texto vazio
+ou com mais de 5.000 caracteres dá 422 e a página mantém o que a pessoa escreveu.
+
 Se o pedido mudou no meio (409 `wrong_state` ou `already_done`), a página avisa e recarrega a lista e a conversa.
 
 A API falsa traz, além do pedido da NF 20046 (que entra em Aguardando depois de emitir e enviar na aba Pedido), seis
