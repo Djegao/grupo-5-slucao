@@ -44,8 +44,8 @@ function fromPartial(invoice: InvoiceView, decision: ReturnDecision, products: r
   const lines = partialLines(decision).flatMap((line) => {
     const item = invoice.items.find((i) => keyOf(i) === line.sku);
     if (item === undefined) return [];
-    // #1/AC-1: a linha sai sempre na unidade do item da nota, pelo mesmo caminho da recusa; linha em
-    // outra unidade sem fator de caixa é pulada de propósito, como lá (não há como convertê-la).
+    // #1/AC-1: a linha sai sempre na unidade do item da nota, pelo mesmo caminho da recusa.
+    // #1/AC-1: linha em outra unidade sem fator de caixa é pulada de propósito, como lá (não há como convertê-la).
     const amount = inItemUnit(line.quantity, item.quantity.unit, boxFactorOf(invoice, item, products));
     return amount === null ? [] : [{ supplierCode: item.supplierCode, quantity: Quantity.of(amount, item.quantity.unit) }];
   });
@@ -72,12 +72,22 @@ function inItemUnit(quantity: Quantity, unit: Unit, factor: number): number | nu
   return unit === 'UN' ? quantity.amount * factor : quantity.amount / factor;
 }
 
-/** #1/AC-4: o que entrou do código do fornecedor, na unidade do primeiro item da nota com o código. */
+/**
+ * #1/AC-4: o que entrou do código do fornecedor, na unidade do primeiro item da nota com o código.
+ * Soma o recebido por unidade e converte cada total uma vez, para não acumular erro de ponto
+ * flutuante (seis linhas de 1 UN, fator 6, dão 1 CX exato).
+ */
 function receivedOf(invoice: InvoiceView, item: InvoiceItem, receipt: Receipt, products: readonly Product[]): number {
   const factor = boxFactorOf(invoice, item, products);
-  return receipt.items
-    .filter((r) => r.supplierCode === item.supplierCode)
-    .reduce((sum, r) => sum + (inItemUnit(r.quantity, item.quantity.unit, factor) ?? 0), 0);
+  const totals = new Map<Unit, number>();
+  for (const r of receipt.items.filter((i) => i.supplierCode === item.supplierCode)) {
+    totals.set(r.quantity.unit, (totals.get(r.quantity.unit) ?? 0) + r.quantity.amount);
+  }
+  let received = 0;
+  for (const [unit, amount] of totals) {
+    received += inItemUnit(Quantity.of(amount, unit), item.quantity.unit, factor) ?? 0;
+  }
+  return received;
 }
 
 function fromRefusal(
