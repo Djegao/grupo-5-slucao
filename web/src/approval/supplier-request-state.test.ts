@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client";
 import { texts } from "../texts";
 import type { SupplierRequestView } from "./SupplierRequestBlock";
-import { initialSupplierRequestState, supplierRequestError, supplierRequestReducer, viewOf, type SupplierRequestState } from "./supplier-request-state";
+import { initialSupplierRequestState, MAX_POLL_FAILURES, supplierRequestError, supplierRequestReducer, viewOf, type SupplierRequestState } from "./supplier-request-state";
 
 // #3 A conta pura do estado do bloco "Pedido ao fornecedor" (#16): sem rede e sem tela.
 
@@ -104,5 +104,60 @@ describe("#3 estado do pedido ao fornecedor: mensagem por status", () => {
 
   it("#3/AC-4: um erro que não é da API vira a mensagem genérica, sem o texto do erro", () => {
     expect(supplierRequestError(new Error("stack interno"))).toBe(errors.other);
+  });
+});
+
+describe("#3/AC-9 estado do pedido ao fornecedor: falha ao carregar", () => {
+  const writing = withRequest({ status: "writing" });
+  const pollFails = (state: SupplierRequestState, times: number): SupplierRequestState =>
+    Array.from({ length: times }).reduce<SupplierRequestState>((acc) => supplierRequestReducer(acc, { type: "pollFailed" }), state);
+
+  it("#3/AC-9: o limite de falhas seguidas da consulta é 5", () => {
+    expect(MAX_POLL_FAILURES).toBe(5);
+  });
+
+  it("#3/AC-9: a carga inicial que falha marca a falha de carga e não inventa pedido", () => {
+    const next = supplierRequestReducer(initialSupplierRequestState, { type: "loadFailed" });
+    expect(next.loadFailed).toBe(true);
+    expect(viewOf(next)).toBeNull();
+  });
+
+  it("#3/AC-9: 4 consultas seguidas que falham não marcam a falha de carga", () => {
+    const next = pollFails(writing, 4);
+    expect(next.loadFailed).toBe(false);
+    expect(next.pollFailures).toBe(4);
+    expect(next.request).toEqual({ status: "writing" });
+  });
+
+  it("#3/AC-9: a 5ª consulta seguida que falha marca a falha de carga", () => {
+    expect(pollFails(writing, 5).loadFailed).toBe(true);
+  });
+
+  it("#3/AC-9: uma consulta que dá certo zera a contagem das falhas seguidas", () => {
+    const afterSuccess = supplierRequestReducer(pollFails(writing, 4), { type: "loaded", request: { status: "writing" } });
+    expect(afterSuccess.pollFailures).toBe(0);
+    expect(pollFails(afterSuccess, 4).loadFailed).toBe(false);
+  });
+
+  it("#3/AC-9: tentar de novo marca o carregamento sem tirar a falha da tela", () => {
+    const next = supplierRequestReducer(pollFails(writing, 5), { type: "reloadStarted" });
+    expect(next.loadFailed).toBe(true);
+    expect(next.reloading).toBe(true);
+  });
+
+  it("#3/AC-9: recarregar com sucesso tira a falha, zera a contagem e mostra o pedido", () => {
+    const retrying = supplierRequestReducer(pollFails(writing, 5), { type: "reloadStarted" });
+    const next = supplierRequestReducer(retrying, { type: "loaded", request: draft });
+    expect(next.loadFailed).toBe(false);
+    expect(next.reloading).toBe(false);
+    expect(next.pollFailures).toBe(0);
+    expect(viewOf(next)).toEqual(draft);
+  });
+
+  it("#3/AC-9: recarregar que falha de novo mantém a falha e solta o carregamento", () => {
+    const retrying = supplierRequestReducer(supplierRequestReducer(initialSupplierRequestState, { type: "loadFailed" }), { type: "reloadStarted" });
+    const next = supplierRequestReducer(retrying, { type: "loadFailed" });
+    expect(next.loadFailed).toBe(true);
+    expect(next.reloading).toBe(false);
   });
 });

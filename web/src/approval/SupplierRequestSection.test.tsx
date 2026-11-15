@@ -53,13 +53,6 @@ describe("#3 pedido ao fornecedor: carregar", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("#3/AC-1: a busca que falha não desenha o bloco nem derruba a tela", async () => {
-    const p = port(null, { load: vi.fn(async () => Promise.reject(new ApiError(500, "x", "corpo cru"))) });
-    const { container } = show(p);
-    await waitFor(() => expect(p.load).toHaveBeenCalled());
-    expect(container.innerHTML).toBe("");
-  });
-
   it("#3/AC-3: com rascunho, mostra o rascunho e os botões", async () => {
     show(port(draft));
     expect(await screen.findByRole("button", { name: t.actions.sendWithNote })).toBeTruthy();
@@ -289,5 +282,39 @@ describe("#3 pedido ao fornecedor: descartar e refazer", () => {
     click(t.actions.redo);
     expect(await screen.findByText(t.errors.conflict)).toBeTruthy();
     expect(button(t.actions.redo).disabled).toBe(false);
+  });
+});
+
+describe("#3/AC-9 pedido ao fornecedor: não foi possível carregar", () => {
+  const boom = () => new ApiError(500, "codigo_interno", "SQLSTATE 23505 corpo cru");
+
+  it("#3/AC-9: a carga inicial que falha mostra o alerta e Tentar de novo, sem o texto do erro", async () => {
+    const p = port(null, { load: vi.fn(async () => Promise.reject(boom())) });
+    show(p);
+    expect(await screen.findByText(t.loadFailed.title)).toBeTruthy();
+    expect(button(t.loadFailed.retry)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/SQLSTATE|codigo_interno|corpo cru/);
+  });
+
+  it("#3/AC-9: Tentar de novo recarrega e o bloco volta ao rascunho", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockRejectedValueOnce(boom()).mockResolvedValue(draft);
+    show(port(null, { load }));
+    await screen.findByText(t.loadFailed.title);
+    click(t.loadFailed.retry);
+    expect(await screen.findByRole("button", { name: t.actions.sendWithNote })).toBeTruthy();
+    expect(screen.queryByText(t.loadFailed.title)).toBeNull();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("#3/AC-9: 5 consultas seguidas que falham enquanto escreve trocam o bloco pelo alerta, e Tentar de novo mostra o pedido pronto", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce({ status: "writing" });
+    for (let i = 0; i < 5; i += 1) load.mockRejectedValueOnce(boom());
+    load.mockResolvedValue(draft);
+    show(port(null, { load }), 5);
+    expect(await screen.findByText(t.loadFailed.title)).toBeTruthy();
+    expect(screen.queryByText(t.writing)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/SQLSTATE|codigo_interno|corpo cru/);
+    click(t.loadFailed.retry);
+    expect(await screen.findByRole("button", { name: t.actions.sendWithNote })).toBeTruthy();
   });
 });

@@ -71,3 +71,57 @@ describe("#3 gancho useSupplierRequest", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("#3/AC-9 gancho useSupplierRequest: falha ao carregar", () => {
+  const writing: SupplierRequestView = { status: "writing" };
+  const boom = () => new ApiError(500, "codigo_interno", "corpo cru");
+
+  it("#3/AC-9: a carga inicial que falha entrega a falha de carga, não um bloco ausente sem aviso", async () => {
+    const { result } = renderHook(() => useSupplierRequest(port({ load: vi.fn(async () => Promise.reject(boom())) }), KEY));
+    await waitFor(() => expect(result.current.loadFailed).toBe(true));
+    expect(result.current.request).toBeNull();
+    expect(JSON.stringify(result.current)).not.toMatch(/corpo cru|codigo_interno/);
+  });
+
+  it("#3/AC-9: 4 consultas seguidas que falham e depois uma que dá certo seguem consultando, sem falha de carga", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(writing);
+    for (let i = 0; i < 4; i += 1) load.mockRejectedValueOnce(boom());
+    load.mockResolvedValueOnce(writing).mockResolvedValue(draft);
+    const { result } = renderHook(() => useSupplierRequest(port({ load }), KEY, 5));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    expect(result.current.loadFailed).toBeFalsy();
+    expect(load).toHaveBeenCalledTimes(7);
+  });
+
+  it("#3/AC-9: 5 consultas seguidas que falham param a consulta e entregam a falha de carga", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(writing).mockRejectedValue(boom());
+    const { result } = renderHook(() => useSupplierRequest(port({ load }), KEY, 5));
+    await waitFor(() => expect(result.current.loadFailed).toBe(true));
+    const calls = load.mock.calls.length;
+    expect(calls).toBe(6);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(load.mock.calls.length).toBe(calls);
+  });
+
+  it("#3/AC-9: onReload recarrega o pedido e tira a falha de carga", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockRejectedValueOnce(boom()).mockResolvedValue(draft);
+    const { result } = renderHook(() => useSupplierRequest(port({ load }), KEY));
+    await waitFor(() => expect(result.current.loadFailed).toBe(true));
+    act(() => result.current.onReload());
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    expect(result.current.loadFailed).toBe(false);
+    expect(result.current.reloading).toBeFalsy();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("#3/AC-9: onReload depois da parada da consulta volta a consultar se o pedido ainda está escrevendo", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(writing);
+    for (let i = 0; i < 5; i += 1) load.mockRejectedValueOnce(boom());
+    load.mockResolvedValueOnce(writing).mockResolvedValue(draft);
+    const { result } = renderHook(() => useSupplierRequest(port({ load }), KEY, 5));
+    await waitFor(() => expect(result.current.loadFailed).toBe(true));
+    act(() => result.current.onReload());
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    expect(result.current.loadFailed).toBe(false);
+  });
+});

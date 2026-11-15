@@ -34,6 +34,7 @@ function setup(request: SupplierRequestView | null, extra: Partial<SupplierReque
     onCancelEdit: vi.fn(),
     onResend: vi.fn(),
     onRedo: vi.fn(),
+    onReload: vi.fn(),
     onDraftTextChange: vi.fn(),
   };
   const view = render(<SupplierRequestBlock request={request} viewer={VIEWER} {...on} {...extra} />);
@@ -203,5 +204,33 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
     expect(screen.queryByRole("button", { name: "Emitir e enviar" })).toBeNull();
     fireEvent.click(button("Refazer"));
     expect(on.onRedo).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("#3/AC-9 bloco Pedido ao fornecedor: não foi possível carregar", () => {
+  it("#3/AC-9: no lugar do bloco, um alerta de erro com a mensagem fixa e Tentar de novo, sem título nem selo", () => {
+    setup(null, { loadFailed: true });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Não foi possível carregar o pedido");
+    expect(button("Tentar de novo")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Pedido ao fornecedor" })).toBeNull();
+    expect(screen.queryByText("Claude")).toBeNull();
+  });
+
+  it("#3/AC-9: Tentar de novo chama o recarregamento", () => {
+    const on = setup(null, { loadFailed: true });
+    fireEvent.click(button("Tentar de novo"));
+    expect(on.onReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("#3/AC-9: recarregando, o botão mostra Carregando… e fica travado", () => {
+    setup(null, { loadFailed: true, reloading: true });
+    expect(button("Carregando…").disabled).toBe(true);
+  });
+
+  it("#3/AC-9: a falha de carga vale mesmo com o pedido escrevendo na memória, e nada do pedido aparece", () => {
+    setup({ status: "writing" }, { loadFailed: true });
+    expect(screen.getByRole("alert").textContent).toContain("Não foi possível carregar o pedido");
+    expect(screen.queryByText("O Claude está preparando o pedido…")).toBeNull();
   });
 });
