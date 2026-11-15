@@ -57,11 +57,17 @@ export function decided(
   };
 }
 
-export const partialE3 = () =>
+export const partialE3 = (): DockAction =>
   DockAction.partial([{ sku: 'SKU-1', quantity: Quantity.of(20, 'UN'), disposition: 'devolver' }]);
 
+export type MemoryOutbox = {
+  readonly outbox: ReturnNoteOutbox;
+  readonly rows: Published<ReturnNoteMessage>[];
+  readonly calls: { publish: number; list: number };
+};
+
 /** #7 Dublê em memória da caixa de saída: grava toda publicação e conta as chamadas; a idempotência testada é a da varredura. */
-export function memoryOutbox(seed: readonly ReturnNoteMessage[] = []) {
+export function memoryOutbox(seed: readonly ReturnNoteMessage[] = []): MemoryOutbox {
   const rows: Published<ReturnNoteMessage>[] = seed.map((m, i) => ({ ...m, id: i + 1, publishedAt: '2026-11-12T10:00:00Z' }));
   const calls = { publish: 0, list: 0 };
   const outbox: ReturnNoteOutbox = {
