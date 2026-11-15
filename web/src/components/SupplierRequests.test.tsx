@@ -279,4 +279,21 @@ describe("#20 SupplierRequests: cobrar", () => {
     expect(screen.getByText("Aguardando (cobrado)")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
   });
+
+  it("#5/AC-4: depois de cobrar, o bloco reaberto não tem 'Próximo passo:' nem 'Cobrar', e a linha também não", async () => {
+    renderScreen();
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
+    await screen.findByText(/Cobrança enviada por você/);
+    fireEvent.click(chip(/^Aguardando/));
+    // #5/AC-4 Fecha antes de reabrir, como no teste de reabrir a linha cobrada (#20).
+    fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
+    fireEvent.click(rowOf("59738"));
+
+    const block = screen.getByRole("region", { name: "Pedido ao fornecedor" });
+    expect(within(block).queryByText(/Próximo passo:/)).toBeNull();
+    expect(within(block).queryByRole("button", { name: "Cobrar" })).toBeNull();
+    expect(within(rowOf("59738")).queryByRole("button", { name: "Cobrar" })).toBeNull();
+  });
 });

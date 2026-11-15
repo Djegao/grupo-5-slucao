@@ -114,7 +114,12 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
       {openRow ? (
         <Drawer isOpen title={texts.fila.drawerTitle(openRow.invoiceNumber)} onClose={() => dispatch({ type: "close" })} className="shell-connection-panel">
           <DrawerBody
-            conversation={screen.charged[openRow.id] ? { ...conversationOf(openRow), status: "waitingCharged" } : conversationOf(openRow)}
+            conversation={
+              screen.charged[openRow.id]
+                ? // #5/AC-4 Pedido já cobrado nesta sessão: o bloco fica "Aguardando (cobrado)" e sem próximo passo (estado 9 do wireframe, #20).
+                  { ...conversationOf(openRow), status: "waitingCharged", reading: { ...conversationOf(openRow).reading, nextStep: null } }
+                : conversationOf(openRow)
+            }
             flow={flow}
             draft={currentDraft(draftOf(openRow), flow)}
             onNextStep={(step) => handleNextStep(openRow, step)}
