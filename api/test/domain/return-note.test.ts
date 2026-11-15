@@ -178,6 +178,12 @@ describe('devolução da proposta decidida: returnNoteFor', () => {
     expect(lines(note)).toEqual([['F08-002', 7 / 6, 'CX']]);
   });
 
+  it('#1/AC-4 #6/AC-3: recusar soma o recebido por unidade antes de converter (seis linhas de 1 UN dão 1 CX, não 0,9999999999999999)', () => {
+    const r = receipt(Array.from({ length: 6 }, () => ({ supplierCode: 'F08-002', amount: 1 })));
+    const note = returnNoteFor(invoice, decision('E2', DockAction.refuse()), r, [box]);
+    expect(lines(note)).toEqual([['F08-002', 1, 'CX']]);
+  });
+
   it('#1/AC-4 #6/AC-3: recusar uma NAO_CATALOGADA com recebimento até o dia da decisão devolve os itens recebidos', () => {
     const onDecisionDay = receipt([{ supplierCode: 'F08-001', amount: 40 }], { receivedOn: '2026-11-12' });
     const earlier = receipt([{ supplierCode: 'F08-001', amount: 40 }], { receivedOn: '2026-11-10' });
