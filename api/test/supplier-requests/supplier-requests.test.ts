@@ -50,7 +50,7 @@ describe('abrir o pedido para as propostas decididas', () => {
       asks: ['Retirar o item trocado', 'Entregar o item pedido'],
       channel: 'mock',
       createdBy: 'ana@jachegou.test',
-      createdAt: '2026-11-16T11:00:00.000Z',
+      createdAt: '2026-11-16T12:00:00.000Z',
       body: null,
     });
   });
@@ -175,12 +175,12 @@ describe('o Claude escreve o texto', () => {
 
   it('#156 a rodada escreve todos os pedidos escrevendo e para no limite do Claude', async () => {
     const w = await openedWorld();
-    expect(await writeDrafts(w.deps, goodAsk)).toEqual({ drafted: 1, discarded: 0, failed: 0, stopped: false, failedIds: [] });
+    expect(await writeDrafts(w.deps, goodAsk)).toEqual({ drafted: 1, discarded: 0, skipped: 0, failed: 0, stopped: false, failedIds: [] });
     const w2 = await openedWorld();
     const limited = (async () => {
       throw new ClaudeError('rate_limit', 'limite', 429);
     }) as Ask;
-    expect(await writeDrafts(w2.deps, limited)).toEqual({ drafted: 0, discarded: 0, failed: 1, stopped: true, failedIds: [w2.id] });
+    expect(await writeDrafts(w2.deps, limited)).toEqual({ drafted: 0, discarded: 0, skipped: 0, failed: 1, stopped: true, failedIds: [w2.id] });
   });
 
   it('#156 o pedido que deixou de qualificar é descartado pelo sistema e a rodada não o deixa escrevendo', async () => {
@@ -241,6 +241,32 @@ describe('o Claude escreve o texto', () => {
     expect(calls).toBe(1);
     expect(result).toMatchObject({ discarded: 1, failed: 0 });
     expect(w.requests.rows.get(w.id)).toMatchObject({ status: 'discarded', discardedBy: SYSTEM_ACTOR, discardReason: 'claude_unavailable' });
+  });
+
+  it('#156/AC-1 a proposta decidida há dois dias, varrida agora, é escrita: a janela conta da abertura do pedido', async () => {
+    const w = world({ cases: [E2_CASE()] });
+    w.clock.current = new Date('2026-11-18T12:00:00.000Z');
+    const opened = await openForDecided(w.deps);
+    let calls = 0;
+    const ask = (async () => {
+      calls += 1;
+      return { body: GOOD_BODY };
+    }) as Ask;
+    expect(await writeDrafts(w.deps, ask)).toMatchObject({ drafted: 1, discarded: 0, failed: 0 });
+    expect(calls).toBe(1);
+    expect(w.requests.rows.get(opened.opened[0]!)).toMatchObject({ status: 'draft', createdAt: '2026-11-18T12:00:00.000Z' });
+  });
+
+  it('#156 o conflito esperado da rodada (a pessoa descartou no meio) conta em skipped, fora de failed', async () => {
+    const w = await openedWorld();
+    const ask = (async () => {
+      const row = w.requests.rows.get(w.id)!;
+      w.requests.rows.set(w.id, { ...row, updatedAt: '2026-11-16T12:00:01.000Z' });
+      return { body: GOOD_BODY };
+    }) as Ask;
+    const result = await writeDrafts(w.deps, ask);
+    expect(result).toEqual({ drafted: 0, discarded: 0, skipped: 1, failed: 0, stopped: false, failedIds: [] });
+    expect(w.logs).toEqual([]);
   });
 
   it('#156 a falha que não é global entra no log, sem o texto da exceção, e nos ids que falharam', async () => {

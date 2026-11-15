@@ -97,8 +97,7 @@ export type DecidedCase = {
   readonly goodsEntered: boolean;
   /** #156: o contexto do catálogo de fatos, como o dossiê o lê. */
   readonly context: CheckContext;
-  /** #156: quando e por quem foi decidida; sem o dado, vale o instante da varredura e o sistema. */
-  readonly decidedAt: string | null;
+  /** #156: por quem foi decidida; sem o dado, vale o sistema. O pedido nasce no instante da varredura. */
   readonly decidedBy: string | null;
 };
 
@@ -120,7 +119,8 @@ export type SupplierRequestConfig = {
   /** #156: o CNPJ da Já Chegou, o emitente da nota de devolução. */
   readonly issuerCnpj: string;
   /** #156/AC-5: o canal escolhido pela configuração; fica no pedido ao abrir. */
-  readonly channel: SupplierRequestChannel;};
+  readonly channel: SupplierRequestChannel;
+};
 
 export type SupplierRequestDeps = {
   readonly requests: SupplierRequestRepository;

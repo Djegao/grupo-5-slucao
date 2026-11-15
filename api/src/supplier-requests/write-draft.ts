@@ -58,6 +58,8 @@ async function discardBySystem(
 export type WriteDraftsResult = {
   readonly drafted: number;
   readonly discarded: number;
+  /** #156: conflito esperado (a pessoa descartou ou editou no meio da rodada): o pedido segue com ela, não é falha. */
+  readonly skipped: number;
   readonly failed: number;
   /** #156: os ids dos pedidos que falharam nesta rodada, para quem chama acompanhar. */
   readonly failedIds: readonly string[];
@@ -72,8 +74,9 @@ export type WriteDraftsOptions = { readonly limit?: number };
 export async function writeDrafts(deps: SupplierRequestDeps, ask: Ask, options: WriteDraftsOptions = {}): Promise<WriteDraftsResult> {
   let drafted = 0;
   let discarded = 0;
+  let skipped = 0;
   const failedIds: string[] = [];
-  const result = (stopped: boolean): WriteDraftsResult => ({ drafted, discarded, failed: failedIds.length, stopped, failedIds });
+  const result = (stopped: boolean): WriteDraftsResult => ({ drafted, discarded, skipped, failed: failedIds.length, stopped, failedIds });
   const pending = await deps.requests.listByStatus('writing');
   for (const request of pending.slice(0, options.limit ?? MAX_PER_RUN)) {
     try {
@@ -81,7 +84,7 @@ export async function writeDrafts(deps: SupplierRequestDeps, ask: Ask, options: 
       if (result.kind === 'ok') {
         if (result.status === 'draft') drafted += 1;
         else discarded += 1;
-      } else failedIds.push(request.id);
+      } else skipped += 1;
     } catch (error) {
       failedIds.push(request.id);
       deps.log(`pedido ${request.id}: falhou (${storedError(error, deps.secrets)})`);

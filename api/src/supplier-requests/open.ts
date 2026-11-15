@@ -72,7 +72,7 @@ async function openOne(deps: SupplierRequestDeps, decided: DecidedCase): Promise
   if (hasOpenRequest(existing, decided.invoice.accessKey, REQUEST_TYPE)) return { kind: 'skipped', reason: 'open_request_exists' };
   // #156: o que já foi tratado (enviado ou descartado) não reabre pela varredura; "refazer" é da pessoa.
   if (existing.length > 0) return { kind: 'skipped', reason: 'already_handled' };
-  return openPlanned(deps, planned, decided.decidedBy ?? SYSTEM_ACTOR, decided.decidedAt ?? deps.clock.now().toISOString());
+  return openPlanned(deps, planned, decided.decidedBy ?? SYSTEM_ACTOR, deps.clock.now().toISOString());
 }
 
 /**

@@ -134,7 +134,6 @@ export const E2_CASE = (): DecidedCase => ({
   invoice: originInvoice(),
   goodsEntered: false,
   context: emptyContext(),
-  decidedAt: '2026-11-16T11:00:00.000Z',
   decidedBy: 'ana@jachegou.test',
 });
 
