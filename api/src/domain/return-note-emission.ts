@@ -3,17 +3,17 @@ import type { InvoiceView } from './invoice.js';
 import { Money } from './money.js';
 import type { ReturnNotePlan, ReturnedLine } from './return-note-plan.js';
 
-// #156: a nota de devolução, do rascunho à emissão emulada. O formato é o das notas do kit
-// (data/kit/notas.json): chaves em português como a fonte, valores em reais com duas casas.
+/* #156: a nota de devolução, do rascunho à emissão emulada. O formato é o das notas do kit
+   (data/kit/notas.json): chaves em português como a fonte, valores em reais com duas casas. */
 
 /** #156: a linha no formato dos itens do kit. */
 export type KitItem = {
-  readonly codigo_fornecedor: string; // ADR-002
+  readonly codigo_fornecedor: string; // ADR-001
   readonly sku: string | null;
-  readonly descricao: string; // ADR-002
-  readonly quantidade: number; // ADR-002
-  readonly unidade: string; // ADR-002
-  readonly preco_unitario: number; // ADR-002
+  readonly descricao: string; // ADR-001
+  readonly quantidade: number; // ADR-001
+  readonly unidade: string; // ADR-001
+  readonly preco_unitario: number; // ADR-001
   readonly valor: number;
 };
 
@@ -21,12 +21,12 @@ const reais = (m: Money): number => m.cents / 100;
 
 const kitItem = (l: ReturnedLine): KitItem =>
   Object.freeze({
-    codigo_fornecedor: l.supplierCode,
+    codigo_fornecedor: l.supplierCode, // ADR-001
     sku: l.sku,
-    descricao: l.description,
-    quantidade: l.quantity.amount,
-    unidade: l.quantity.unit,
-    preco_unitario: reais(l.unitPrice),
+    descricao: l.description, // ADR-001
+    quantidade: l.quantity.amount, // ADR-001
+    unidade: l.quantity.unit, // ADR-001
+    preco_unitario: reais(l.unitPrice), // ADR-001
     valor: reais(l.value),
   });
 
@@ -38,9 +38,7 @@ export type ReturnNoteDraft = {
   /** #156: o CD ou a loja que devolve, o destino da nota de origem. */
   readonly destination: string;
   readonly lines: readonly ReturnedLine[];
-  readonly itens: readonly KitItem[]; // ADR-002
   readonly total: Money;
-  readonly valor_total: number; // ADR-002
 };
 
 export function buildReturnNoteDraft(invoice: InvoiceView, plan: ReturnNotePlan): ReturnNoteDraft {
@@ -50,9 +48,7 @@ export function buildReturnNoteDraft(invoice: InvoiceView, plan: ReturnNotePlan)
     supplierId: invoice.supplierId,
     destination: invoice.store,
     lines: plan.lines,
-    itens: Object.freeze(plan.lines.map(kitItem)),
     total: plan.total,
-    valor_total: reais(plan.total),
   });
 }
 
@@ -67,18 +63,18 @@ export function assertDraftMatchesQueue(draft: ReturnNoteDraft, queueValue: Mone
 
 /** #156/AC-4: a nota de devolução emitida pelo mock, no formato das notas do kit. */
 export type ReturnNote = {
-  readonly nota_id: string; // ADR-002
-  readonly chave: string; // ADR-002
-  readonly numero: number; // ADR-002
-  readonly serie: number; // ADR-002
-  readonly emitente: string; // ADR-002
-  readonly fornecedor_id: string; // ADR-002
-  readonly destino: string; // ADR-002
-  readonly data_emissao: string; // ADR-002
-  readonly nota_referenciada: string; // ADR-002
-  readonly natureza: 'devolucao'; // ADR-002
-  readonly itens: readonly KitItem[]; // ADR-002
-  readonly valor_total: number; // ADR-002
+  readonly nota_id: string; // ADR-001
+  readonly chave: string; // ADR-001
+  readonly numero: number; // ADR-001
+  readonly serie: number; // ADR-001
+  readonly emitente: string; // ADR-001
+  readonly fornecedor_id: string; // ADR-001
+  readonly destino: string; // ADR-001
+  readonly data_emissao: string; // ADR-001
+  readonly nota_referenciada: string; // ADR-001
+  readonly natureza: 'devolucao'; // ADR-001
+  readonly itens: readonly KitItem[]; // ADR-001
+  readonly valor_total: number; // ADR-001
 };
 
 /** #156: a série própria da devolução, fora da faixa das notas do kit. */
@@ -103,7 +99,7 @@ export function accessKeyCheckDigit(digits: string): number {
 
 const pad = (n: number, width: number): string => String(n).padStart(width, '0');
 
-function buildAccessKey(args: { issuedOn: string; cnpj: string; numero: number; queueRowId: number }): string {
+function buildAccessKey(args: { issuedOn: string; cnpj: string; sequence: number; queueRowId: number }): string {
   const [year, month] = args.issuedOn.split('-');
   const body =
     UF_SAO_PAULO +
@@ -112,7 +108,7 @@ function buildAccessKey(args: { issuedOn: string; cnpj: string; numero: number; 
     args.cnpj +
     MODEL_NFE +
     pad(RETURN_NOTE_SERIES, 3) +
-    pad(args.numero, 9) +
+    pad(args.sequence, 9) +
     NORMAL_EMISSION +
     pad(args.queueRowId % 100_000_000, 8);
   return body + String(accessKeyCheckDigit(body));
@@ -151,17 +147,17 @@ export function emitReturnNote(draft: ReturnNoteDraft, ctx: EmissionContext): Re
     throw new DomainError('ReturnNote: o CNPJ do emitente deve ter 14 dígitos');
   }
   return Object.freeze({
-    nota_id: `ND-${pad(ctx.sequence, 4)}`,
-    chave: buildAccessKey({ issuedOn: ctx.issuedOn, cnpj, numero: ctx.sequence, queueRowId: ctx.queueRowId }),
-    numero: ctx.sequence,
-    serie: RETURN_NOTE_SERIES,
-    emitente: ctx.issuerCnpj,
-    fornecedor_id: draft.supplierId,
-    destino: draft.destination,
-    data_emissao: ctx.issuedOn,
-    nota_referenciada: draft.invoiceAccessKey,
-    natureza: 'devolucao',
-    itens: draft.itens,
-    valor_total: draft.valor_total,
+    nota_id: `ND-${pad(ctx.sequence, 4)}`, // ADR-001
+    chave: buildAccessKey({ issuedOn: ctx.issuedOn, cnpj, sequence: ctx.sequence, queueRowId: ctx.queueRowId }), // ADR-001
+    numero: ctx.sequence, // ADR-001
+    serie: RETURN_NOTE_SERIES, // ADR-001
+    emitente: ctx.issuerCnpj, // ADR-001
+    fornecedor_id: draft.supplierId, // ADR-001
+    destino: draft.destination, // ADR-001
+    data_emissao: ctx.issuedOn, // ADR-001
+    nota_referenciada: draft.invoiceAccessKey, // ADR-001
+    natureza: 'devolucao', // ADR-001
+    itens: Object.freeze(draft.lines.map(kitItem)), // ADR-001
+    valor_total: reais(draft.total), // ADR-001
   });
 }

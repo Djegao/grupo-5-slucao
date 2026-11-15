@@ -21,9 +21,13 @@ describe('rascunho da nota de devolução', () => {
   it('#156/AC-2 tem só a linha devolvida, no formato dos itens do kit', () => {
     const d = draft();
     expect(d.invoiceAccessKey).toBe(ORIGIN_KEY);
-    expect(d.itens).toEqual([
+    expect(d.lines.map((l) => l.supplierCode)).toEqual(['F11-001']);
+    expect(d.total.cents).toBe(216320);
+    expect(d).not.toHaveProperty('itens');
+    expect(d).not.toHaveProperty('valor_total');
+    expect(emitReturnNote(d, CTX).itens).toEqual([
       {
-        codigo_fornecedor: 'F11-001', // ADR-002
+        codigo_fornecedor: 'F11-001',
         sku: 'SKU-2001',
         descricao: 'Shampoo 350 ml',
         quantidade: 40,
@@ -32,7 +36,7 @@ describe('rascunho da nota de devolução', () => {
         valor: 2163.2,
       },
     ]);
-    expect(d.valor_total).toBe(2163.2); // ADR-002
+    expect(emitReturnNote(d, CTX).valor_total).toBe(2163.2);
   });
 
   it('#156/AC-2 o valor_total bate com o valor da fila da #140, em centavos', () => {
@@ -69,12 +73,13 @@ describe('emissão emulada da nota de devolução', () => {
     expect(chave.slice(43)).toBe(String(accessKeyCheckDigit(chave.slice(0, 43))));
   });
 
-  it('#156/AC-4 calcula o DV pelo módulo 11 da NF-e', () => {
-    // pesos 2..9 da direita para a esquerda: 4*2+3*3+2*4+1*5 = 30; 30 % 11 = 8; DV = 11 - 8
-    expect(accessKeyCheckDigit('1234')).toBe(3);
-    expect(accessKeyCheckDigit('51')).toBe(5); // 1*2 + 5*3 = 17; 17 % 11 = 6; DV = 11 - 6
-    expect(accessKeyCheckDigit('14')).toBe(0); // 4*2 + 1*3 = 11; resto 0 → DV 0
-    expect(accessKeyCheckDigit('23')).toBe(0); // 3*2 + 2*3 = 12; resto 1 → DV 0
+  it.each([
+    ['1234', 3, 'resto 8, DV 11 - 8'],
+    ['51', 5, 'resto 6, DV 11 - 6'],
+    ['14', 0, 'resto 0, DV 0'],
+    ['23', 0, 'resto 1, DV 0'],
+  ])('#156/AC-4 calcula o DV pelo módulo 11 da NF-e de %s (%#)', (digits, expected) => {
+    expect(accessKeyCheckDigit(digits)).toBe(expected);
   });
 
   it('#156/AC-4 a mesma devolução, de novo, devolve a nota já emitida e não outra', () => {

@@ -2,8 +2,8 @@ import { renderText, textChecks, type FactCatalog } from './dossier.js';
 import { DomainError, InvalidTransitionError } from './errors.js';
 import type { ReturnNote } from './return-note-emission.js';
 
-// #156: o pedido ao fornecedor: o e-mail (e, quando a decisão devolve, a nota de devolução emitida)
-// que o agente prepara para a pessoa revisar, emitir e enviar. Nada sai sem uma pessoa (AC-3).
+/* #156: o pedido ao fornecedor: o e-mail (e, quando a decisão devolve, a nota de devolução emitida)
+   que o agente prepara para a pessoa revisar, emitir e enviar. Nada sai sem uma pessoa (AC-3). */
 
 export type SupplierRequestType = // #156
   | 'return_note'
@@ -50,6 +50,10 @@ export type SupplierRequestAttachment = {
 };
 
 export type SupplierRequestSnapshot = {
+  /** #156: a identidade do pedido, dada por quem o abre: o domínio não gera identificadores. */
+  readonly id: string;
+  readonly createdAt: string;
+  readonly createdBy: string;
   readonly invoiceAccessKey: string;
   readonly supplierId: string;
   readonly requestType: SupplierRequestType;
@@ -75,6 +79,10 @@ export type SupplierRequestSnapshot = {
 };
 
 export type SupplierRequestOpenProps = {
+  id: string;
+  /** #156: quando e por quem o pedido foi aberto: o instante da decisão e quem decidiu. */
+  createdAt: string;
+  createdBy: string;
   invoiceAccessKey: string;
   supplierId: string;
   requestType: SupplierRequestType;
@@ -128,6 +136,9 @@ export function defaultDueOn(draftedAt: string, businessDays = 3): string {
 
 /** #156: o pedido ao fornecedor: raiz do agregado. Os asks e os anexos não mudam por edição. */
 export class SupplierRequest {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly createdBy: string;
   readonly invoiceAccessKey: string;
   readonly supplierId: string;
   readonly requestType: SupplierRequestType;
@@ -135,9 +146,12 @@ export class SupplierRequest {
   readonly subject: string;
   readonly asks: readonly string[];
   readonly channel: SupplierRequestChannel;
-  private data: Omit<SupplierRequestSnapshot, 'invoiceAccessKey' | 'supplierId' | 'requestType' | 'to' | 'subject' | 'asks' | 'channel'>;
+  private data: Omit<SupplierRequestSnapshot, 'id' | 'createdAt' | 'createdBy' | 'invoiceAccessKey' | 'supplierId' | 'requestType' | 'to' | 'subject' | 'asks' | 'channel'>;
 
   private constructor(s: SupplierRequestSnapshot) {
+    this.id = s.id;
+    this.createdAt = s.createdAt;
+    this.createdBy = s.createdBy;
     this.invoiceAccessKey = s.invoiceAccessKey;
     this.supplierId = s.supplierId;
     this.requestType = s.requestType;
@@ -166,6 +180,7 @@ export class SupplierRequest {
 
   /** #156/AC-1: o pedido nasce escrevendo e espera a tarefa do Claude. Nada é emitido nem enviado. */
   static open(props: SupplierRequestOpenProps): SupplierRequest {
+    if (props.id.trim() === '') throw new DomainError('SupplierRequest: o pedido precisa de identidade');
     if (props.to.trim() === '') throw new DomainError('SupplierRequest: o fornecedor não tem e-mail no cadastro');
     return new SupplierRequest({
       ...props,
@@ -194,6 +209,9 @@ export class SupplierRequest {
 
   snapshot(): SupplierRequestSnapshot {
     return Object.freeze({
+      id: this.id,
+      createdAt: this.createdAt,
+      createdBy: this.createdBy,
       invoiceAccessKey: this.invoiceAccessKey,
       supplierId: this.supplierId,
       requestType: this.requestType,
@@ -334,9 +352,9 @@ export class SupplierRequest {
     this.data = { ...this.data, status: 'send_failed', sendFailure: reason };
   }
 
-  /** #156: a pessoa descarta o pedido, escrevendo ou em rascunho. */
+  /** #156: a pessoa descarta o pedido, escrevendo, em rascunho ou com o envio falhado. */
   discard(by: string, at: string, reason: string): void {
-    this.assertStatus(['writing', 'draft'], 'descartar');
+    this.assertStatus(['writing', 'draft', 'send_failed'], 'descartar');
     this.data = { ...this.data, status: 'discarded', discardedBy: by, discardedAt: at, discardReason: reason };
   }
 

@@ -16,7 +16,8 @@ import {
 import { emptyContext } from './fixtures.js';
 import { decided, originInvoice, partialReturn } from './supplier-request-fixtures.js';
 
-const DRAFTED_AT = '2026-11-16T12:00:00.000Z'; // segunda-feira
+const DRAFTED_AT_MONDAY = '2026-11-16T12:00:00.000Z';
+const DRAFTED_AT = DRAFTED_AT_MONDAY;
 const DUE_ON = '2026-11-19';
 const META = { draftedAt: DRAFTED_AT, model: 'claude-opus-5-5', dueOn: DUE_ON };
 
@@ -38,6 +39,9 @@ const writing = (): SupplierRequest =>
     subject: 'NF 20046 · devolução de mercadoria',
     asks: planFor().asks,
     channel: 'mock',
+    id: 'sr-1',
+    createdAt: DRAFTED_AT,
+    createdBy: 'ana',
   });
 
 const drafted = (): SupplierRequest => {
@@ -47,6 +51,13 @@ const drafted = (): SupplierRequest => {
 };
 
 describe('pedido ao fornecedor: nascimento e rascunho', () => {
+  it('#156/AC-1 nasce com identidade, quando e por quem foi aberto', () => {
+    const snap = writing().snapshot();
+    expect(snap.id).toBe('sr-1');
+    expect(snap.createdAt).toBe(DRAFTED_AT);
+    expect(snap.createdBy).toBe('ana');
+  });
+
   it('#156/AC-1 nasce escrevendo, com o e-mail do cadastro, o assunto e os asks da regra', () => {
     const r = writing();
     expect(r.status).toBe('writing');
@@ -164,6 +175,19 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
     expect(r.discardReason).toBe('fornecedor errado');
   });
 
+  it('#156 descarta também o envio falhado: a nota segue emitida e anexa', () => {
+    const r = drafted();
+    r.attachReturnNote(note());
+    r.markSendFailed('provedor fora do ar');
+    r.discard('ana', '2026-11-16T15:00:00.000Z', 'fornecedor trocado');
+    expect(r.status).toBe('discarded');
+    expect(r.discardedBy).toBe('ana');
+    expect(r.discardedAt).toBe('2026-11-16T15:00:00.000Z');
+    expect(r.discardReason).toBe('fornecedor trocado');
+    expect(r.attachments).toHaveLength(1);
+    expect(r.isOpen).toBe(false);
+  });
+
   it('#156 descarta também enquanto escreve, mas não depois de enviado', () => {
     const w = writing();
     w.discard('ana', DRAFTED_AT, 'não vale');
@@ -249,14 +273,16 @@ describe('pedido aberto por nota de origem', () => {
 });
 
 describe('prazo de resposta', () => {
-  it('#156 padrão: 3 dias úteis depois do rascunho', () => {
-    expect(defaultDueOn('2026-11-16T12:00:00.000Z')).toBe('2026-11-19'); // seg → qui
+  it('#156 padrão: 3 dias úteis depois do rascunho, de segunda a quinta', () => {
+    expect(defaultDueOn(DRAFTED_AT_MONDAY)).toBe('2026-11-19');
   });
 
-  it('#156 pula sábado e domingo', () => {
-    expect(defaultDueOn('2026-11-18T10:00:00.000Z')).toBe('2026-11-23'); // qua → seg
-    expect(defaultDueOn('2026-11-20T10:00:00.000Z')).toBe('2026-11-25'); // sex → qua
-    expect(defaultDueOn('2026-11-21T10:00:00.000Z')).toBe('2026-11-25'); // sáb → qua
+  it.each([
+    ['quarta a segunda, pulando o fim de semana', '2026-11-18T10:00:00.000Z', '2026-11-23'],
+    ['sexta a quarta, pulando o fim de semana', '2026-11-20T10:00:00.000Z', '2026-11-25'],
+    ['sábado a quarta, pulando o fim de semana', '2026-11-21T10:00:00.000Z', '2026-11-25'],
+  ])('#156 pula sábado e domingo: %s', (_caso, draftedAt, expected) => {
+    expect(defaultDueOn(draftedAt)).toBe(expected);
   });
 
   it('#156 data inválida é erro do domínio', () => {

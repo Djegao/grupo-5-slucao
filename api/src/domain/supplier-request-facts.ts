@@ -2,12 +2,12 @@ import type { Fact, FactCatalog } from './dossier.js';
 import { DomainError } from './errors.js';
 import type { ReturnNoteDraft } from './return-note-emission.js';
 
-// #156: os fatos da devolução, acrescentados ao catálogo do dossiê (domain/dossier.ts). O número da
-// nota de origem já está lá, em `nota.numero`. No texto do e-mail um fato aparece só como {{chave}}.
-//
-//   devolucao.item[<código>].quantidade | .preco_unitario | .valor | .descricao
-//   devolucao.valor_total
-//   pedido.prazo
+/* #156: os fatos da devolução, acrescentados ao catálogo do dossiê (domain/dossier.ts). O número da
+   nota de origem já está lá, em `nota.numero`. No texto do e-mail um fato aparece só como {{chave}}.
+
+     devolucao.item[<código>].quantidade | .preco_unitario | .valor | .descricao
+     devolucao.valor_total
+     pedido.prazo */
 
 export const returnFactKey = {
   item: (supplierCode: string, field: 'quantidade' | 'preco_unitario' | 'valor' | 'descricao'): string =>

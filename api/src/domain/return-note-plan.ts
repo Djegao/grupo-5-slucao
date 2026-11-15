@@ -6,8 +6,8 @@ import { Money } from './money.js';
 import type { ProposalState } from './proposal.js';
 import type { Quantity } from './quantity.js';
 
-// #156: a decisão que pede uma nota de devolução ao fornecedor. Quem monta as linhas, os valores e o
-// que se pede é a regra, a partir da decisão aprovada; o Claude só escreve o e-mail.
+/* #156: a decisão que pede uma nota de devolução ao fornecedor. Quem monta as linhas, os valores e o
+   que se pede é a regra, a partir da decisão aprovada; o Claude só escreve o e-mail. */
 
 /** #156: o que a proposta decidida entrega a esta regra. A `Proposal` já tem esta forma. */
 export type DecidedProposal = {
@@ -44,7 +44,8 @@ const ASKS: Readonly<Record<ReturnNoteKind, readonly string[]>> = Object.freeze(
   recusa_apos_entrada: Object.freeze(['Retirar a mercadoria']), // ADR-002
 });
 
-const PARTIAL_KINDS: ReadonlySet<Classification> = new Set(['E1', 'E2', 'E3']);
+/** #156: as classificações em que receber parcial devolve a diferença. */
+const isPartialKind = (c: Classification): c is 'E1' | 'E2' | 'E3' => c === 'E1' || c === 'E2' || c === 'E3';
 
 function returnedLine(item: InvoiceItem, quantity: Quantity): ReturnedLine {
   if (quantity.unit !== item.quantity.unit) {
@@ -87,13 +88,14 @@ export function planReturnNote(input: {
   const action = proposal.dockAction;
 
   if (action.kind === 'receber_parcial') {
-    if (!PARTIAL_KINDS.has(proposal.classification)) return null;
+    const kind = proposal.classification;
+    if (!isPartialKind(kind)) return null;
     const lines = action.lines.map((partial) => {
       const item = invoice.items.find((i) => i.sku !== null && i.sku === partial.sku);
       if (!item) throw new DomainError(`ReturnNote: o SKU ${partial.sku} não está na nota de origem ${invoice.number}`);
       return returnedLine(item, partial.quantity);
     });
-    return build(proposal.classification as 'E1' | 'E2' | 'E3', lines);
+    return build(kind, lines);
   }
 
   if (action.kind === 'recusar' && goodsEntered && proposal.classification !== 'E6') {
