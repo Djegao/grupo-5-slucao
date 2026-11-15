@@ -64,11 +64,15 @@ describe('abrir o pedido para as propostas decididas', () => {
     expect(w.sender.sent).toHaveLength(0);
   });
 
-  it('#156/AC-1 a recusa com mercadoria já entrada abre o pedido com o assunto da mercadoria recusada', async () => {
+  it('#156/AC-1 a recusa com mercadoria já entrada está fora da entrega: nem pedido nem linha na fila, e sai como not_qualifying', async () => {
     const refused = { ...E2_CASE(), proposal: decided('E2', DockAction.refuse()), goodsEntered: true };
     const w = world({ cases: [refused] });
-    await openForDecided(w.deps);
-    expect([...w.requests.rows.values()][0]?.subject).toBe('NF 20046 · devolução de mercadoria recusada');
+    const result = await openForDecided(w.deps);
+    expect(result.opened).toEqual([]);
+    expect(result.skipped).toEqual([{ invoiceAccessKey: ORIGIN_KEY, reason: 'not_qualifying' }]);
+    expect(w.requests.rows.size).toBe(0);
+    expect(w.queue.rows.size).toBe(0);
+    expect(w.queue.publishes).toBe(0);
   });
 
   it('#156/AC-1 a decisão que não devolve mercadoria não abre pedido', async () => {

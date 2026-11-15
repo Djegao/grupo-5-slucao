@@ -15,11 +15,12 @@ import type { DecidedCase, SupplierRequestDeps, ReturnNoteWorkQueue } from './po
 
 export type PlannedCase = { readonly decided: DecidedCase; readonly plan: ReturnNotePlan; readonly draft: ReturnNoteDraft };
 
-/** #156/AC-1: a regra aplicada ao caso; `null` quando a decisão não devolve ou a nota de origem não fecha com ela. */
+/** #156/AC-1: a regra aplicada ao caso (abrir, reescrever, refazer e emitir passam por aqui); `null` quando a decisão não devolve ou a nota de origem não fecha com ela. */
 export function planCase(decided: DecidedCase): PlannedCase | null {
   try {
     const plan = planReturnNote({ proposal: decided.proposal, invoice: decided.invoice, goodsEntered: decided.goodsEntered });
-    if (!plan) return null;
+    // #156: a recusa com mercadoria já entrada está fora desta entrega; só receber parcial de E1, E2 e E3 abre pedido.
+    if (!plan || plan.kind === 'recusa_apos_entrada') return null;
     return { decided, plan, draft: buildReturnNoteDraft(decided.invoice, plan) };
   } catch (error) {
     if (error instanceof DomainError) return null;
