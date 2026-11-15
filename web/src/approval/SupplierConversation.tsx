@@ -108,6 +108,9 @@ export function SupplierConversation({ conversation, onNextStep }: SupplierConve
         <Text as="p" variant="body-base">
           {t.summary(reading.summary)}
         </Text>
+        <Text as="p" variant="body-base">
+          {t.nextStepLabel}:
+        </Text>
         <Button variant="outline" size="base" onClick={() => onNextStep(reading.nextStep)}>
           {t.nextStep[reading.nextStep]}
         </Button>

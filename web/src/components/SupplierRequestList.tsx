@@ -13,7 +13,7 @@ import { shortDate, type SupplierFilter, type SupplierFilterValue, type Supplier
 const t = texts.supplierRequests;
 
 /** #19 A rota em português da Fila de aprovação, que o vazio geral oferece. */
-const FILA_ROUTE = "/pagar/fila"; // ADR-004
+const APPROVAL_QUEUE_ROUTE = "/pagar/fila"; // ADR-004
 
 const FILTERS: SupplierFilter[] = ["waiting", "fulfilled", "needsYou", "late"];
 
@@ -107,7 +107,7 @@ export function SupplierRequestList(props: SupplierRequestListProps): ReactEleme
       loadingLabel={t.loading}
       errorTitle={t.error}
       emptyLabel={t.empty.title}
-      empty={<EmptyState title={t.empty.title} description={t.empty.description} action={{ label: t.empty.action, to: FILA_ROUTE }} />}
+      empty={<EmptyState title={t.empty.title} description={t.empty.description} action={{ label: t.empty.action, to: APPROVAL_QUEUE_ROUTE }} />}
     >
       {() =>
         rows.length === 0 ? (

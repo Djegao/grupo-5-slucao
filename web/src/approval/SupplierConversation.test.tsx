@@ -71,6 +71,13 @@ describe("#19 SupplierConversation", () => {
     expect(onNextStep).toHaveBeenCalledWith("confirm_document");
   });
 
+  it("#5/AC-3: o rótulo 'Próximo passo:' vem antes do botão do próximo passo", () => {
+    render(<SupplierConversation conversation={fulfilled} onNextStep={vi.fn()} />);
+    const label = screen.getByText("Próximo passo:");
+    const button = screen.getByRole("button", { name: "Confirmar documento" });
+    expect(label.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it.each([
     ["close", "Encerrar"],
     ["confirm_document", "Confirmar documento"],
