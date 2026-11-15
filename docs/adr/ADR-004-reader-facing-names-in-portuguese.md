@@ -9,14 +9,14 @@ A regra de linguagem dos bastidores pede nomes em inglês, e o AGENTS.md pede pr
 
 ## Decision
 
-O que a pessoa lê segue em português: as rotas das telas, as pastas dos artefatos de wireframe e a chave de página, e os nomes de `describe` e `it`, que mantêm o prefixo `#N/AC-n:`. Os identificadores de código (variáveis, tipos, funções, nomes de arquivo de código e caminhos da API, como `/api/supplier-requests/sr-1/send`) seguem em inglês, como o ADR-002 já fixa. O detector de linguagem dos bastidores roda com `--exclude 'web/test/*'` e `--exclude 'artifacts/wireframe-*'`, no mesmo modo do ADR-002.
+O que a pessoa lê segue em português: as rotas das telas, as pastas dos artefatos de wireframe e a chave de página, e os nomes de `describe` e `it`, que mantêm o prefixo `#N/AC-n:`. Os identificadores de código (variáveis, tipos, funções, nomes de arquivo de código e caminhos da API, como `/api/supplier-requests/sr-1/send`) seguem em inglês, como o ADR-002 já fixa. Cada linha que escreve uma rota de tela ou a chave de página de um wireframe leva `// ADR-004`. O detector de linguagem dos bastidores roda com `--exclude 'artifacts/wireframe-*'`, no mesmo modo do ADR-002.
 
 ## Consequences
 
 - Quem lê a tela, o wireframe ou o relatório de teste encontra a frase do critério de aceite, sem tradução.
 - O nome de um arquivo de código ou de um caminho da API não vira português: o arquivo de teste segue `supplier-request.test.tsx`.
 - Renomear uma rota de tela ou a chave de página de um wireframe quebra os links dos planos e é mudança incompatível.
-- O detector de linguagem dos bastidores não cobra os caminhos excluídos; o resto do código segue em inglês.
+- O detector de linguagem dos bastidores não cobra as linhas marcadas com `ADR-004` nem as pastas de wireframe excluídas; o resto do código segue em inglês.
 
 ## Alternatives considered
 
