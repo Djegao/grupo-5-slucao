@@ -2,7 +2,7 @@
 
 Issue: #8, plano da história #1 (AC-1 a AC-8). Banco: PostgreSQL 17 no Supabase (`supabase/config.toml`, `[db] major_version = 17`), acessado pelo PostgREST a partir de um Cloudflare Worker. Registro: `supabase/persistence-modes.yaml`.
 
-**Em uma frase:** a #8 não precisa de migração. O adaptador de `DecidedReturnSource` lê em três requisições fixas, mais duas da fila e do Cron. A única gravação é o insert idempotente que já existe em `outbox_return_notes`.
+**Em uma frase:** a #8 não precisa de migração. O adaptador de `DecidedReturnSource` `listDecided` faz 4 leituras fixas (Q1 propostas com recursos embutidos, Q2 recebimentos em 2 requisições e Q3 produtos). Uma rodada da varredura soma 1 leitura da fila, ou seja, 5 `GET`, mais 1 `POST` por nota nova. A única gravação é o insert idempotente que já existe em `outbox_return_notes`.
 
 ## Entradas
 
@@ -40,7 +40,7 @@ GET proposals?select=id,invoice_access_key,classification,state,dock_action,
 
 O PostgREST junta tabelas pelas chaves estrangeiras e monta os recursos relacionados numa só chamada ([Resource Embedding](https://docs.postgrest.org/en/stable/references/api/resource_embedding.html)). `proposals_invoice_fkey` dá a relação muitos-para-um com `invoices`, e `approvals_proposal_fkey`, com a restrição única `approvals_proposal_key`, dá a relação um-para-um com `approvals` (mesma página: "when the foreign key has a unique constraint"). `divergences_invoice_fkey` dá as divergências da nota. Só entram se o adaptador remonta o `Invoice` por `invoiceFromRows`; senão, fica fora do `select`. Toda requisição roda numa transação ([PostgREST: Transactions](https://docs.postgrest.org/en/stable/references/transactions.html)), então proposta, aprovação e nota saem de uma única transação somente leitura. Também não há filtro `in.(...)` cuja URL cresceria com cada decisão. `decided_on` nulo cai em `approved_at`, cortado no dia, como em `approvalFromRow`.
 
-O `FakePostgrest` (`api/test/support/fake-postgrest.ts`) ainda não entende `select` com recurso embutido. Quem constrói a #8 o estende, com o mapa das três relações acima. Se não quiser estender, o caminho que resta é o de `SupabaseApprovalStore.load`: `proposals`, depois `approvals` e `invoices` com `in.(...)` em paralelo, ou seja, três requisições. Ele tem dois custos: a URL cresce com as decisões e as leituras saem de transações separadas. Nenhuma página lida aqui diz o tamanho máximo de URL do PostgREST (ver Em aberto).
+O `FakePostgrest` (`api/test/support/fake-postgrest.ts`) entende `select` com recurso embutido: esta camada o estendeu, com o mapa das três relações acima. Se não quiser estender, o caminho que resta é o de `SupabaseApprovalStore.load`: `proposals`, depois `approvals` e `invoices` com `in.(...)` em paralelo, ou seja, três requisições. Ele tem dois custos: a URL cresce com as decisões e as leituras saem de transações separadas. Nenhuma página lida aqui diz o tamanho máximo de URL do PostgREST (ver Em aberto).
 
 **Q2, duas requisições.** `WmsCountConnector.listReceipts()` já lê `kit_recebimentos` e `kit_recebimento_itens` inteiras. As tabelas são fixas, e `mergeReceipts` filtra pela chave e pelo dia da decisão.
 
