@@ -75,7 +75,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 async function openDrawer() {
-  window.history.replaceState(null, "", `/pagar/fila/${KEY}`);
+  window.history.replaceState(null, "", `/pagar/fila/${KEY}`); // ADR-004
   render(<Frame context={fallbackContext("ana@jachegou.test")} />);
   await screen.findByText("Decisão registrada");
 }

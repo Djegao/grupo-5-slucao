@@ -31,7 +31,7 @@ import { AlreadyDecidedError, type ApprovalStore, type CaseFile } from './store.
 
 // #63 Formato das linhas, conferido na borda antes de virar domínio.
 
-type InvoiceRow = {
+export type InvoiceRow = {
   access_key: string;
   number: string;
   series: string;
@@ -45,7 +45,7 @@ type InvoiceRow = {
   state: InvoiceState;
 };
 
-type DivergenceRow = {
+export type DivergenceRow = {
   invoice_access_key: string;
   seq: number;
   classification: string;
@@ -87,7 +87,7 @@ const isLevel = oneOf(...APPROVAL_LEVELS);
 /** #63 A chave de acesso tem 44 dígitos; validar aqui protege os filtros `in.(...)` montados com ela. */
 const isAccessKey = (v: unknown): v is string => isString(v) && /^\d{44}$/.test(v);
 
-const isInvoiceRow = shaped<InvoiceRow>({
+export const isInvoiceRow = shaped<InvoiceRow>({
   access_key: isAccessKey,
   number: isString,
   series: isString,
@@ -101,7 +101,7 @@ const isInvoiceRow = shaped<InvoiceRow>({
   state: oneOf('a_conferir', 'conferida', 'com_proposta', 'decidida'),
 } satisfies Shape<InvoiceRow>);
 
-const isDivergenceRow = shaped<DivergenceRow>({
+export const isDivergenceRow = shaped<DivergenceRow>({
   invoice_access_key: isString,
   seq: isInteger,
   classification: isString,
@@ -150,14 +150,14 @@ const CLASSIFICATIONS: readonly Classification[] = [
   'E8',
   'NAO_CATALOGADA',
 ];
-const isClassification = oneOf(...CLASSIFICATIONS);
+export const isClassification = oneOf(...CLASSIFICATIONS);
 const isEvidence = shaped<Evidence>({
   source: oneOf('sefaz', 'erp_compras', 'erp_contas_a_pagar', 'erp_cadastro', 'banco', 'wms'),
   reference: isString,
   description: isString,
 } satisfies Shape<Evidence>);
 
-function corrupt(table: string, detail: string): never {
+export function corrupt(table: string, detail: string): never {
   throw new SupabaseRestError('parse', table, 0, detail);
 }
 
@@ -200,7 +200,7 @@ export function dockActionFromJson(raw: unknown, table: string): DockAction {
   return corrupt(table, 'ação na doca desconhecida');
 }
 
-function invoiceFromRows(row: InvoiceRow, divergences: readonly DivergenceRow[]): Invoice {
+export function invoiceFromRows(row: InvoiceRow, divergences: readonly DivergenceRow[]): Invoice {
   if (!Array.isArray(row.items)) corrupt('invoices', 'itens fora do formato');
   const invoice = Invoice.receive({
     accessKey: row.access_key,
