@@ -30,4 +30,17 @@ describe('#11/AC-1 o prompt do e-mail ao fornecedor', () => {
     const { schema } = buildSupplierRequestPrompt(catalog(), 'return_note');
     expect(schema).toMatchObject({ type: 'object', required: ['subject', 'body', 'asks'] });
   });
+
+  it('manda citar o item pelo código do fornecedor, nunca pela descrição, e o assunto com {{nota.numero}}', () => {
+    const { system, schema } = buildSupplierRequestPrompt(catalog(), 'return_note');
+    expect(system).toContain('código do fornecedor');
+    expect(system).toContain('nunca pela descrição');
+    expect(system).toContain('{{nota.numero}}');
+    expect(JSON.stringify(schema)).toContain('{{nota.numero}}');
+  });
+
+  it('os códigos do fornecedor dos itens estão entre os identificadores do catálogo', () => {
+    const { identifiers } = catalog();
+    for (const item of returnNote().items) expect(identifiers).toContain(item.supplierCode);
+  });
 });

@@ -2,6 +2,7 @@
 // #11: a tarefa não emite nem envia; o laço registra a linha em claude_suggestions e a pessoa decide.
 import type { Ask } from '../claude/client.js';
 import type { ClaudeTask } from '../claude/task.js';
+import type { RequestStatus } from '../domain/index.js';
 import { draftRequest } from './draft.js';
 import type { SupplierDeps } from './ports.js';
 
@@ -10,7 +11,7 @@ export type SupplierDraftInput = { readonly queueId: number };
 
 /** #11: o que a tarefa deixa registrado: o pedido criado e o estado dele, ou o motivo de não ter criado. */
 export type SupplierDraftOutput =
-  | { readonly requestId: number; readonly status: string }
+  | { readonly requestId: number; readonly status: RequestStatus }
   | { readonly skipped: 'open_request_exists' | 'queue_not_pending' };
 
 export const SUPPLIER_DRAFT_TASK = 'supplier-request-draft';

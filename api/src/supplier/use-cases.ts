@@ -12,7 +12,11 @@ import type { MailMessage, MailResult, RequestRecord, SourceInvoice, SupplierDep
 
 // #11: os casos de uso do pedido ao fornecedor (#2): emitir e enviar, editar o corpo, descartar e refazer.
 // #11: cada um devolve um resultado tipado que a camada da API mapeia para HTTP; aqui não há HTTP.
-// #11: a transação de cada caso de uso é aberta pela unidade de trabalho da persistência (OLTP), não aqui.
+// #11: cada escrita confirma sozinha (PostgREST não tem transação entre tabelas); o pedido (SupplierRequest) é a raiz que manda.
+// #11: a ordem do envio é: conferir a fila, emitir (idempotente por devolução), registrar no pedido, mover a fila (com guarda),
+// #11: enviar o e-mail e marcar. Uma falha no meio deixa um estado que reenviar conserta, sem segunda nota: a janela é entre
+// #11: emitir e registrar (a emissão idempotente devolve a mesma nota) e entre mover a fila e marcar (o reenvio vê a fila emitida
+// #11: com o número do pedido e segue). A transação de um só commit, se vier, é da unidade de trabalho do OLTP, não daqui.
 
 const SEND_FAILED_FALLBACK = 'send_failed';
 const MAILER_ERROR = 'mailer_error';
@@ -65,15 +69,25 @@ async function ensureIssued(deps: SupplierDeps, record: RequestRecord): Promise<
   return issued;
 }
 
-/** #11/AC-4: a devolução da fila vira emitida com o número; já emitida com o mesmo número é um reenvio, e vale. */
-async function moveQueue(deps: SupplierDeps, record: RequestRecord, issued: IssuedReturnNote, by: string): Promise<SendResult | null> {
+/** #11/AC-4: a fila é conferida ANTES de emitir: pendente, ou emitida com o número já emitido deste pedido (reenvio). */
+async function checkQueue(deps: SupplierDeps, record: RequestRecord): Promise<'pending' | 'already_moved' | SendResult> {
   const now = deps.clock.now();
-  const number = String(issued.number);
-  const moved = await deps.queue.emit(record.queueId, number, by, now);
-  if (moved.kind === 'ok') return null;
-  if (moved.kind === 'not_found') return { kind: 'conflict', reason: 'queue_entry_missing' };
+  const pending = (await deps.queue.list('pendente', now)).find((e) => e.id === record.queueId);
+  if (pending !== undefined) return 'pending';
   const done = (await deps.queue.list('emitida', now)).find((e) => e.id === record.queueId);
-  return done?.emitted?.number === number ? null : { kind: 'conflict', reason: 'queue_not_pending' };
+  if (done !== undefined) {
+    const issuedNumber = record.request.issuedNote?.number;
+    return issuedNumber !== undefined && done.emitted?.number === String(issuedNumber) ? 'already_moved' : { kind: 'conflict', reason: 'queue_not_pending' };
+  }
+  const cancelled = (await deps.queue.list('cancelada', now)).find((e) => e.id === record.queueId);
+  return { kind: 'conflict', reason: cancelled === undefined ? 'queue_entry_missing' : 'queue_not_pending' };
+}
+
+/** #11/AC-4: a devolução pendente vira emitida com o número; se mudou entre a conferência e agora, é conflito. */
+async function moveQueue(deps: SupplierDeps, record: RequestRecord, issued: IssuedReturnNote, by: string): Promise<SendResult | null> {
+  const moved = await deps.queue.emit(record.queueId, String(issued.number), by, deps.clock.now());
+  if (moved.kind === 'ok') return null;
+  return { kind: 'conflict', reason: moved.kind === 'not_found' ? 'queue_entry_missing' : 'queue_not_pending' };
 }
 
 /** #11/AC-5: o envio; falha do envio, ou erro lançado pela porta, vira send_failed com um motivo sem o texto do erro. */
@@ -107,9 +121,11 @@ async function send(deps: SupplierDeps, id: number, by: string): Promise<SendRes
   if (source === null) return { kind: 'invalid', reason: 'source_missing' };
   const text = validateRequestText({ subject: request.subject, body: request.body, asks: request.asks }, catalogOf(record, source));
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
+  const gate = await checkQueue(deps, record);
+  if (typeof gate === 'object') return gate;
   const issued = await ensureIssued(deps, record);
   if (issued === null) return { kind: 'conflict', reason: 'issuance_missing' };
-  const blocked = await moveQueue(deps, record, issued, by);
+  const blocked = gate === 'pending' ? await moveQueue(deps, record, issued, by) : null;
   if (blocked !== null) return blocked;
   const message: MailMessage = {
     invoiceAccessKey: request.invoiceAccessKey,

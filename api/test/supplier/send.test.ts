@@ -81,14 +81,26 @@ describe('#11/AC-4 emitir e enviar', () => {
     expect(w.mailer.sent).toHaveLength(1);
   });
 
-  it('devolução que já não está pendente na fila é conflito: o e-mail não sai e a nota emitida fica registrada', async () => {
+  it('devolução que já não está pendente na fila é conflito: nada é emitido nem registrado e o e-mail não sai', async () => {
     const w = await drafted();
     w.queue.views[0]!.status = 'emitida';
     w.queue.views[0]!.emitted = { number: '999', by: 'outra@jachegou.example', at: NOW.toISOString() };
     expect(await createSupplierUseCases(w.deps).send(41, BY)).toEqual({ kind: 'conflict', reason: 'queue_not_pending' });
     expect(w.mailer.sent).toEqual([]);
     expect(statusOf(w, 41)).toBe('draft');
-    expect(w.requests.rows[0]?.request.issuedNote?.number).toBe(101);
+    expect(w.notes.issuedCount).toBe(0);
+    expect(w.requests.rows[0]?.request.issuedNote).toBeNull();
+    expect(w.queue.emitCalls).toEqual([]);
+  });
+
+  it('devolução emitida com o número deste pedido é um reenvio: não emite outra nota nem move a fila de novo', async () => {
+    const w = await drafted(fakeMailer({ ok: false, reason: 'caixa_de_saida_indisponivel' }));
+    const useCases = createSupplierUseCases(w.deps);
+    await useCases.send(41, BY);
+    expect(w.queue.views[0]).toMatchObject({ status: 'emitida', emitted: { number: '101' } });
+    expect((await useCases.send(41, BY)).kind).toBe('ok');
+    expect(w.notes.issuedCount).toBe(1);
+    expect(w.queue.emitCalls).toHaveLength(1);
   });
 
   it('devolução que sumiu da fila é conflito', async () => {
