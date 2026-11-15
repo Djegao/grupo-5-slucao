@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tratativa com o fornecedor</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --text: #1d2330;
+        --muted: #667085;
+        --line: #e3e6eb;
+        --accent: #2f5bd3;
+        --ok: #127a46;
+        --warn: #a15c00;
+        --err: #b42318;
+        color-scheme: light;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+      header.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+      h1 { font-size: 20px; margin: 0; }
+      h2 { font-size: 16px; margin: 0; }
+      h3 { font-size: 14px; margin: 18px 0 6px; }
+      .muted { color: var(--muted); }
+      .small { font-size: 13px; }
+      .mode { background: #fff4d6; border: 1px solid #f0d58a; border-radius: 6px; padding: 6px 10px; font-size: 13px; margin: 12px 0 0; }
+      form { display: flex; gap: 8px; align-items: center; margin: 20px 0; flex-wrap: wrap; }
+      form label { font-weight: 600; }
+      #key { flex: 1 1 320px; min-width: 0; padding: 8px 10px; font: 14px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 6px; }
+      button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+      button:hover:not(:disabled) { border-color: #c5cad3; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.quiet { border-color: transparent; color: var(--err); background: transparent; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 12px 0; }
+      .skeleton { min-height: 120px; }
+      .note-header { padding: 4px 2px; }
+      .block-head { display: flex; justify-content: space-between; align-items: center; }
+      .chip { font-size: 12px; background: #eef2ff; color: var(--accent); border-radius: 999px; padding: 2px 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0; }
+      th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+      caption { text-align: left; font-size: 13px; color: var(--muted); padding: 6px 0; }
+      .num { text-align: right; white-space: nowrap; }
+      tfoot td { font-weight: 600; border-bottom: none; }
+      .meta { font-size: 14px; color: var(--muted); }
+      pre.body { white-space: pre-wrap; font: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 8px 0; }
+      textarea { width: 100%; font: 14px/1.5 ui-monospace, Menlo, monospace; padding: 10px; border: 1px solid var(--accent); border-radius: 8px; margin-top: 8px; }
+      .asks ul { margin: 4px 0 0; padding-left: 20px; }
+      .actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+      .grow { flex: 1; }
+      .ok { color: var(--ok); font-weight: 600; }
+      .warn { color: var(--warn); }
+      .spin { color: var(--accent); }
+      .notice { border-radius: 8px; padding: 10px 12px; margin: 12px 0; }
+      .notice.error { background: #fdecea; color: var(--err); }
+      .notice.info { background: #eef2ff; color: var(--accent); }
+      .history { margin-top: 8px; color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <div>
+          <h1>Tratativa com o fornecedor <span class="muted small">(demonstração)</span></h1>
+          <div class="muted small">Não é a gaveta oficial do painel.</div>
+        </div>
+        <div id="me" class="muted small"></div>
+      </header>
+      <p id="mode" class="mode" hidden>Modo demonstração: API falsa em memória, dados fictícios. Nada é emitido nem enviado de verdade.</p>
+
+      <form id="form">
+        <label for="key">Nota (chave de acesso)</label>
+        <input id="key" inputmode="numeric" autocomplete="off" maxlength="60" placeholder="44 dígitos" />
+        <span id="count" class="muted small">0/44</span>
+        <button id="open" class="primary" type="submit">Abrir</button>
+      </form>
+
+      <div id="notice" class="notice" role="alert" hidden></div>
+      <main id="main"></main>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
