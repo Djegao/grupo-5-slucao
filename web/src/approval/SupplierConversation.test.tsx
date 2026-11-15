@@ -95,7 +95,7 @@ describe("#19 SupplierConversation", () => {
     render(<SupplierConversation conversation={{ ...noReply, status: "waitingCharged", reading: { ...noReply.reading, nextStep: null } }} onNextStep={vi.fn()} />);
     expect(screen.queryByText("Próximo passo:")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText("O fornecedor não respondeu no prazo.")).toBeTruthy();
+    expect(screen.getByText('Resumo: "O fornecedor não respondeu no prazo."')).toBeTruthy();
   });
 
   it("#5/AC-4: sem resposta, atrasado: diz que nenhuma resposta veio e o próximo passo é 'Cobrar'", () => {
