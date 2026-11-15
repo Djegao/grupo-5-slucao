@@ -45,7 +45,7 @@ export function hasOpenRequest(
 /** #156: o anexo do e-mail. Hoje só a nota de devolução emitida, em JSON. */
 export type SupplierRequestAttachment = {
   readonly kind: 'return_note';
-  readonly notaId: string;
+  readonly returnNoteId: string;
   readonly filename: string;
 };
 
@@ -346,7 +346,7 @@ export class SupplierRequest {
     }
     const attachment: SupplierRequestAttachment = Object.freeze({
       kind: 'return_note',
-      notaId: note.nota_id,
+      returnNoteId: note.nota_id,
       filename: `nota-devolucao-${note.nota_id}.json`,
     });
     this.data = {

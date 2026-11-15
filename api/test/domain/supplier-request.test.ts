@@ -202,7 +202,7 @@ describe('pedido ao fornecedor: descarte, emissão e envio', () => {
   it('#156/AC-4 emitida a nota, anexa ao pedido; uma só vez', () => {
     const r = drafted();
     r.attachReturnNote(note(), 'ana', DRAFTED_AT);
-    expect(r.attachments).toEqual([{ kind: 'return_note', notaId: 'ND-0012', filename: 'nota-devolucao-ND-0012.json' }]);
+    expect(r.attachments).toEqual([{ kind: 'return_note', returnNoteId: 'ND-0012', filename: 'nota-devolucao-ND-0012.json' }]);
     expect(() => r.attachReturnNote(note(), 'ana', DRAFTED_AT)).toThrow(DomainError);
   });
 
