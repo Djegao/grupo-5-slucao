@@ -653,12 +653,24 @@ const KPI_SUB = { aguardando: 'pedidos no prazo', atendidos: 'fornecedor atendeu
 
 function chips() {
   const counts = board.counts ?? {};
-  // #157 Os cards de números, como os da Fila de aprovação; clicar filtra a tabela (de novo, limpa).
-  const items = BUCKETS.map(
+  const total = BUCKETS.reduce((n, [key]) => n + Number(counts[key] ?? 0), 0);
+  // #157 Os cards de números, como os da Fila de aprovação.
+  const kpis = BUCKETS.map(
     ([key, label]) =>
-      `<button class="kpi" data-filter="${key}" aria-pressed="${board.filter === key}"><span class="k-label"><span class="k-dot"></span>${esc(label)}</span><span class="k-value">${Number(counts[key] ?? 0)}</span><span class="k-sub">${esc(KPI_SUB[key] ?? '')}</span></button>`,
+      `<div class="kpi" data-kpi="${key}"><span class="k-label"><span class="k-dot"></span>${esc(label)}</span><span class="k-value">${Number(counts[key] ?? 0)}</span><span class="k-sub">${esc(KPI_SUB[key] ?? '')}</span></div>`,
   ).join('');
-  return `<div class="kpis" role="group" aria-label="Filtrar por status">${items}</div>`;
+  // #157 Os filtros em pílula ("Todas" e um por aba) e a busca, como na fila.
+  const pills = [`<button class="pill p-all" data-filter="__all" aria-pressed="${board.filter === null}">Todas · ${total}</button>`]
+    .concat(BUCKETS.map(([key, label]) => `<button class="pill p-${key}" data-filter="${key}" aria-pressed="${board.filter === key}">${esc(label)} · ${Number(counts[key] ?? 0)}</button>`))
+    .join('');
+  const search = `<label class="search"><input id="board-search" type="search" placeholder="Buscar nota ou fornecedor" value="${esc(board.query ?? '')}" autocomplete="off" /><i class="ph ph-magnifying-glass" aria-hidden="true"></i></label>`;
+  return `<div class="kpis">${kpis}</div><div class="toolbar"><div class="pills" role="group" aria-label="Filtrar por status">${pills}</div>${search}</div>`;
+}
+
+/** #157 A busca filtra as linhas já desenhadas, sem redesenhar (o campo não perde o foco). */
+function applySearch() {
+  const q = (board.query ?? '').trim().toLowerCase();
+  for (const tr of document.querySelectorAll('#lista tr[data-search]')) tr.hidden = q !== '' && !tr.dataset.search.includes(q);
 }
 
 function table() {
@@ -667,17 +679,18 @@ function table() {
   }
   const rows = board.items.map(row).join('');
   return `<table class="list">
-    <thead><tr><th>Nota</th><th>Fornecedor</th><th>Pedido</th><th class="num">Valor</th><th>Prazo</th><th>Status</th></tr></thead>
+    <thead><tr><th>Nota fiscal</th><th>Pedido</th><th class="num">Valor</th><th>Prazo</th><th>Status</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 }
 
 function row(i) {
   const open = i.id === board.openId;
-  return `<tr data-row="${esc(i.id)}" class="${open ? 'open' : ''}">
-    <td data-label="Nota"><button class="link" data-row-open="${esc(i.id)}" aria-expanded="${open}">${esc(i.invoiceNumber ?? '—')}</button></td>
-    <td data-label="Fornecedor">${esc(supplierName(i.supplierId))}</td>
-    <td data-label="Pedido">${esc(REQUEST_TYPE[i.requestType] ?? i.requestType)}</td>
-    <td data-label="Valor" class="num">${i.valueCents == null ? '—' : esc(brl(i.valueCents))}</td>
+  const search = `${i.invoiceNumber ?? ''} ${supplierName(i.supplierId)} ${i.supplierId}`.toLowerCase();
+  const q = (board.query ?? '').trim().toLowerCase();
+  return `<tr data-row="${esc(i.id)}" data-search="${esc(search)}" class="${open ? 'open' : ''}"${q && !search.includes(q) ? ' hidden' : ''}>
+    <td data-label="Nota fiscal"><button class="link" data-row-open="${esc(i.id)}" aria-expanded="${open}">NF ${esc(i.invoiceNumber ?? '—')}</button><div class="sub">${esc(supplierName(i.supplierId))}</div></td>
+    <td data-label="Pedido"><span class="badge b-grey">${esc(REQUEST_TYPE[i.requestType] ?? i.requestType)}</span></td>
+    <td data-label="Valor" class="num"><strong>${i.valueCents == null ? '—' : esc(brl(i.valueCents))}</strong></td>
     <td data-label="Prazo">${esc(dayMonth(i.dueOn))}</td>
     <td data-label="Status" class="status">${statusCell(i)}</td>
   </tr>`;
@@ -868,7 +881,7 @@ $('lista').addEventListener('click', (event) => {
     if (el.disabled) return;
     const d = el.dataset;
     if (d.filter) {
-      board.filter = board.filter === d.filter ? null : d.filter;
+      board.filter = d.filter === '__all' || board.filter === d.filter ? null : d.filter;
       board.notice = null;
       return loadBoard({ quiet: true });
     }
@@ -916,6 +929,10 @@ $('lista').addEventListener('input', (event) => {
     if (counter) counter.textContent = `${board.text.trim().length.toLocaleString('pt-BR')} / 5.000 caracteres`;
   }
   if (event.target.id === 'close-note') board.closeNote = event.target.value;
+  if (event.target.id === 'board-search') {
+    board.query = event.target.value;
+    applySearch();
+  }
 });
 
 // ---------- início ----------
