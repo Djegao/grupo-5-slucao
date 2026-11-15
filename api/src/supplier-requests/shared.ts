@@ -19,8 +19,8 @@ export type PlannedCase = { readonly decided: DecidedCase; readonly plan: Return
 export function planCase(decided: DecidedCase): PlannedCase | null {
   try {
     const plan = planReturnNote({ proposal: decided.proposal, invoice: decided.invoice, goodsEntered: decided.goodsEntered });
-    // #156: a recusa com mercadoria já entrada está fora desta entrega; só receber parcial de E1, E2 e E3 abre pedido.
-    if (!plan || plan.kind === 'recusa_apos_entrada') return null;
+    // #156: receber parcial de E1, E2 e E3 e a recusa com mercadoria já entrada abrem pedido (decisão do grupo, 15/11).
+    if (!plan) return null;
     return { decided, plan, draft: buildReturnNoteDraft(decided.invoice, plan) };
   } catch (error) {
     if (error instanceof DomainError) return null;

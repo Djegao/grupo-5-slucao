@@ -244,3 +244,19 @@ describe('#156 pedido ao fornecedor: o que mais a API faz', () => {
     expect(world.ask.calls).toHaveLength(0);
   });
 });
+
+describe('#156 recusa com mercadoria já entrada (decisão do grupo)', () => {
+  it('#156/AC-1 a recusa depois da entrada ganha o pedido de retirada, e emitir e enviar funciona', async () => {
+    const w = await buildWorld();
+    const d = decide(w.fake, 'E2', E2_NUMBER, LINES);
+    const proposal = w.fake.rows('proposals').find((p) => p.invoice_access_key === d.key && p.classification === 'E2')!;
+    proposal.dock_action = { kind: 'recusar' };
+    const round = await w.cron(fakeAsk(goodBody(String(d.item.supplierCode))));
+    const [request] = await listOf(w, d.key);
+    expect(round.opened).toBe(1);
+    expect(request).toMatchObject({ status: 'draft', asks: ['Retirar a mercadoria'] });
+    const sent = await post(w, request.id, 'emitir-e-enviar');
+    expect(sent.status).toBe(200);
+    expect(((await sent.json()) as { status: string }).status).toBe('sent');
+  });
+});
