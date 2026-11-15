@@ -5,8 +5,8 @@ import { Money } from './money.js';
 import type { Unit } from './quantity.js';
 
 // #10: a nota de devolução no formato das notas do kit (data/kit/notas.json), montada pela regra a
-// partir da devolução da fila (#140) e da nota de origem. O Claude nunca monta item nem total.
-// Os nomes dos campos espelham o kit, em português (ADR-002); o dinheiro sai em reais, derivado dos
+// Os campos têm o nome em inglês, par a par com os do kit (ADR-002 só mantém em português o valor `devolucao`
+// da natureza); o mapeamento para o JSON do kit é da borda. O dinheiro sai em reais, derivado dos centavos exatos de `Money`.
 // centavos exatos de `Money`.
 
 /** #10: a linha da fila (`outbox_return_notes.payload.lines`): o que voltou, na unidade da nota. */
@@ -16,33 +16,33 @@ export type ReturnQueueLine = { readonly supplierCode: string; readonly amount: 
 export type ReturnQueueEntry = { readonly invoiceAccessKey: string; readonly lines: readonly ReturnQueueLine[] };
 
 export type ReturnNoteItem = {
-  readonly codigo_fornecedor: string; // ADR-002
-  readonly sku: string | null; // ADR-002
-  readonly descricao: string; // ADR-002
-  readonly quantidade: number; // ADR-002
-  readonly unidade: Unit; // ADR-002
-  readonly preco_unitario: number; // ADR-002
-  readonly valor: number; // ADR-002
+  readonly supplierCode: string;
+  readonly sku: string | null;
+  readonly description: string;
+  readonly quantity: number;
+  readonly unit: Unit;
+  readonly unitPrice: number;
+  readonly value: number;
 };
 
 /** #10/AC-1: a nota montada, ainda sem emissão. */
 export type ReturnNoteDraft = {
-  readonly natureza: 'devolucao'; // ADR-002
-  readonly nota_referenciada: string; // ADR-002
-  readonly fornecedor_id: string; // ADR-002
-  readonly destino: string; // ADR-002
-  readonly itens: readonly ReturnNoteItem[]; // ADR-002
-  readonly valor_total: number; // ADR-002
+  readonly nature: 'devolucao'; // ADR-002
+  readonly referencedAccessKey: string;
+  readonly supplierId: string;
+  readonly destination: string;
+  readonly items: readonly ReturnNoteItem[];
+  readonly total: number;
 };
 
 /** #10/AC-2: a nota emitida pelo mock. O emitente leva só o nome e o destino: o kit não tem CNPJ de destino. */
 export type IssuedReturnNote = ReturnNoteDraft & {
-  readonly nota_id: string; // ADR-002
-  readonly chave: string; // ADR-002
-  readonly numero: number; // ADR-002
-  readonly serie: number; // ADR-002
-  readonly data_emissao: string; // ADR-002
-  readonly emitente: { readonly nome: string; readonly destino: string }; // ADR-002
+  readonly noteId: string;
+  readonly accessKey: string;
+  readonly number: number;
+  readonly series: number;
+  readonly issuedOn: string;
+  readonly issuer: { readonly name: string; readonly destination: string };
 };
 
 const reais = (money: Money): number => money.cents / 100;
@@ -62,13 +62,13 @@ function toNoteItem(line: ReturnQueueLine, invoice: InvoiceView): ReturnNoteItem
     throw new DomainError(`Nota de devolução: quantidade inválida na linha ${line.supplierCode}`);
   }
   return Object.freeze({
-    codigo_fornecedor: item.supplierCode,
+    supplierCode: item.supplierCode,
     sku: item.sku,
-    descricao: item.description,
-    quantidade: line.amount,
-    unidade: item.quantity.unit,
-    preco_unitario: reais(item.unitPrice),
-    valor: reais(lineValue(item, line.amount)),
+    description: item.description,
+    quantity: line.amount,
+    unit: item.quantity.unit,
+    unitPrice: reais(item.unitPrice),
+    value: reais(lineValue(item, line.amount)),
   });
 }
 
@@ -78,16 +78,16 @@ export function buildReturnNote(entry: ReturnQueueEntry, invoice: InvoiceView): 
     throw new DomainError('Nota de devolução: a devolução é de outra nota');
   }
   if (entry.lines.length === 0) throw new DomainError('Nota de devolução: a devolução não tem linhas');
-  const itens = entry.lines.map((line) => toNoteItem(line, invoice));
+  const items = entry.lines.map((line) => toNoteItem(line, invoice));
   // #10/AC-1: cada valor já é centavos exatos em reais; voltar a centavos é exato, então a soma também.
-  const total = itens.reduce((sum, item) => sum.add(Money.fromReais(item.valor)), Money.zero());
+  const total = items.reduce((sum, item) => sum.add(Money.fromReais(item.value)), Money.zero());
   return Object.freeze({
-    natureza: 'devolucao',
-    nota_referenciada: invoice.accessKey,
-    fornecedor_id: invoice.supplierId,
-    destino: invoice.store,
-    itens: Object.freeze(itens),
-    valor_total: reais(total),
+    nature: 'devolucao', // ADR-002
+    referencedAccessKey: invoice.accessKey,
+    supplierId: invoice.supplierId,
+    destination: invoice.store,
+    items: Object.freeze(items),
+    total: reais(total),
   });
 }
 
@@ -132,11 +132,11 @@ export function issueReturnNote(
   parseIsoDate(issuedOn);
   return Object.freeze({
     ...draft,
-    nota_id: `ND-${sequence}`,
-    chave: mockAccessKey(sequence, issuedOn),
-    numero: sequence,
-    serie: RETURN_NOTE_SERIES,
-    data_emissao: issuedOn,
-    emitente: Object.freeze({ nome: ISSUER_NAME, destino: draft.destino }),
+    noteId: `ND-${sequence}`,
+    accessKey: mockAccessKey(sequence, issuedOn),
+    number: sequence,
+    series: RETURN_NOTE_SERIES,
+    issuedOn,
+    issuer: Object.freeze({ name: ISSUER_NAME, destination: draft.destination }),
   });
 }

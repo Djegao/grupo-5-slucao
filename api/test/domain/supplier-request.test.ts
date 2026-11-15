@@ -27,7 +27,7 @@ const GOOD: SupplierRequestText = {
 const drafted = (): SupplierRequest => {
   const validated = validateRequestText(GOOD, catalog());
   if (!validated.ok) throw new Error('fixture inválida');
-  return SupplierRequest.draft({ invoiceAccessKey: SOURCE_KEY, note: returnNote(), text: validated.text, draftedOn: '2026-11-12' });
+  return SupplierRequest.draft({ id: 41, invoiceAccessKey: SOURCE_KEY, note: returnNote(), text: validated.text, draftedOn: '2026-11-12' });
 };
 
 const inState = (status: RequestStatus): SupplierRequest => {
@@ -113,8 +113,8 @@ describe('a validação do texto do Claude', () => {
 
 describe('o prazo padrão', () => {
   it('#10/AC-4 é de 3 dias úteis depois do rascunho', () => {
-    expect(addBusinessDays('2026-11-09', 3)).toBe('2026-11-12'); // segunda → quinta
-    expect(addBusinessDays('2026-11-12', 3)).toBe('2026-11-17'); // quinta → terça (pula o fim de semana)
+    expect(addBusinessDays('2026-11-09', 3)).toBe('2026-11-12'); // #10: segunda → quinta
+    expect(addBusinessDays('2026-11-12', 3)).toBe('2026-11-17'); // #10: quinta → terça (pula o fim de semana)
   });
 
   it('#10/AC-4 um rascunho de sexta, sábado ou domingo vence na quarta', () => {
@@ -162,7 +162,21 @@ describe('o ciclo do pedido', () => {
     request.markSent();
     expect(request.status).toBe('sent');
     expect(() => inState('send_failed').discard('x')).toThrow(InvalidTransitionError);
-    expect(() => inState('send_failed').markSendFailed()).toThrow(InvalidTransitionError);
+  });
+
+  it('#10/AC-5 um reenvio que falha de novo se registra: continua send_failed', () => {
+    const request = inState('send_failed');
+    request.markSendFailed();
+    expect(request.status).toBe('send_failed');
+    expect(request.isOpen).toBe(true);
+  });
+
+  it('#10/AC-5 o pedido leva a identidade que o chamador deu, no rascunho e no recusado', () => {
+    expect(drafted().id).toBe(41);
+    const rejected = validateRequestText({ ...GOOD, body: 'Devolvemos 8 unidades.' }, catalog());
+    if (rejected.ok) throw new Error('esperava recusa');
+    const request = SupplierRequest.rejected({ id: 42, invoiceAccessKey: SOURCE_KEY, note: returnNote(), draftedOn: '2026-11-12', rejection: rejected });
+    expect(request.id).toBe(42);
   });
 
   it('#10/AC-5 recusa toda outra transição, sem mudar o estado', () => {
@@ -191,7 +205,7 @@ describe('o ciclo do pedido', () => {
   it('#10/AC-5 o texto recusado do Claude nasce como pedido descartado com o motivo', () => {
     const rejected = validateRequestText({ ...GOOD, body: 'Devolvemos 8 unidades.' }, catalog());
     if (rejected.ok) throw new Error('esperava recusa');
-    const request = SupplierRequest.rejected({ invoiceAccessKey: SOURCE_KEY, note: returnNote(), draftedOn: '2026-11-12', rejection: rejected });
+    const request = SupplierRequest.rejected({ id: 42, invoiceAccessKey: SOURCE_KEY, note: returnNote(), draftedOn: '2026-11-12', rejection: rejected });
     expect(request.status).toBe('discarded');
     expect(request.discardReason).toBe('number_mismatch: body');
     expect(request.isOpen).toBe(false);
@@ -201,14 +215,14 @@ describe('o ciclo do pedido', () => {
     const request = drafted();
     expect(request.issuedNote).toBeNull();
     request.recordIssuance(issueReturnNote(request.note, { sequence: 1, issuedOn: '2026-11-12' }));
-    expect(request.issuedNote?.nota_id).toBe('ND-1');
+    expect(request.issuedNote?.noteId).toBe('ND-1');
     const second = issueReturnNote(request.note, { sequence: 2, issuedOn: '2026-11-12' });
     expect(() => request.recordIssuance(second)).toThrow(DomainError);
-    expect(request.issuedNote?.nota_id).toBe('ND-1');
+    expect(request.issuedNote?.noteId).toBe('ND-1');
   });
 
   it('#10/AC-5 só registra a emissão da nota que o próprio pedido monta', () => {
-    const other = { ...returnNote(), destino: 'LJ-099' };
+    const other = { ...returnNote(), destination: 'LJ-099' };
     const issued = issueReturnNote(other, { sequence: 1, issuedOn: '2026-11-12' });
     expect(() => drafted().recordIssuance(issued)).toThrow(DomainError);
   });
@@ -264,7 +278,7 @@ describe('a edição do pedido', () => {
     expect(request.asks).toEqual(GOOD.asks);
     expect(request.note).toEqual(note);
     expect(Object.isFrozen(request.note)).toBe(true);
-    expect(Object.isFrozen(request.note.itens)).toBe(true);
+    expect(Object.isFrozen(request.note.items)).toBe(true);
     expect(Object.isFrozen(request.asks)).toBe(true);
   });
 });

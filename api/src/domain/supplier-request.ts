@@ -32,17 +32,17 @@ export const hasOpenRequest = (existing: readonly RequestRef[], invoiceAccessKey
 /** #10/AC-3: o catálogo de fatos do pedido: quantidade e valor de cada linha, o total, o número da nota e o prazo. */
 export function buildSupplierRequestFacts(note: ReturnNoteDraft, invoice: Pick<InvoiceView, 'number'>, dueOn: string): FactCatalog {
   const facts: Record<string, Fact> = {};
-  const ids = new Set<string>([note.nota_referenciada, note.fornecedor_id, note.destino]);
+  const ids = new Set<string>([note.referencedAccessKey, note.supplierId, note.destination]);
   const put = (key: string, label: string, value: string, source: Fact['source']): void => {
     facts[key] = Object.freeze({ label, value, source });
   };
   put(factKey.invoiceNumber(), 'Número da nota de origem', invoice.number, 'invoice');
-  put(factKey.returnTotal(), 'Valor total da devolução', Money.fromReais(note.valor_total).toString(), 'return_note');
+  put(factKey.returnTotal(), 'Valor total da devolução', Money.fromReais(note.total).toString(), 'return_note');
   put(factKey.dueDate(), 'Prazo de resposta do fornecedor', formatBrazilianDate(dueOn), 'return_note');
-  for (const item of note.itens) {
-    const code = item.codigo_fornecedor;
-    put(factKey.returnItem(code, 'quantidade'), `Quantidade devolvida de ${item.descricao}`, `${item.quantidade} ${item.unidade}`, 'return_note');
-    put(factKey.returnItem(code, 'valor'), `Valor devolvido de ${item.descricao}`, Money.fromReais(item.valor).toString(), 'return_note');
+  for (const item of note.items) {
+    const code = item.supplierCode;
+    put(factKey.returnItem(code, 'quantidade'), `Quantidade devolvida de ${item.description}`, `${item.quantity} ${item.unit}`, 'return_note');
+    put(factKey.returnItem(code, 'valor'), `Valor devolvido de ${item.description}`, Money.fromReais(item.value).toString(), 'return_note');
     ids.add(code);
     if (item.sku !== null) ids.add(item.sku);
   }
@@ -103,6 +103,8 @@ export function validateRequestText(raw: unknown, catalog: FactCatalog): Request
 }
 
 type DraftProps = {
+  /** #10: a identidade do pedido, dada por quem o persiste; o domínio não a gera. */
+  readonly id: number;
   readonly invoiceAccessKey: string;
   readonly note: ReturnNoteDraft;
   readonly text: SupplierRequestText;
@@ -113,14 +115,15 @@ type DraftProps = {
 type RejectedProps = Omit<DraftProps, 'text'> & { readonly rejection: RequestTextRejection };
 
 const sameNote = (a: ReturnNoteDraft, b: ReturnNoteDraft): boolean =>
-  a.nota_referenciada === b.nota_referenciada &&
-  a.fornecedor_id === b.fornecedor_id &&
-  a.destino === b.destino &&
-  a.valor_total === b.valor_total &&
-  JSON.stringify(a.itens) === JSON.stringify(b.itens);
+  a.referencedAccessKey === b.referencedAccessKey &&
+  a.supplierId === b.supplierId &&
+  a.destination === b.destination &&
+  a.total === b.total &&
+  JSON.stringify(a.items) === JSON.stringify(b.items);
 
 /** O pedido ao fornecedor (#10): raiz do agregado do ciclo draft, sent, send_failed e discarded. */
 export class SupplierRequest {
+  readonly id: number;
   readonly requestType: RequestType = 'return_note';
   readonly invoiceAccessKey: string;
   /** #10/AC-6: a nota montada pela regra; congelada, nenhuma edição a alcança. */
@@ -134,6 +137,7 @@ export class SupplierRequest {
   private issued: IssuedReturnNote | null = null;
 
   private constructor(props: DraftProps, status: RequestStatus, reason: string | null) {
+    this.id = props.id;
     this.invoiceAccessKey = props.invoiceAccessKey;
     this.note = props.note;
     this.subject = props.text.subject;
@@ -190,7 +194,7 @@ export class SupplierRequest {
   }
 
   markSendFailed(): void {
-    this.assertFrom(['draft'], 'registrar a falha do envio');
+    this.assertFrom(['draft', 'send_failed'], 'registrar a falha do envio');
     this.currentStatus = 'send_failed';
   }
 

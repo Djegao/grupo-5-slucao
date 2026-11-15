@@ -5,50 +5,50 @@ import { SOURCE_KEY, queueEntry, returnNote, sourceInvoice } from './supplier-re
 describe('a nota de devolução montada pela regra', () => {
   it('#10/AC-1 cita a chave da nota de origem e sai com natureza devolucao', () => {
     const note = returnNote();
-    expect(note.nota_referenciada).toBe(SOURCE_KEY);
-    expect(note.natureza).toBe('devolucao');
+    expect(note.referencedAccessKey).toBe(SOURCE_KEY);
+    expect(note.nature).toBe('devolucao');
   });
 
   it('#10/AC-1 leva o fornecedor e o destino da nota de origem', () => {
     const note = returnNote();
-    expect(note.fornecedor_id).toBe('F02');
-    expect(note.destino).toBe('LJ-012');
+    expect(note.supplierId).toBe('F02');
+    expect(note.destination).toBe('LJ-012');
   });
 
   it('#10/AC-1 tem só as linhas devolvidas, com os dados da nota de origem', () => {
-    expect(returnNote().itens).toEqual([
+    expect(returnNote().items).toEqual([
       {
-        codigo_fornecedor: 'F02-002',
+        supplierCode: 'F02-002',
         sku: 'SKU-1006',
-        descricao: 'Refrigerante cola 2 L',
-        quantidade: 7,
-        unidade: 'UN',
-        preco_unitario: 8.49,
-        valor: 59.43,
+        description: 'Refrigerante cola 2 L',
+        quantity: 7,
+        unit: 'UN',
+        unitPrice: 8.49,
+        value: 59.43,
       },
       {
-        codigo_fornecedor: 'F02-005',
+        supplierCode: 'F02-005',
         sku: null,
-        descricao: 'Arroz 5 kg',
-        quantidade: 5,
-        unidade: 'CX',
-        preco_unitario: 100,
-        valor: 500,
+        description: 'Arroz 5 kg',
+        quantity: 5,
+        unit: 'CX',
+        unitPrice: 100,
+        value: 500,
       },
     ]);
   });
 
-  it('#10/AC-1 o valor_total é a soma exata dos itens, igual ao valor da devolução da fila', () => {
+  it('#10/AC-1 o total é a soma exata dos itens, igual ao valor da devolução da fila', () => {
     const note = returnNote();
-    expect(note.valor_total).toBe(559.43);
-    // a fila valora por quantidade x preço unitário, arredondado em centavos (api/src/returns/return-notes.ts)
+    expect(note.total).toBe(559.43);
+    // #10: a fila valora por quantity x preço unitário, arredondado em centavos (api/src/returns/return-notes.ts)
     const queueCents = Math.round(849 * 7) + Math.round(10000 * 5);
-    expect(Math.round(note.valor_total * 100)).toBe(queueCents);
+    expect(Math.round(note.total * 100)).toBe(queueCents);
   });
 
   it('#10/AC-1 uma quantidade fracionada fecha com o valor que a fila calcula', () => {
     const note = buildReturnNote(queueEntry({ lines: [{ supplierCode: 'F02-005', amount: 7 / 6, unit: 'CX' }] }), sourceInvoice());
-    expect(Math.round(note.valor_total * 100)).toBe(Math.round(10000 * (7 / 6)));
+    expect(Math.round(note.total * 100)).toBe(Math.round(10000 * (7 / 6)));
   });
 
   it('#10/AC-1 recusa linha que a nota de origem não tem', () => {
@@ -67,35 +67,35 @@ describe('a nota de devolução montada pela regra', () => {
 describe('a emissão mock da nota de devolução', () => {
   const issue = (sequence: number, issuedOn = '2026-11-12') => issueReturnNote(returnNote(), { sequence, issuedOn });
 
-  it('#10/AC-2 dá o nota_id ND-n, o número e a série próprios, a natureza e a data', () => {
+  it('#10/AC-2 dá o noteId ND-n, o número e a série próprios, a natureza e a data', () => {
     const issued = issue(7);
-    expect(issued.nota_id).toBe('ND-7');
-    expect(issued.numero).toBe(7);
-    expect(issued.serie).toBe(9);
-    expect(issued.natureza).toBe('devolucao');
-    expect(issued.data_emissao).toBe('2026-11-12');
+    expect(issued.noteId).toBe('ND-7');
+    expect(issued.number).toBe(7);
+    expect(issued.series).toBe(9);
+    expect(issued.nature).toBe('devolucao');
+    expect(issued.issuedOn).toBe('2026-11-12');
   });
 
   it('#10/AC-2 a chave tem 44 algarismos e só algarismos', () => {
-    expect(issue(7).chave).toMatch(/^\d{44}$/);
+    expect(issue(7).accessKey).toMatch(/^\d{44}$/);
   });
 
   it('#10/AC-2 sequências diferentes dão chaves diferentes e a mesma sequência dá a mesma chave', () => {
-    const keys = new Set([1, 2, 3, 10, 999].map((n) => issue(n).chave));
+    const keys = new Set([1, 2, 3, 10, 999].map((n) => issue(n).accessKey));
     expect(keys.size).toBe(5);
-    expect(issue(3).chave).toBe(issue(3).chave);
+    expect(issue(3).accessKey).toBe(issue(3).accessKey);
   });
 
   it('#10/AC-2 mantém a nota montada: itens, total e a chave de origem', () => {
     const issued = issue(1);
-    expect(issued.itens).toEqual(returnNote().itens);
-    expect(issued.valor_total).toBe(559.43);
-    expect(issued.nota_referenciada).toBe(SOURCE_KEY);
+    expect(issued.items).toEqual(returnNote().items);
+    expect(issued.total).toBe(559.43);
+    expect(issued.referencedAccessKey).toBe(SOURCE_KEY);
   });
 
   it('#10/AC-2 o emitente é a Já Chegou e o destino que devolve, sem CNPJ inventado', () => {
-    const { emitente } = issue(1);
-    expect(emitente).toEqual({ nome: 'Já Chegou', destino: 'LJ-012' });
+    const { issuer } = issue(1);
+    expect(issuer).toEqual({ name: 'Já Chegou', destination: 'LJ-012' });
   });
 
   it('#10/AC-2 recusa sequência que não é inteiro positivo ou não cabe na chave', () => {
@@ -106,5 +106,49 @@ describe('a emissão mock da nota de devolução', () => {
 
   it('#10/AC-2 recusa data de emissão que não é AAAA-MM-DD', () => {
     expect(() => issue(1, '12/11/2026')).toThrow(DomainError);
+  });
+});
+
+// #10/AC-1: o kit nomeia os campos em português (data/kit/notas.json); o domínio os nomeia em inglês.
+// O mapeamento para o JSON do kit é da borda, não do domínio.
+const KIT_NOTE_FIELDS = {
+  nota_id: 'noteId',
+  chave: 'accessKey',
+  numero: 'number',
+  serie: 'series',
+  fornecedor_id: 'supplierId',
+  destino: 'destination',
+  data_emissao: 'issuedOn',
+  itens: 'items',
+  valor_total: 'total',
+} as const;
+
+const KIT_ITEM_FIELDS = {
+  codigo_fornecedor: 'supplierCode',
+  sku: 'sku',
+  descricao: 'description',
+  quantidade: 'quantity',
+  unidade: 'unit',
+  preco_unitario: 'unitPrice',
+  valor: 'value',
+} as const;
+
+describe('os campos da nota de devolução e os da nota do kit', () => {
+  it('#10/AC-1 todo campo da nota do kit tem o seu par, em inglês, na nota emitida e em cada item', () => {
+    const issued = issueReturnNote(returnNote(), { sequence: 1, issuedOn: '2026-11-12' });
+    for (const field of Object.values(KIT_NOTE_FIELDS)) expect(issued).toHaveProperty(field);
+    for (const item of issued.items) {
+      for (const field of Object.values(KIT_ITEM_FIELDS)) expect(item).toHaveProperty(field);
+    }
+  });
+
+  it('#10/AC-1 o único literal em português é o valor devolucao da natureza; nenhum nome de campo é português', () => {
+    const issued = issueReturnNote(returnNote(), { sequence: 1, issuedOn: '2026-11-12' });
+    const names = [...Object.keys(issued), ...Object.keys(issued.items[0] ?? {}), ...Object.keys(issued.issuer)];
+    for (const portuguese of Object.keys(KIT_NOTE_FIELDS)) expect(names).not.toContain(portuguese);
+    for (const portuguese of Object.keys(KIT_ITEM_FIELDS)) {
+      if (portuguese !== 'sku') expect(names).not.toContain(portuguese);
+    }
+    expect(issued.nature).toBe('devolucao');
   });
 });
