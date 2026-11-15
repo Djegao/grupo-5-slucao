@@ -24,7 +24,7 @@ const draft = {
     total: money(246_320),
   },
   email: { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução do item trocado", body: MAIL_TEXT },
-  attachment: { name: "nota-devolucao-ND-0012.pdf", url: "/api/supplier-requests/sr-1/nota.pdf" },
+  attachment: { name: "nota-devolucao-ND-0012.pdf", url: "/api/supplier-requests/sr-1/return-note.pdf" },
 };
 
 const detail = (supplierRequest: unknown) => ({
@@ -113,10 +113,11 @@ describe("#3 bloco Pedido ao fornecedor na gaveta", () => {
     expect(inBlock.getByText(/Condicionador 350 ml/)).toBeTruthy();
     expect(inBlock.getByText(/40 UN/)).toBeTruthy();
     expect(inBlock.getByText(/R\$ 54,08/)).toBeTruthy();
-    expect(inBlock.getByText(/R\$ 2163,20/)).toBeTruthy(); // total da linha 1
-    expect(inBlock.getByText(/R\$ 300,00/)).toBeTruthy(); // total da linha 2
-    expect(inBlock.getByText(/R\$ 2463,20/)).toBeTruthy(); // total da nota, diferente de cada linha
+    expect(inBlock.getByText(/R\$ 2163,20/)).toBeTruthy(); // #3/AC-3 total da linha 1
+    expect(inBlock.getByText(/R\$ 300,00/)).toBeTruthy(); // #3/AC-3 total da linha 2
+    expect(inBlock.getByText(/R\$ 2463,20/)).toBeTruthy(); // #3/AC-3 total da nota, diferente de cada linha
     expect(inBlock.getByText(/fiscal@higienetotal\.test/)).toBeTruthy();
+    expect(inBlock.getByText(/Prazo: 18\/11/)).toBeTruthy();
     expect(inBlock.getByText(/NF 20046 · devolução do item trocado/)).toBeTruthy();
     expect(inBlock.getByText(MAIL_TEXT, { exact: false })).toBeTruthy();
     expect(inBlock.getByText(/nota-devolucao-ND-0012\.pdf/)).toBeTruthy();
@@ -187,7 +188,7 @@ describe("#3 bloco Pedido ao fornecedor na gaveta", () => {
   it("#3/AC-8: sem rascunho por falha ou número fora do catálogo, mostra o motivo e Refazer", async () => {
     current = { id: "sr-1", status: "failed", failure: "o texto citou um número fora do catálogo" };
     await openDrawer();
-    expect(await screen.findByText("Não foi possível preparar o pedido: o texto citou um número fora do catálogo")).toBeTruthy();
+    expect(await screen.findByText("Não foi possível preparar o pedido: o texto citou um número fora do catálogo.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Emitir e enviar" })).toBeNull();
     onPost = () => {
       current = { id: "sr-1", status: "writing" };
