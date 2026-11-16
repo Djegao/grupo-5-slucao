@@ -12,8 +12,8 @@ const drafted = async (mailer: FakeMailer = fakeMailer()): Promise<World> => {
   return w;
 };
 
-describe('#11/AC-4 emitir e enviar', () => {
-  it('emite a nota pelo mock, move a fila para emitida com o número e envia com a nota anexa', async () => {
+describe('#11/AC-4 emitir e enviar', () => { // ADR-002
+  it('emite a nota pelo mock, move a fila para emitida com o número e envia com a nota anexa', async () => { // ADR-002
     const w = await drafted();
     const result = await createSupplierUseCases(w.deps).send(41, BY);
     expect(result.kind).toBe('ok');
@@ -24,7 +24,7 @@ describe('#11/AC-4 emitir e enviar', () => {
     expect(w.requests.rows[0]?.request.issuedNote?.number).toBe(101);
   });
 
-  it('o e-mail vai para o fornecedor, com os números do catálogo no lugar dos marcadores', async () => {
+  it('o e-mail vai para o fornecedor, com os números do catálogo no lugar dos marcadores', async () => { // ADR-002
     const w = await drafted();
     await createSupplierUseCases(w.deps).send(41, BY);
     const [mail] = w.mailer.sent;
@@ -38,7 +38,7 @@ describe('#11/AC-4 emitir e enviar', () => {
     expect(mail?.dueOn).toBe('2026-11-17');
   });
 
-  it('grava quem enviou, quando, o canal e o identificador do provedor', async () => {
+  it('grava quem enviou, quando, o canal e o identificador do provedor', async () => { // ADR-002
     const w = await drafted(fakeMailer({ ok: true, channel: 'resend', providerMessageId: 'msg-9' }));
     await createSupplierUseCases(w.deps).send(41, BY);
     expect(w.requests.rows[0]?.stamps).toContainEqual({
@@ -53,13 +53,13 @@ describe('#11/AC-4 emitir e enviar', () => {
     });
   });
 
-  it('pedido que não existe é not_found, sem emitir nada', async () => {
+  it('pedido que não existe é not_found, sem emitir nada', async () => { // ADR-002
     const w = await drafted();
     expect(await createSupplierUseCases(w.deps).send(99, BY)).toEqual({ kind: 'not_found' });
     expect(w.notes.issuedCount).toBe(0);
   });
 
-  it('pedido já enviado ou descartado é conflito, sem outro e-mail', async () => {
+  it('pedido já enviado ou descartado é conflito, sem outro e-mail', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     await useCases.send(41, BY);
@@ -67,7 +67,7 @@ describe('#11/AC-4 emitir e enviar', () => {
     expect(w.mailer.sent).toHaveLength(1);
   });
 
-  it('devolução que já não está pendente na fila é conflito: nada é emitido nem registrado e o e-mail não sai', async () => {
+  it('devolução que já não está pendente na fila é conflito: nada é emitido nem registrado e o e-mail não sai', async () => { // ADR-002
     const w = await drafted();
     w.queue.views[0]!.status = 'emitida';
     w.queue.views[0]!.emitted = { number: '999', by: 'outra@jachegou.example', at: NOW.toISOString() };
@@ -79,7 +79,7 @@ describe('#11/AC-4 emitir e enviar', () => {
     expect(w.queue.emitCalls).toEqual([]);
   });
 
-  it('devolução emitida com o número deste pedido é um reenvio: não emite outra nota nem move a fila de novo', async () => {
+  it('devolução emitida com o número deste pedido é um reenvio: não emite outra nota nem move a fila de novo', async () => { // ADR-002
     const w = await drafted(fakeMailer({ ok: false, reason: 'caixa_de_saida_indisponivel' }));
     const useCases = createSupplierUseCases(w.deps);
     await useCases.send(41, BY);
@@ -89,13 +89,13 @@ describe('#11/AC-4 emitir e enviar', () => {
     expect(w.queue.emitCalls).toHaveLength(1);
   });
 
-  it('devolução que sumiu da fila é conflito', async () => {
+  it('devolução que sumiu da fila é conflito', async () => { // ADR-002
     const w = await drafted();
     w.queue.views.length = 0;
     expect(await createSupplierUseCases(w.deps).send(41, BY)).toEqual({ kind: 'conflict', reason: 'queue_entry_missing' });
   });
 
-  it('nota de origem que o cadastro não devolve é invalid, antes de emitir', async () => {
+  it('nota de origem que o cadastro não devolve é invalid, antes de emitir', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases({ ...w.deps, source: { find: async () => null } });
     expect(await useCases.send(41, BY)).toEqual({ kind: 'invalid', reason: 'source_missing' });
@@ -103,8 +103,8 @@ describe('#11/AC-4 emitir e enviar', () => {
   });
 });
 
-describe('#11/AC-5 reenviar nunca emite outra nota', () => {
-  it('a falha do envio deixa send_failed com o motivo; o reenvio usa a nota emitida e envia', async () => {
+describe('#11/AC-5 reenviar nunca emite outra nota', () => { // ADR-002
+  it('a falha do envio deixa send_failed com o motivo; o reenvio usa a nota emitida e envia', async () => { // ADR-002
     const w = await drafted(fakeMailer({ ok: false, reason: 'caixa_de_saida_indisponivel' }));
     const useCases = createSupplierUseCases(w.deps);
     expect(await useCases.send(41, BY)).toMatchObject({ kind: 'send_failed', reason: 'caixa_de_saida_indisponivel' });
@@ -120,7 +120,7 @@ describe('#11/AC-5 reenviar nunca emite outra nota', () => {
     expect(w.mailer.sent[1]?.attachments[0]?.filename).toBe('ND-101.json');
   });
 
-  it('o reenvio que falha de novo troca o motivo e continua send_failed', async () => {
+  it('o reenvio que falha de novo troca o motivo e continua send_failed', async () => { // ADR-002
     const w = await drafted(fakeMailer({ ok: false, reason: 'primeira' }, { ok: false, reason: 'segunda' }));
     const useCases = createSupplierUseCases(w.deps);
     await useCases.send(41, BY);
@@ -129,7 +129,7 @@ describe('#11/AC-5 reenviar nunca emite outra nota', () => {
     expect(w.notes.issuedCount).toBe(1);
   });
 
-  it('o envio é refeito do rascunho que já tem nota: sem emitir outra', async () => {
+  it('o envio é refeito do rascunho que já tem nota: sem emitir outra', async () => { // ADR-002
     const w = await drafted();
     const request = w.requests.rows[0]!.request;
     request.recordIssuance(await w.deps.notes.issue(7, request.note, '2026-11-12'));
@@ -138,8 +138,8 @@ describe('#11/AC-5 reenviar nunca emite outra nota', () => {
   });
 });
 
-describe('#11/AC-5 pedido que falhou sem nota registrada', () => {
-  it('não emite pelo reenvio: o domínio só registra a nota a partir do rascunho', async () => {
+describe('#11/AC-5 pedido que falhou sem nota registrada', () => { // ADR-002
+  it('não emite pelo reenvio: o domínio só registra a nota a partir do rascunho', async () => { // ADR-002
     const w = await drafted();
     w.requests.rows[0]!.request.markSendFailed('estado antigo');
     expect(await createSupplierUseCases(w.deps).send(41, BY)).toEqual({ kind: 'conflict', reason: 'issuance_missing' });
@@ -148,8 +148,8 @@ describe('#11/AC-5 pedido que falhou sem nota registrada', () => {
   });
 });
 
-describe('#11/AC-5 o que o motivo da falha carrega', () => {
-  it('um erro lançado pelo envio vira motivo genérico, sem o texto do erro', async () => {
+describe('#11/AC-5 o que o motivo da falha carrega', () => { // ADR-002
+  it('um erro lançado pelo envio vira motivo genérico, sem o texto do erro', async () => { // ADR-002
     const w = await drafted(fakeMailer(new Error('SMTP recusou a senha hunter2 em smtp.interno')));
     const result = await createSupplierUseCases(w.deps).send(41, BY);
     expect(result).toEqual({ kind: 'send_failed', reason: 'mailer_error', record: w.requests.rows[0] });
@@ -157,15 +157,15 @@ describe('#11/AC-5 o que o motivo da falha carrega', () => {
     expect(JSON.stringify(result)).not.toContain('hunter2');
   });
 
-  it('motivo em branco do envio vira um motivo genérico, para a falha ficar registrada', async () => {
+  it('motivo em branco do envio vira um motivo genérico, para a falha ficar registrada', async () => { // ADR-002
     const w = await drafted(fakeMailer({ ok: false, reason: '  ' }));
     await createSupplierUseCases(w.deps).send(41, BY);
     expect(w.requests.rows[0]?.request.sendFailureReason).toBe('send_failed');
   });
 });
 
-describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
-  it('troca o corpo e deixa assunto, lista e nota como estavam; devolve o corpo já com os números', async () => {
+describe('#11/AC-6 editar aceita só o corpo, revalidado', () => { // ADR-002
+  it('troca o corpo e deixa assunto, lista e nota como estavam; devolve o corpo já com os números', async () => { // ADR-002
     const w = await drafted();
     const before = w.requests.rows[0]!.request;
     const note = before.note;
@@ -181,7 +181,7 @@ describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
     expect(w.requests.rows[0]?.stamps).toContainEqual({ by: BY, at: NOW, action: 'edited' });
   });
 
-  it('número digitado fora do catálogo é recusado e o corpo anterior fica', async () => {
+  it('número digitado fora do catálogo é recusado e o corpo anterior fica', async () => { // ADR-002
     const w = await drafted();
     const result = await createSupplierUseCases(w.deps).editBody(41, 'Devolvemos 999 caixas.', BY);
     expect(result).toEqual({ kind: 'invalid', reason: 'number_mismatch', field: 'body' });
@@ -189,7 +189,7 @@ describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
     expect(w.requests.saves).toBe(0);
   });
 
-  it('só o rascunho se edita; o inexistente é not_found', async () => {
+  it('só o rascunho se edita; o inexistente é not_found', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     expect(await useCases.editBody(99, 'texto', BY)).toEqual({ kind: 'not_found' });
@@ -197,15 +197,15 @@ describe('#11/AC-6 editar aceita só o corpo, revalidado', () => {
     expect(await useCases.editBody(41, 'texto', BY)).toEqual({ kind: 'conflict', reason: 'not_draft' });
   });
 
-  it('sem a nota de origem para refazer o catálogo, não edita', async () => {
+  it('sem a nota de origem para refazer o catálogo, não edita', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases({ ...w.deps, source: { find: async () => null } });
     expect(await useCases.editBody(41, 'texto', BY)).toEqual({ kind: 'invalid', reason: 'source_missing' });
   });
 });
 
-describe('#11/AC-6 descartar respeita o ciclo do pedido', () => {
-  it('descarta o rascunho com o motivo e quem descartou', async () => {
+describe('#11/AC-6 descartar respeita o ciclo do pedido', () => { // ADR-002
+  it('descarta o rascunho com o motivo e quem descartou', async () => { // ADR-002
     const w = await drafted();
     const result = await createSupplierUseCases(w.deps).discard(41, BY, 'fornecedor já avisado por telefone');
     expect(result.kind).toBe('ok');
@@ -214,7 +214,7 @@ describe('#11/AC-6 descartar respeita o ciclo do pedido', () => {
     expect(w.requests.rows[0]?.stamps).toContainEqual({ by: BY, at: NOW, action: 'discarded' });
   });
 
-  it('motivo em branco é invalid; pedido enviado é conflito; inexistente é not_found', async () => {
+  it('motivo em branco é invalid; pedido enviado é conflito; inexistente é not_found', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     expect(await useCases.discard(41, BY, '  ')).toEqual({ kind: 'invalid', reason: 'reason_required' });
@@ -224,8 +224,8 @@ describe('#11/AC-6 descartar respeita o ciclo do pedido', () => {
   });
 });
 
-describe('#11/AC-6 refazer respeita um pedido aberto por nota de origem e tipo', () => {
-  it('depois de descartar, cria um rascunho novo pelo mesmo caminho da tarefa', async () => {
+describe('#11/AC-6 refazer respeita um pedido aberto por nota de origem e tipo', () => { // ADR-002
+  it('depois de descartar, cria um rascunho novo pelo mesmo caminho da tarefa', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     await useCases.discard(41, BY, 'texto ruim');
@@ -236,14 +236,14 @@ describe('#11/AC-6 refazer respeita um pedido aberto por nota de origem e tipo',
     expect(w.notes.issuedCount).toBe(0);
   });
 
-  it('com um pedido aberto para a nota, é conflito e o Claude nem é chamado', async () => {
+  it('com um pedido aberto para a nota, é conflito e o Claude nem é chamado', async () => { // ADR-002
     const w = await drafted();
     const ask = fakeAsk();
     expect(await createSupplierUseCases(w.deps).redraft(41, ask)).toEqual({ kind: 'conflict', reason: 'open_request_exists' });
     expect(ask.calls).toEqual([]);
   });
 
-  it('com a devolução já fora da pendente, é conflito', async () => {
+  it('com a devolução já fora da pendente, é conflito', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     await useCases.discard(41, BY, 'x');
@@ -251,7 +251,7 @@ describe('#11/AC-6 refazer respeita um pedido aberto por nota de origem e tipo',
     expect(await useCases.redraft(41, fakeAsk())).toEqual({ kind: 'conflict', reason: 'queue_not_pending' });
   });
 
-  it('pedido inexistente é not_found; falha do Claude sobe como está', async () => {
+  it('pedido inexistente é not_found; falha do Claude sobe como está', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     expect(await useCases.redraft(99, fakeAsk())).toEqual({ kind: 'not_found' });
@@ -260,7 +260,7 @@ describe('#11/AC-6 refazer respeita um pedido aberto por nota de origem e tipo',
     await expect(useCases.redraft(41, fakeAsk(failure))).rejects.toBe(failure);
   });
 
-  it('o texto recusado vira um pedido descartado com o motivo, e o resultado diz isso', async () => {
+  it('o texto recusado vira um pedido descartado com o motivo, e o resultado diz isso', async () => { // ADR-002
     const w = await drafted();
     const useCases = createSupplierUseCases(w.deps);
     await useCases.discard(41, BY, 'x');

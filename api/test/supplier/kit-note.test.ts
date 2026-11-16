@@ -14,8 +14,8 @@ const kitFields = (): string[] => {
   return Object.keys(notas[0] ?? {});
 };
 
-describe('#11/AC-4 a nota anexa é o JSON no formato do kit', () => {
-  it('traz os campos da nota, a nota de origem e as linhas devolvidas, em português', () => {
+describe('#11/AC-4 a nota anexa é o JSON no formato do kit', () => { // ADR-002
+  it('traz os campos da nota, a nota de origem e as linhas devolvidas, em português', () => { // ADR-002
     const note = toKitNote(issued());
     expect(note).toMatchObject({
       nota_id: 'ND-101',
@@ -35,7 +35,7 @@ describe('#11/AC-4 a nota anexa é o JSON no formato do kit', () => {
     ]);
   });
 
-  it('cada campo das notas do kit está presente, além de emitente, nota_referenciada e natureza', () => {
+  it('cada campo das notas do kit está presente, além de emitente, nota_referenciada e natureza', () => { // ADR-002
     const note = toKitNote(issued());
     const keys = Object.keys(note);
     const own = ['nota_id', 'chave', 'numero', 'serie', 'fornecedor_id', 'destino', 'data_emissao', 'itens'];
@@ -46,7 +46,7 @@ describe('#11/AC-4 a nota anexa é o JSON no formato do kit', () => {
     expect(note.emitente).toEqual({ nome: expect.any(String), destino: 'LJ-012' });
   });
 
-  it('o anexo se chama <nota_id>.json, é application/json e o conteúdo é a nota do kit', () => {
+  it('o anexo se chama <nota_id>.json, é application/json e o conteúdo é a nota do kit', () => { // ADR-002
     const attachment = kitNoteAttachment(issued());
     expect(attachment.filename).toBe('ND-101.json');
     expect(attachment.contentType).toBe('application/json');
