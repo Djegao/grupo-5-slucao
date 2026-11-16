@@ -59,6 +59,8 @@ const bareToken = (token: string): string => token.replace(/^[^\p{L}\p{N}]+|[^\p
 
 const tokensOf = (text: string): string[] => text.split(/[\s/]+/).map(bareToken).filter((t) => t !== '');
 
+const MAX_DOCUMENT_TOKENS = 2; // #33: "NF-D 881" tem dois tokens; mais que isso já é frase
+
 /** #33: o documento está na resposta por palavras inteiras: a sequência dele de tokens aparece seguida na da resposta. */
 function documentInReply(document: string, replyText: string): boolean {
   const wanted = tokensOf(document);
@@ -74,7 +76,10 @@ function documentInReply(document: string, replyText: string): boolean {
  * #4/AC-1: o summary é texto corrido, sem {{chave}} (`validateReading` recusa o marcador, porque o
  * summary não é renderizado): ele conta o que o fornecedor disse, e o que o fornecedor disse (o número
  * do documento dele) não está no catálogo. Por isso cada número do summary tem de ser um valor de fato
- * do catálogo, um identificador do pedido ou o `supplier_document` citado, que está na resposta;
+ * do catálogo, um identificador do pedido ou o `supplier_document` citado, que está na resposta; o
+ * `supplier_document` é só o identificador do documento (no máximo dois tokens, como "NF-D 881"), e
+ * `validateReading` recusa o que passar disso, para que o campo não carregue uma frase da resposta e
+ * libere os números dela;
  * `textChecks` (o mesmo contrato do texto da #2) faz a conferência, e recusa também o número por extenso.
  */
 function allowedNumbers(catalog: FactCatalog, supplierDocument: string | null): ReadonlySet<string> {
@@ -110,6 +115,8 @@ export function validateReading(raw: unknown, ctx: ReadingContext): ReadingValid
   if (!fulfilled_asks.every((a) => ctx.asks.includes(a))) return rejection('unknown_ask', 'fulfilled_asks');
   if (supplier_document !== null && !isText(supplier_document)) return rejection('invalid_shape', 'supplier_document');
   const document = supplier_document === null ? null : supplier_document.trim();
+  // #33: o documento é só o identificador, no máximo dois tokens; uma frase inteira liberaria os números dela no summary.
+  if (document !== null && tokensOf(document).length > MAX_DOCUMENT_TOKENS) return rejection('invalid_shape', 'supplier_document');
   // #33: o documento é palavra do modelo, e libera número no summary: tem de estar na resposta, como o injection_flag.
   if (document !== null && !documentInReply(document, ctx.replyText)) return rejection('document_not_in_reply', 'supplier_document');
   if (!isText(summary) || MARKER.test(summary)) return rejection('invalid_shape', 'summary');
