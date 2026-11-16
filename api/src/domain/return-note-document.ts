@@ -95,7 +95,7 @@ export function buildReturnNote(entry: ReturnQueueEntry, invoice: InvoiceView): 
 export const RETURN_NOTE_SERIES = 9;
 
 const MAX_SEQUENCE = 999_999_999;
-const ISSUER_NAME = 'Já Chegou';
+const ISSUER_NAME = 'Já Chegou'; // #10: a operadora fictícia do caso (AGENTS.md)
 
 /** #10/AC-2: dígito verificador módulo 11 da chave de acesso, pesos de 2 a 9 da direita para a esquerda. */
 function checkDigit(digits: string): number {
