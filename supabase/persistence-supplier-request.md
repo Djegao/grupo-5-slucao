@@ -1,13 +1,13 @@
 # Desenho da persistência: pedido ao fornecedor (#12)
 
-Issue: #12 (história #2). Banco: PostgreSQL 17 no Supabase (`supabase/config.toml`, `major_version = 17`), acessado só por PostgREST com a chave secreta. Registro: `supabase/persistence-modes.yaml`. Migração desta camada: `supabase/migrations/20261116120000_pedido_fornecedor.sql` (posterior à última, `20261116100000`).
+Issue: #12 (história #2). Banco: PostgreSQL 17 no Supabase (`supabase/config.toml`, `major_version = 17`), acessado só por PostgREST com a chave secreta. Registro: `supabase/persistence-modes.yaml`. Migração desta camada: `supabase/migrations/20261116120000_supplier_request.sql` (posterior à última, `20261116100000`).
 
 ## Entradas
 
 | Entrada | Valor | Fonte |
 |---|---|---|
 | Raízes | `SupplierRequest` (pedido ao fornecedor); `IssuedReturnNote` (a nota emitida pelo mock, valor imutável); a entrada da fila `outbox_return_notes` (existente, #140) | `api/src/domain/supplier-request.ts`, `return-note-document.ts`, `api/src/returns/return-notes.ts` |
-| Consultas | Q1 `findOpen(invoice_access_key, request_type)` entre `draft`, `sent`, `send_failed`; Q2 `get(id)`; Q3 `issue(queueId)`: a nota já emitida da devolução; Q4 `SourceInvoices.find`: `invoices` por `access_key` e `kit_fornecedores` por `fornecedor_id`; Q5 o pedido por id na trava e nas gravações | `api/src/supplier/ports.ts`, `draft.ts`, `use-cases.ts` |
+| Consultas | Q1 `findOpen(invoice_access_key, request_type)` entre `draft`, `sent`, `send_failed`; Q1b `listOpenKeys(request_type)`: as notas de origem com pedido aberto do tipo, numa leitura só (o `pending()` da tarefa do Cron, em vez de um `findOpen` por devolução; mesmo predicado do índice parcial); Q2 `get(id)`; Q3 `issue(queueId)`: a nota já emitida da devolução; Q4 `SourceInvoices.find`: `invoices` por `access_key` e `kit_fornecedores` por `fornecedor_id`; Q5 o pedido por id na trava e nas gravações | `api/src/supplier/ports.ts`, `draft.ts`, `use-cases.ts` |
 | Inquilino | nenhum | brief da #12 |
 | Números assumidos | pedidos por dia: não informado; entradas de histórico por pedido: poucas dezenas (rascunho, edições, emissão, tentativas de envio), assumido; prazo da trava do envio: 5 minutos, assumido (não informado o tempo máximo do envio de e-mail) | |
 
@@ -100,7 +100,7 @@ A trava expira em 5 minutos (assumido) para que um processo que morreu no meio n
 
 O que muda nos casos de uso (#11) para isso existir, a ser feito por quem constrói a camada:
 
-- `SupplierRequestStore` ganha `claimSend(id: number): Promise<{kind: 'claimed'} | {kind: 'conflict'}>` (o adaptador guarda a versão lida e o `uuid` com o registro), e `send` a chama logo depois de validar o texto, antes de `checkQueue`; conflito vira `{kind: 'conflict', reason: 'send_in_progress'}`.
+- `SupplierRequestStore` ganha `claimSend(id: number): Promise<{kind: 'claimed'} | {kind: 'conflict'}>` (o adaptador guarda a versão lida; o `uuid` NÃO fica no adaptador: `claimSend` o devolve, o envio o leva em `RequestChange.claim` de cada gravação sua e em `releaseSend(id, claim, by, at)`, e o adaptador filtra `send_claim=eq.<chave>` só quando ela é dada; edição e descarte não a levam e são recusados enquanto a trava vive, mesmo na mesma instância do adaptador), e `send` a chama logo depois de validar o texto, antes de `checkQueue`; conflito vira `{kind: 'conflict', reason: 'send_in_progress'}`.
 - `save` passa a devolver `'ok' | 'stale'` (ou lançar um erro próprio), em vez de `void`: 0 linhas no `PATCH` não pode passar calado.
 - `save` recebe quem fez em todo ato, não só no envio e no descarte: `editBody(id, body)` hoje não recebe quem editou, e o histórico (PER-3) pede quem. `RequestChange` ganha `by` e `at` obrigatórios, e o caso de uso passa o usuário e o relógio que já recebe.
 - `SendStamp` leva os anexos (`filename`, `contentType`, id da nota) para a coluna `attachments` (AC-4).

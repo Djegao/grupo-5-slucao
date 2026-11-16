@@ -155,7 +155,7 @@ async function runTask(task: ClaudeTask<unknown, unknown>, options: RunOptions):
   const { requests, dropped } = await task.pending(options.db);
   const pending = requests.filter((request) => existing.byKey.get(request.key)?.status !== 'ok');
   const now = (options.now ?? (() => new Date()))();
-  const plan = planQueue(pending, existing, now, options.limit ?? MAX_PER_RUN);
+  const plan = planQueue(pending, existing, now, Math.min(task.limit ?? MAX_PER_RUN, options.limit ?? MAX_PER_RUN));
   const counts: Counts = { ok: 0, failed: 0, firstError: undefined };
   let stopped = false;
   let outOfBudget = false;

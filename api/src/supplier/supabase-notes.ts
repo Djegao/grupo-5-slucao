@@ -5,7 +5,7 @@ import type { IssuedNoteStore } from './ports.js';
 
 // #12: a nota emitida pelo mock (issued_return_notes): um fato imutável, uma por devolução da fila (AC-2).
 // #12: o id da linha é a sequência da emissão (ND-<id>, número <id>); a chave de acesso e o emitente não são
-// #12: gravados: issueReturnNote é determinística e os refaz iguais a cada leitura (supabase/persistence-pedido-fornecedor.md).
+// #12: gravados: issueReturnNote é determinística e os refaz iguais a cada leitura (supabase/persistence-supplier-request.md).
 
 const TABLE = 'issued_return_notes';
 

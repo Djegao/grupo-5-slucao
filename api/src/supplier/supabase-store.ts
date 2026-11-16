@@ -83,6 +83,8 @@ const isRow = shaped<Row>({
   send_claim: nullable(isString),
 } satisfies Shape<Row>);
 
+const isKeyRow = shaped<{ invoice_access_key: string }>({ invoice_access_key: isString });
+
 /** #12: o estado inteiro depois de cada gravação, como entra no histórico. */
 type State = {
   status: RequestStatus;
@@ -92,8 +94,8 @@ type State = {
   issued_return_note_id: number | null;
 };
 
-/** #12: o que o adaptador guarda de cada pedido lido: a versão, o histórico, o estado e a trava que este processo tomou. */
-type Meta = { version: number; history: unknown[]; state: State; claim: string | null };
+/** #12: o que o adaptador guarda de cada pedido lido: a versão, o histórico e o estado. A trava não fica aqui: quem a tomou a leva. */
+type Meta = { version: number; history: unknown[]; state: State };
 
 const stateOf = (request: SupplierRequest): State => ({
   status: request.status,
@@ -120,7 +122,7 @@ function rejectionOf(reason: string | null): RequestTextRejection {
 /** #12: o código do Postgres que o PostgREST põe no corpo do erro; o resto do corpo não passa daqui. */
 const pgCode = (detail: string): string | null => /"code"\s*:\s*"(\w{5})"/.exec(detail)?.[1] ?? null;
 
-/** #12: a raiz é refeita pelos métodos dela, na ordem dos fatos (supabase/persistence-pedido-fornecedor.md). */
+/** #12: a raiz é refeita pelos métodos dela, na ordem dos fatos (supabase/persistence-supplier-request.md). */
 function rebuild(row: Row, issued: SupplierRequest['issuedNote']): SupplierRequest {
   const base = { id: row.id, invoiceAccessKey: row.invoice_access_key, note: noteFromJson(row.note, TABLE), draftedOn: row.drafted_on };
   const rejected = row.status === 'discarded' && row.subject === '';
@@ -149,10 +151,7 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
       if (error instanceof DomainError) return corrupt('pedido fora do que o domínio aceita');
       throw error;
     }
-    // #12: a trava só é deste processo se ele a tomou e a linha ainda a guarda; a de outro nunca vira dele ao ler.
-    const held = metas.get(row.id)?.claim ?? null;
-    const claim = held !== null && held === row.send_claim ? held : null;
-    metas.set(row.id, { version: row.version, history: row.history, state: stateOf(request), claim });
+    metas.set(row.id, { version: row.version, history: row.history, state: stateOf(request) });
     return { request, queueId: row.queue_id, to: row.recipient };
   }
 
@@ -181,6 +180,15 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
         TABLE,
       );
       return rows[0] === undefined ? null : toRecord(rows[0]);
+    },
+
+    async listOpenKeys(requestType) {
+      const rows = parseRows(
+        await rest.select(TABLE, { select: 'invoice_access_key', filters: { request_type: `eq.${requestType}`, status: OPEN } }),
+        isKeyRow,
+        TABLE,
+      );
+      return new Set(rows.map((row) => row.invoice_access_key));
     },
 
     async get(id) {
@@ -242,7 +250,7 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
       const state = stateOf(request);
       const history = [...meta.history, entry(version, change, state)];
       const releases = change.action === 'sent' || change.action === 'send_failed';
-      const holder = meta.claim !== null;
+      const claim = change.claim ?? null;
       const body: Record<string, unknown> = {
         status: state.status,
         body: state.body,
@@ -268,15 +276,14 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
         body.discarded_by = change.by;
         body.discarded_at = change.at.toISOString();
       }
-      // #12: quem tem a trava grava pela chave dela e a limpa no último save; quem não tem só grava com a trava livre ou vencida.
-      const filters: Filters = holder ? { send_claim: `eq.${meta.claim}` } : { or: notHeld(change.at) };
-      const clears = !holder || releases;
-      if (clears) {
+      // #12: quem leva a chave grava por ela e a limpa no último save; quem não leva só grava com a trava livre ou vencida.
+      const filters: Filters = claim !== null ? { send_claim: `eq.${claim}` } : { or: notHeld(change.at) };
+      if (claim === null || releases) {
         body.send_claim = null;
         body.send_claimed_at = null;
       }
       if (!(await patch(request.id, meta, filters, body))) return 'stale';
-      metas.set(request.id, { version, history, state, claim: clears ? null : meta.claim });
+      metas.set(request.id, { version, history, state });
       return 'ok';
     },
 
@@ -288,17 +295,17 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
       const history = [...meta.history, entry(version, { by, at, action: 'send_claimed' }, meta.state)];
       const body = { send_claim: claim, send_claimed_at: at.toISOString(), version, history, updated_at: at.toISOString() };
       if (!(await patch(id, meta, { status: SENDABLE, or: notHeld(at) }, body))) return { kind: 'conflict' };
-      metas.set(id, { ...meta, version, history, claim });
+      metas.set(id, { ...meta, version, history });
       return { kind: 'claimed', claim };
     },
 
-    async releaseSend(id, by, at) {
+    async releaseSend(id, claim, by, at) {
       const meta = metas.get(id);
-      if (meta === undefined || meta.claim === null) return;
+      if (meta === undefined) return;
       const version = meta.version + 1;
       const history = [...meta.history, entry(version, { by, at, action: 'send_released' }, meta.state)];
       const body = { send_claim: null, send_claimed_at: null, version, history, updated_at: at.toISOString() };
-      if (await patch(id, meta, { send_claim: `eq.${meta.claim}` }, body)) metas.set(id, { ...meta, version, history, claim: null });
+      if (await patch(id, meta, { send_claim: `eq.${claim}` }, body)) metas.set(id, { ...meta, version, history });
     },
   };
 }

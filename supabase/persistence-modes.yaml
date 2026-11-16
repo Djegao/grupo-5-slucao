@@ -1,6 +1,6 @@
 # Registro de modos de persistência (#12): uma entrada por tabela, ao lado de supabase/migrations/.
 # Chaves em inglês (formato do registro); descrições em português.
-# O desenho que explica cada escolha: supabase/persistence-pedido-fornecedor.md.
+# O desenho que explica cada escolha: supabase/persistence-supplier-request.md.
 #
 # mode:     append-only | upsert-with-history | ephemeral
 # history:  json-column | json-child-table | history-table | none

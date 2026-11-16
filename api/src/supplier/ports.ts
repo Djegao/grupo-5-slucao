@@ -66,6 +66,8 @@ export type RequestChange = {
   readonly at: Date;
   readonly action: RequestAction;
   readonly sent?: SendStamp;
+  /** #12/AC-4: a chave da trava do envio que grava; só o envio que a tomou a leva. Edição e descarte não levam e são recusados enquanto ela vive. */
+  readonly claim?: string;
 };
 
 /** #12: `stale` é a versão lida que já não é a da linha, ou a trava de um envio em curso: 0 linhas no PATCH. */
@@ -83,8 +85,10 @@ export interface SupplierRequestStore {
   save(request: SupplierRequest, change: RequestChange): Promise<SaveResult>;
   /** #12/AC-4: toma a trava do envio antes de qualquer efeito; só um envio por vez segue. */
   claimSend(id: number, by: string, at: Date): Promise<ClaimResult>;
-  /** #12/AC-4: solta a trava de um envio que parou antes de enviar (fila já tratada, por exemplo). */
-  releaseSend(id: number, by: string, at: Date): Promise<void>;
+  /** #12/AC-4: solta a trava de um envio que parou antes de enviar (fila já tratada, por exemplo); só solta a que tem esta chave. */
+  releaseSend(id: number, claim: string, by: string, at: Date): Promise<void>;
+  /** #12/AC-6: as notas de origem com pedido aberto do tipo, numa só leitura (o `pending()` da tarefa não faz uma leitura por devolução). */
+  listOpenKeys(requestType: RequestType): Promise<ReadonlySet<string>>;
 }
 
 /** #11/AC-5: a emissão mock, idempotente por devolução da fila: a segunda chamada devolve a nota já emitida. */

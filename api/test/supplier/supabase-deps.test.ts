@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { supplierDeps } from '../../src/supplier/supabase-deps.js';
 import { createSupplierUseCases } from '../../src/supplier/use-cases.js';
-import { NOW, fakeAsk } from './doubles.js';
+import { NOW, fakeAsk, fakeMailer } from './doubles.js';
 import { draftRequest } from '../../src/supplier/draft.js';
 import { harness, invoiceRow, queueRow, supplierRow } from './supabase-support.js';
 
@@ -9,8 +9,8 @@ import { harness, invoiceRow, queueRow, supplierRow } from './supabase-support.j
 
 const seed = () => ({ outbox_return_notes: [queueRow()], invoices: [invoiceRow()], kit_fornecedores: [supplierRow()] });
 
-describe('#12/AC-5 do rascunho ao envio pela caixa de saída mock', () => {
-  it('rascunha, emite a nota uma vez, move a fila e envia pelo mock: o pedido guarda o canal e o envio', async () => {
+describe('#12/AC-5 do rascunho ao envio pela caixa de saída mock', () => { // ADR-002
+  it('rascunha, emite a nota uma vez, move a fila e envia pelo mock: o pedido guarda o canal e o envio', async () => { // ADR-002
     const { fake, rest } = harness(seed());
     const deps = supplierDeps(rest, { clock: { now: () => NOW } });
     const drafted = await draftRequest(deps, 7, fakeAsk());
@@ -32,7 +32,7 @@ describe('#12/AC-5 do rascunho ao envio pela caixa de saída mock', () => {
     ]);
   });
 
-  it('o mock não grava na tabela do pedido: o único escritor da linha do pedido é o adaptador do pedido', async () => {
+  it('o mock não grava na tabela do pedido: o único escritor da linha do pedido é o adaptador do pedido', async () => { // ADR-002
     const { fake, rest } = harness(seed());
     const deps = supplierDeps(rest, { clock: { now: () => NOW } });
     await draftRequest(deps, 7, fakeAsk());
@@ -52,7 +52,7 @@ describe('#12/AC-5 do rascunho ao envio pela caixa de saída mock', () => {
     expect(fake.requests.length).toBe(before);
   });
 
-  it('enviar duas vezes seguidas não manda dois e-mails nem emite outra nota', async () => {
+  it('enviar duas vezes seguidas não manda dois e-mails nem emite outra nota', async () => { // ADR-002
     const { fake, rest } = harness(seed());
     const deps = supplierDeps(rest, { clock: { now: () => NOW } });
     await draftRequest(deps, 7, fakeAsk());
@@ -60,5 +60,31 @@ describe('#12/AC-5 do rascunho ao envio pela caixa de saída mock', () => {
     await useCases.send(1, 'ana@jachegou.example');
     expect(await useCases.send(1, 'ana@jachegou.example')).toEqual({ kind: 'conflict', reason: 'not_sendable' });
     expect(fake.rows('issued_return_notes')).toHaveLength(1);
+  });
+});
+
+describe('#12/AC-4 dois envios ao mesmo tempo do mesmo pedido', () => { // ADR-002
+  const BY = 'ana@jachegou.example';
+
+  const twoSends = async (separateInstances: boolean) => {
+    const { fake, rest } = harness(seed());
+    const mailer = fakeMailer();
+    const first = supplierDeps(rest, { clock: { now: () => NOW }, mailer });
+    const second = separateInstances ? supplierDeps(rest, { clock: { now: () => NOW }, mailer }) : first;
+    await draftRequest(first, 7, fakeAsk());
+    const results = await Promise.all([createSupplierUseCases(first).send(1, BY), createSupplierUseCases(second).send(1, BY)]);
+    return { fake, mailer, results };
+  };
+
+  it.each([
+    ['na mesma instância do adaptador', false],
+    ['em instâncias separadas sobre o mesmo banco', true],
+  ] as const)('%s: sai um e-mail só, uma nota só, e o que perdeu é send_in_progress', async (_name, separate) => { // ADR-002
+    const { fake, mailer, results } = await twoSends(separate);
+    expect(mailer.sent).toHaveLength(1);
+    expect(fake.rows('issued_return_notes')).toHaveLength(1);
+    expect(results.filter((r) => r.kind === 'ok')).toHaveLength(1);
+    expect(results.filter((r) => r.kind === 'conflict')).toEqual([{ kind: 'conflict', reason: 'send_in_progress' }]);
+    expect(fake.rows('outbox_supplier_emails')[0]).toMatchObject({ status: 'sent', send_claim: null });
   });
 });

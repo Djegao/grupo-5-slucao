@@ -1,6 +1,6 @@
 -- #12 Persistência do pedido ao fornecedor (#2): o e-mail de cada fornecedor, a nota emitida pelo mock e o pedido.
 -- #12 RLS ligado e nenhuma política: só a chave secreta (service_role) lê e grava, como nas demais tabelas.
--- #12 O desenho e o modo de cada tabela: supabase/persistence-pedido-fornecedor.md e supabase/persistence-modes.yaml.
+-- #12 O desenho e o modo de cada tabela: supabase/persistence-supplier-request.md e supabase/persistence-modes.yaml.
 
 -- #12/AC-1 O e-mail de teste do fornecedor. Anulável: a migração roda antes da carga (scripts/load_kit.py), que o preenche.
 alter table public.kit_fornecedores add column email text;

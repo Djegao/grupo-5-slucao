@@ -18,6 +18,7 @@ import type { MailMessage, MailResult, RequestRecord, SourceInvoice, SupplierDep
 // #11: emitir e registrar (a emissão idempotente devolve a mesma nota) e entre mover a fila e marcar (o reenvio vê a fila emitida
 // #11: com o número do pedido e segue). A transação de um só commit, se vier, é da unidade de trabalho do OLTP, não daqui.
 // #12: o envio toma a trava (claimSend) antes de qualquer efeito: só um envio por vez emite, move a fila e manda o e-mail.
+// #12: a chave da trava viaja no `RequestChange` de cada gravação do envio e em `releaseSend`; o adaptador não a guarda.
 // #12: gravação que não acha a versão lida volta `stale` e vira conflito; ninguém grava por cima de outra pessoa.
 
 const SEND_FAILED_FALLBACK = 'send_failed';
@@ -66,14 +67,14 @@ const catalogOf = (record: RequestRecord, source: SourceInvoice) =>
 const STALE: SendResult = { kind: 'conflict', reason: 'stale' };
 
 /** #11/AC-4: a nota emitida é a do pedido; sem ela, emite (idempotente por devolução) e registra. */
-async function ensureIssued(deps: SupplierDeps, record: RequestRecord, by: string): Promise<IssuedReturnNote | 'stale' | null> {
+async function ensureIssued(deps: SupplierDeps, record: RequestRecord, by: string, claim: string): Promise<IssuedReturnNote | 'stale' | null> {
   const { request } = record;
   if (request.issuedNote !== null) return request.issuedNote;
   if (request.status !== 'draft') return null;
   const now = deps.clock.now();
   const issued = await deps.notes.issue(record.queueId, request.note, todayIso(now));
   request.recordIssuance(issued);
-  const saved = await deps.requests.save(request, { by, at: now, action: 'issued' });
+  const saved = await deps.requests.save(request, { by, at: now, action: 'issued', claim });
   return saved === 'ok' ? issued : 'stale';
 }
 
@@ -105,6 +106,7 @@ async function mail(
   message: MailMessage,
   issuedNoteId: number,
   by: string,
+  claim: string,
 ): Promise<SendResult | null> {
   const at = deps.clock.now();
   let result: MailResult;
@@ -126,13 +128,14 @@ async function mail(
       by,
       at,
       action: 'sent',
+      claim,
       sent: { channel: result.channel, providerMessageId: result.providerMessageId, attachments },
     });
     return saved === 'ok' ? null : STALE;
   }
   const reason = result.reason.trim() === '' ? SEND_FAILED_FALLBACK : result.reason;
   record.request.markSendFailed(reason);
-  const saved = await deps.requests.save(record.request, { by, at, action: 'send_failed' });
+  const saved = await deps.requests.save(record.request, { by, at, action: 'send_failed', claim });
   return saved === 'ok' ? { kind: 'send_failed', record, reason } : STALE;
 }
 
@@ -147,7 +150,7 @@ async function sendClaimed(
   const { request } = record;
   const gate = await checkQueue(deps, record);
   if (typeof gate === 'object') return gate;
-  const issued = await ensureIssued(deps, record, by);
+  const issued = await ensureIssued(deps, record, by, claim);
   if (issued === 'stale') return STALE;
   if (issued === null) return { kind: 'conflict', reason: 'issuance_missing' };
   const blocked = gate === 'pending' ? await moveQueue(deps, record, issued, by) : null;
@@ -162,7 +165,7 @@ async function sendClaimed(
     dueOn: request.dueOn,
     idempotencyKey: claim,
   };
-  return (await mail(deps, record, message, issued.number, by)) ?? { kind: 'ok', record, issued };
+  return (await mail(deps, record, message, issued.number, by, claim)) ?? { kind: 'ok', record, issued };
 }
 
 async function send(deps: SupplierDeps, id: number, by: string): Promise<SendResult> {
@@ -177,8 +180,8 @@ async function send(deps: SupplierDeps, id: number, by: string): Promise<SendRes
   const claimed = await deps.requests.claimSend(id, by, deps.clock.now());
   if (claimed.kind === 'conflict') return { kind: 'conflict', reason: 'send_in_progress' };
   const result = await sendClaimed(deps, record, text.rendered, claimed.claim, by);
-  // #12/AC-4: o envio que termina (ok ou send_failed) limpa a trava no último save; o que para antes a solta aqui.
-  if (result.kind !== 'ok' && result.kind !== 'send_failed') await deps.requests.releaseSend(id, by, deps.clock.now());
+  // #12/AC-4: o envio que termina (ok ou send_failed) limpa a trava no último save; o que para antes a solta aqui, pela chave dela.
+  if (result.kind !== 'ok' && result.kind !== 'send_failed') await deps.requests.releaseSend(id, claimed.claim, by, deps.clock.now());
   return result;
 }
 

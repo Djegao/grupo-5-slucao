@@ -3,7 +3,7 @@ import { runClaudeRound } from '../../../src/claude/cron.js';
 import { tasksFor } from '../../../src/claude/tasks/index.js';
 import type { Db } from '../../../src/claude/db.js';
 import { SUPPLIER_DRAFT_TASK, type SupplierDraftInput } from '../../../src/supplier/draft-task.js';
-import { GOOD_TEXT, SUPPLIER_EMAIL, fakeAsk } from '../../supplier/doubles.js';
+import { GOOD_TEXT, SUPPLIER_EMAIL, draftInput, fakeAsk } from '../../supplier/doubles.js';
 import { harness, invoiceRow, queueRow, supplierRow } from '../../supplier/supabase-support.js';
 
 // #12: o registro das tarefas do Claude leva a tarefa do rascunho do pedido ao fornecedor (#2).
@@ -32,7 +32,7 @@ describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude'
   it('com o rascunho feito, a devolução não volta à lista da tarefa; o rascunho nunca emite nota nem envia', async () => {
     const { fake, rest } = harness(seed());
     const task = tasksFor(rest).find((t) => t.name === SUPPLIER_DRAFT_TASK)!;
-    await task.run({ queueId: 7 }, fakeAsk(GOOD_TEXT));
+    await task.run(draftInput(), fakeAsk(GOOD_TEXT));
     expect((await task.pending(db)).requests).toEqual([]);
     expect(fake.rows('issued_return_notes')).toEqual([]);
     expect(fake.rows('outbox_return_notes')[0]?.status).toBe('pendente');
