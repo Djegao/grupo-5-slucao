@@ -106,6 +106,14 @@ describe('#33/AC-1: a leitura aceita só a forma pedida', () => {
     });
     expect(rejected({ supplier_document: '99999' })).toMatchObject({ reason: 'document_not_in_reply', field: 'supplier_document' });
   });
+  it('recusa o supplier_document que é só um pedaço de palavra da resposta (8 dentro de 881)', () => {
+    // #33: a conferência é por palavras inteiras; senão o 8 liberaria um 8 no summary.
+    expect(rejected({ supplier_document: '8', summary: 'Recusou e cobra 8 de multa.' })).toEqual({
+      ok: false,
+      reason: 'document_not_in_reply',
+      field: 'supplier_document',
+    });
+  });
   it('aceita o supplier_document com espaços nas pontas quando o texto aparece na resposta', () => {
     expect(reading({ supplier_document: ' 881 ' })).toMatchObject({ ok: true, reading: { supplierDocument: '881' } });
   });
