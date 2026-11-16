@@ -57,6 +57,19 @@ const MARKER = /\{\{[^}]*\}\}/; // #33: marcador {{chave}}, que o summary não t
 
 const bareToken = (token: string): string => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 
+const tokensOf = (text: string): string[] => text.split(/[\s/]+/).map(bareToken).filter((t) => t !== '');
+
+/** #33: o documento está na resposta por palavras inteiras: a sequência dele de tokens aparece seguida na da resposta. */
+function documentInReply(document: string, replyText: string): boolean {
+  const wanted = tokensOf(document);
+  if (wanted.length === 0) return false;
+  const reply = tokensOf(replyText);
+  for (let i = 0; i + wanted.length <= reply.length; i++) {
+    if (wanted.every((t, j) => reply[i + j] === t)) return true;
+  }
+  return false;
+}
+
 /**
  * #4/AC-1: o summary é texto corrido, sem {{chave}} (`validateReading` recusa o marcador, porque o
  * summary não é renderizado): ele conta o que o fornecedor disse, e o que o fornecedor disse (o número
@@ -98,7 +111,7 @@ export function validateReading(raw: unknown, ctx: ReadingContext): ReadingValid
   if (supplier_document !== null && !isText(supplier_document)) return rejection('invalid_shape', 'supplier_document');
   const document = supplier_document === null ? null : supplier_document.trim();
   // #33: o documento é palavra do modelo, e libera número no summary: tem de estar na resposta, como o injection_flag.
-  if (document !== null && !ctx.replyText.includes(document)) return rejection('document_not_in_reply', 'supplier_document');
+  if (document !== null && !documentInReply(document, ctx.replyText)) return rejection('document_not_in_reply', 'supplier_document');
   if (!isText(summary) || MARKER.test(summary)) return rejection('invalid_shape', 'summary');
   if (!textChecks(summary, ctx.catalog, allowedNumbers(ctx.catalog, document))) return rejection('number_mismatch', 'summary');
   if (!isNextStep(next_step)) return rejection('invalid_shape', 'next_step');
