@@ -66,6 +66,14 @@ describe('#34/AC-1: grava a leitura aceita pela regra', () => {
     expect(inbox.status.get(1)).toEqual({ state: 'read', reason: null });
   });
 
+  it('a resposta tardia substitui o no_reply da varredura, que não tem mensagem de origem (#34/AC-1)', async () => {
+    const { deps, store, inbox } = parts([replyRequest(7, { reading: noReply() })], [message(1, 7)]);
+    const out = await supplierReplyReadingTask(deps).run({ messageId: 1, requestId: 7 }, fakeAsk(GOOD_READING));
+    expect(out).toEqual({ messageId: 1, status: 'read', replyOutcome: 'fulfilled' });
+    expect(store.rows.get(7)?.reading?.replyOutcome).not.toBe('no_reply');
+    expect(inbox.status.get(1)).toEqual({ state: 'read', reason: null });
+  });
+
   it('atendeu com documento citado nunca fecha sozinho: o próximo passo é confirmar o documento (#4/AC-4)', async () => {
     const { deps, store } = open();
     await supplierReplyReadingTask(deps).run({ messageId: 1, requestId: 7 }, fakeAsk({ ...GOOD_READING, next_step: 'close' }));
