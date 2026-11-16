@@ -15,6 +15,7 @@ export type ReadingInput = { readonly messageId: number; readonly requestId: num
 /** #34: o que a tarefa deixa registrado: nunca o texto do fornecedor nem o do modelo. */
 export type ReadingOutput =
   | { readonly messageId: number; readonly status: 'read'; readonly replyOutcome: ReplyOutcome }
+  | { readonly messageId: number; readonly status: 'superseded' }
   | { readonly messageId: number; readonly status: 'error'; readonly reason: string }
   | { readonly messageId: number; readonly skipped: 'message_not_pending' | 'request_not_found' | 'request_not_sent' };
 
@@ -59,8 +60,11 @@ export const supplierReplyReadingTask = (deps: ReplyDeps): ClaudeTask<ReadingInp
     }
     // #34/AC-1: recordReading e markRead não são atômicos aqui: a atomicidade é da unidade de trabalho do OLTP.
     // #34/AC-1: se markRead falhar, a mensagem segue pendente e a nova rodada a lê de novo e troca a leitura por uma equivalente.
-    await deps.requests.recordReading(request.id, checked.reading);
+    // #34/AC-1: o OLTP tem de dar um UPDATE condicional no id da mensagem guardada (ver ReplyRequestStore.recordReading):
+    // #34/AC-1: o runner roda as chaves novas antes das retentativas, e a leitura antiga não pode trocar a nova.
+    const recorded = await deps.requests.recordReading(request.id, checked.reading, messageId);
     await deps.inbox.markRead(messageId);
+    if (recorded === 'superseded') return { messageId, status: 'superseded' };
     return { messageId, status: 'read', replyOutcome: checked.reading.replyOutcome };
   },
 });

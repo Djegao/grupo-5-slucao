@@ -31,20 +31,25 @@ async function sweepOverdue(deps: ReplyDeps): Promise<{ readonly marked: readonl
   for (const request of await deps.requests.listSent()) {
     const overdue = overdueReading(request, request.reading, today);
     if (overdue === null) continue;
-    await deps.requests.recordReading(request.id, overdue);
-    marked.push(request.id);
+    // #34/AC-3: sem mensagem de origem (null): o OLTP só grava se o pedido ainda não tem leitura.
+    if ((await deps.requests.recordReading(request.id, overdue, null)) === 'recorded') marked.push(request.id);
   }
   return { marked };
 }
 
 /** #34/AC-4: erro lançado pela porta, ou motivo fora do formato curto, vira um motivo próprio; o texto do provedor não é gravado. */
-async function dispatch(deps: ReplyDeps, message: FollowUpMail): Promise<FollowUpMailResult> {
+async function dispatch(deps: ReplyDeps, requestId: number, message: FollowUpMail): Promise<FollowUpMailResult> {
   try {
     const result = await deps.mailer.send(message);
     if (result.ok) return result;
     return { ok: false, reason: SHORT_REASON.test(result.reason) ? result.reason : SEND_FAILED_FALLBACK };
-  } catch {
+  } catch (error) {
     // #34/AC-4: o texto do erro da porta não vai para o pedido nem para quem chama (layer-exposure).
+    // #34/AC-4: o adaptador de #12 (mock-mailer) não registra a falha antes de lançar; aqui vai para o log do servidor
+    // #34/AC-4: só a classe do erro, a operação e o pedido, como o storedError do runner (#66) faz com o que não é nosso.
+    const className = error instanceof Error ? error.constructor.name : '';
+    const name = /^\w{1,64}$/.test(className) ? className : 'Error';
+    console.error('#34 envio da cobrança falhou', { operation: 'follow-up-send', requestId, error: name });
     return { ok: false, reason: MAILER_ERROR };
   }
 }
@@ -60,7 +65,7 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
   // #34/AC-4: a reivindicação vem antes do e-mail; quem não a ganha não envia, e a que fica presa após o envio impede o segundo e-mail.
   if (!(await deps.requests.claimFollowUpSend(id))) return { kind: 'conflict', reason: 'send_in_progress' };
-  const result = await dispatch(deps, {
+  const result = await dispatch(deps, id, {
     invoiceAccessKey: request.invoiceAccessKey,
     supplierId: request.note.supplierId,
     requestType: request.requestType,

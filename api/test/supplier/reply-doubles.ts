@@ -103,6 +103,7 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
   const calls: StoreCall[] = [];
   const claimed = new Set<number>();
   const failStamp = { on: false };
+  const readingFrom = new Map<number, number>();
   const patch = (id: number, op: string, args: unknown[], change: (r: ReplyRequest) => ReplyRequest): Promise<void> => {
     calls.push({ op, args });
     const row = map.get(id);
@@ -122,7 +123,16 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
     },
     get: (id) => Promise.resolve(map.get(id) ?? null),
     listSent: () => Promise.resolve([...map.values()].filter((r) => r.status === 'sent')),
-    recordReading: (id, r) => patch(id, 'recordReading', [id, r], (row) => ({ ...row, reading: r })),
+    // #34/AC-1: o contrato do OLTP: só troca a leitura se a mensagem é igual ou mais nova que a guardada; a varredura (null) só grava sem leitura.
+    recordReading: async (id, r, messageId) => {
+      const stored = readingFrom.get(id);
+      const row = map.get(id);
+      const blocked = messageId === null ? row?.reading != null : stored !== undefined && messageId < stored;
+      if (blocked) return 'superseded';
+      if (messageId !== null) readingFrom.set(id, messageId);
+      await patch(id, 'recordReading', [id, r, messageId], (current) => ({ ...current, reading: r }));
+      return 'recorded';
+    },
     saveFollowUpDraft: (id, text: SupplierRequestText) =>
       patch(id, 'saveFollowUpDraft', [id, text], (row) => ({ ...row, followUp: { ...row.followUp, draft: text } })),
     recordFollowUpRejection: (id, reason) =>

@@ -73,6 +73,9 @@ export type ReplyRequest = {
   readonly followUp: FollowUpState;
 };
 
+/** #34/AC-1: `superseded` é a leitura que não foi gravada porque o pedido guarda uma de mensagem mais nova. */
+export type ReadingRecorded = 'recorded' | 'superseded';
+
 /**
  * #34/AC-2: a gravação do pedido. Só há escrita da leitura e da cobrança: não existe método para a
  * proposta, o título nem o valor em risco, então a tarefa não tem como tocá-los.
@@ -81,7 +84,14 @@ export interface ReplyRequestStore {
   get(id: number): Promise<ReplyRequest | null>;
   /** #34: os pedidos `sent`; é de onde saem a varredura, a tarefa da cobrança e a lista. */
   listSent(): Promise<ReplyRequest[]>;
-  recordReading(id: number, reading: SupplierReading): Promise<void>;
+  /**
+   * #34/AC-1: grava a leitura do pedido. `messageId` é a mensagem de onde ela veio; o OLTP tem de garantir
+   * um UPDATE condicional na própria linha (não ler e depois gravar): troca a leitura só quando `messageId`
+   * é maior ou igual ao id da mensagem que gerou a leitura guardada, e do contrário não grava e devolve
+   * `superseded`. O runner (#66) roda as chaves novas antes das retentativas, então uma leitura antiga
+   * pode chegar depois de uma nova. `null` é a varredura do prazo: só grava se o pedido não tem leitura.
+   */
+  recordReading(id: number, reading: SupplierReading, messageId: number | null): Promise<ReadingRecorded>;
   saveFollowUpDraft(id: number, text: SupplierRequestText): Promise<void>;
   recordFollowUpRejection(id: number, reason: string): Promise<void>;
   /**

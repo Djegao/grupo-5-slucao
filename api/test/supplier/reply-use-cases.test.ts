@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createReplyUseCases } from '../../src/supplier/reply-use-cases.js';
 import {
   GOOD_FOLLOW_UP,
@@ -146,6 +146,24 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
     const out = await createReplyUseCases(deps).sendFollowUp(7, 'ana');
     expect(out).toEqual({ kind: 'send_failed', reason: 'mailer_error' });
     expect(JSON.stringify([out, store.calls])).not.toContain('sk-segredo');
+  });
+
+  it('porta que lança deixa no log do servidor só a classe do erro, a operação e o pedido, nunca o texto', async () => {
+    class SmtpDown extends Error {}
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { deps } = parts([drafted()], [], fakeMailer(new SmtpDown(PROVIDER_TEXT)));
+      await createReplyUseCases(deps).sendFollowUp(7, 'ana');
+      const lines = JSON.stringify(log.mock.calls);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(lines).toContain('SmtpDown');
+      expect(lines).toContain('follow-up-send');
+      expect(lines).not.toContain('smtp 550');
+      expect(lines).not.toContain('sk-segredo');
+      expect(lines).not.toContain('compras@');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('o motivo curto da porta passa como está; a falha não impede o reenvio', async () => {

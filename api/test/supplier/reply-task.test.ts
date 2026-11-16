@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ClaudeError } from '../../src/claude/client.js';
-import type { Db } from '../../src/claude/db.js';
+import { ClaudeError, type Ask } from '../../src/claude/client.js';
+import type { Db, Row } from '../../src/claude/db.js';
+import { runTasks } from '../../src/claude/runner.js';
 import { readingKey, supplierReplyReadingTask } from '../../src/supplier/reply-task.js';
 import {
   ASK_OK,
@@ -243,5 +244,49 @@ describe('#34/AC-2 (#4/AC-5, #4/AC-6): a tarefa grava só as colunas da leitura'
     await supplierReplyReadingTask(deps).run({ messageId: 1, requestId: 7 }, fakeAsk({ ...GOOD_READING, injection_flag: HIDDEN_ORDER }));
     expect(store.calls).toEqual([]);
     expect(inbox.status.get(1)).toEqual({ state: 'error', reason: 'injection_not_in_reply: injection_flag' });
+  });
+});
+
+describe('#34/AC-1: a leitura de uma mensagem mais antiga nunca troca a de uma mais nova (REL-3)', () => {
+  const newer = {
+    ...GOOD_READING,
+    reply_outcome: 'refused',
+    fulfilled_asks: [],
+    supplier_document: null,
+    next_step: 'answer_supplier',
+    summary: 'O fornecedor recusou.',
+  };
+  const NOW = new Date('2026-11-20T15:00:00Z');
+  const longAgo = new Date(NOW.getTime() - 24 * 60 * 60_000).toISOString();
+
+  it('o runner roda a chave nova antes da retentativa da antiga, e a leitura nova sobrevive; a antiga fica lida (#34/AC-1)', async () => {
+    const { deps, store, inbox } = parts([replyRequest(7)], [message(1, 7), message(2, 7, 'Não conseguimos atender.')]);
+    const upserts: { rows: readonly Row[] }[] = [];
+    const db: Db = {
+      // #34: a mensagem 1 já errou numa rodada anterior, fora da espera; a 2 acaba de chegar.
+      select: async () => [{ input_key: 'inbox_supplier_message:1', status: 'error', attempts: 1, updated_at: longAgo }],
+      upsert: async (_table, rows) => {
+        upserts.push({ rows });
+        return [];
+      },
+    };
+    const answers = [newer, GOOD_READING];
+    let call = 0;
+    const ask = (async () => answers[call++]) as unknown as Ask;
+    await runTasks({ db, ask, tasks: [supplierReplyReadingTask(deps)], log: () => undefined, now: () => NOW });
+    expect(call).toBe(2);
+    expect(store.rows.get(7)?.reading).toMatchObject({ replyOutcome: 'refused', nextStep: 'answer_supplier' });
+    expect([...inbox.status.values()].map((s) => s.state)).toEqual(['read', 'read']);
+    expect(upserts.map((u) => (u.rows[0]?.output as { status: string }).status)).toEqual(['read', 'superseded']);
+  });
+
+  it('run devolve superseded e marca a mensagem lida quando o armazém recusa a gravação (#34/AC-1)', async () => {
+    const { deps, store, inbox } = parts([replyRequest(7)], [message(1, 7), message(2, 7)]);
+    const task = supplierReplyReadingTask(deps);
+    await task.run({ messageId: 2, requestId: 7 }, fakeAsk(newer));
+    const out = await task.run({ messageId: 1, requestId: 7 }, fakeAsk(GOOD_READING));
+    expect(out).toEqual({ messageId: 1, status: 'superseded' });
+    expect(store.rows.get(7)?.reading?.replyOutcome).toBe('refused');
+    expect(inbox.status.get(1)?.state).toBe('read');
   });
 });

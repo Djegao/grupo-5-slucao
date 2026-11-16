@@ -22,8 +22,10 @@ export const followUpKey = (requestId: number): string => `follow_up:${requestId
 
 /**
  * #34/AC-3: espera cobrança o pedido `sent` em no_reply sem rascunho e sem recusa registrada: a recusa
- * fica registrada e não se repete a cada rodada; refazer é decisão de uma pessoa.
+ * fica registrada e não se repete a cada rodada. A tarefa volta normalmente com `rejected`, o runner a guarda
+ * como ok e não a retenta.
  */
+// #34: refazer a cobrança recusada não está nos critérios da #4 e nenhuma rota pede; fica para outra issue.
 const awaitsFollowUp = (r: ReplyRequest): boolean =>
   r.status === 'sent' && r.reading?.replyOutcome === 'no_reply' && r.followUp.draft === null && r.followUp.rejection === null;
 
