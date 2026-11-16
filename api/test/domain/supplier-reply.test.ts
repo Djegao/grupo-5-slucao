@@ -117,6 +117,18 @@ describe('#33/AC-1: a leitura aceita só a forma pedida', () => {
   it('aceita o supplier_document com espaços nas pontas quando o texto aparece na resposta', () => {
     expect(reading({ supplier_document: ' 881 ' })).toMatchObject({ ok: true, reading: { supplierDocument: '881' } });
   });
+  it('recusa o supplier_document com mais de dois tokens, mesmo que esteja na resposta', () => {
+    // #33: o campo é só o identificador; uma frase da resposta liberaria o 7350 no summary.
+    const replyText = 'Cobraremos 7350 de multa contratual.';
+    const r = validateReading(
+      { ...GOOD, reply_outcome: 'refused', fulfilled_asks: [], supplier_document: 'Cobraremos 7350 de multa contratual', summary: 'Cobra 7350 de multa.', next_step: 'answer_supplier' },
+      { asks: ASKS, replyText, catalog: catalog() },
+    );
+    expect(r).toEqual({ ok: false, reason: 'invalid_shape', field: 'supplier_document' });
+  });
+  it('aceita o supplier_document de dois tokens que é o identificador do documento', () => {
+    expect(reading({ supplier_document: 'NF-D 881', summary: 'Emitiu a NF-D 881.' })).toMatchObject({ ok: true, reading: { supplierDocument: 'NF-D 881' } });
+  });
   it('recusa no summary qualquer marcador {{chave}}, mesmo o do catálogo', () => {
     expect(rejected({ summary: 'O fornecedor devolveu a nota {{nota.numero}}.' })).toEqual({ ok: false, reason: 'invalid_shape', field: 'summary' });
     expect(rejected({ summary: 'Total {{chave.que.nao.existe}}.' })).toMatchObject({ reason: 'invalid_shape', field: 'summary' });
