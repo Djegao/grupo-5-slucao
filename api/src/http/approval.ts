@@ -10,17 +10,18 @@ import type { Money } from '../domain/money.js';
 import { Quantity, type Unit } from '../domain/quantity.js';
 import type { Env } from '../env.js';
 import type { Identity } from './access.js';
-import type { CheckContext, Invoice, Product } from '../domain/index.js';
+import type { CheckContext, Invoice, Product, Receipt } from '../domain/index.js';
 import { dossierField, dossierReadFailed, type DossierField } from '../dossier/proposal-field.js';
 import { readDossier } from '../dossier/read-dossier.js';
 import type { DossierSource } from '../dossier/source.js';
-import type { DockActionOutbox, StoreActionOutbox } from '../connectors/ports.js';
+import type { DockActionOutbox, ReturnNoteOutbox, StoreActionOutbox } from '../connectors/ports.js';
 import { SupabaseRestError } from '../connectors/supabase-rest.js';
 import { publishApprovedDockAction } from '../dock/publish-approved-dock-action.js';
 import { publishApprovedStoreAction } from '../dock/publish-approved-store-action.js';
 import { buildTimeline } from '../automation/timeline.js';
 import type { TimelineSource } from '../automation/readers.js';
 import { receivingPlace } from '../dock/receiving-place.js';
+import { publishReturnNote } from '../returns/publish-return-note.js';
 
 export interface ApprovalDeps {
   store: ApprovalStore;
@@ -37,6 +38,14 @@ export interface ApprovalDeps {
   dockOutbox?: DockActionOutbox;
   /** #135 A caixa de saída do app da loja: a ação da nota de loja (`LJ-*`) vai para ela, não para o WMS. */
   storeOutbox?: StoreActionOutbox;
+  /**
+   * #9/AC-1 A caixa de saída das notas de devolução (#1): aprovar ou alterar publica nela a devolução da
+   * decisão que devolve, depois de gravar a decisão. Sem ela, ou sem `receipts` e `products`, a decisão fica
+   * só gravada e a varredura do Cron publica depois.
+   */
+  returnOutbox?: ReturnNoteOutbox;
+  /** #9/AC-1 Os recebimentos do WMS, para a devolução da recusa de nota que já entrou. */
+  receipts?: (invoiceAccessKey: string) => Promise<readonly Receipt[]>;
   /** #211 Os horários da linha do tempo da nota. Sem ele, `timeline` vai vazia. */
   timeline?: TimelineSource;
 }
@@ -273,7 +282,7 @@ async function decide(
       paymentBlocked: file.supplierBlocked,
     });
     await store.saveDecision({ ...file, approval });
-    await publishDecision(deps, key, file);
+    await publishDecision(deps, key, file, approval.decidedOn);
     return Response.json({ approval, title: { state: file.title.state, amount: money(file.title.amount) } });
   } catch (e) {
     if (e instanceof NotAllowedToApproveError) return error(403, 'nivel_insuficiente', e.message);
@@ -286,11 +295,20 @@ async function decide(
 }
 
 /**
+ * #9/AC-1 Publica a decisão gravada: a ação na doca (#43) e a devolução (#1). Cada uma tem a sua falha
+ * isolada, para que uma não pule a outra; nenhuma desfaz a decisão, que já está gravada.
+ */
+async function publishDecision(deps: ApprovalDeps, key: string, file: CaseFile, decidedOn: string): Promise<void> {
+  await publishDockAction(deps, key, file);
+  await publishReturn(deps, key, file, decidedOn);
+}
+
+/**
  * #43 AC-1: a decisão gravada chega à doca pela caixa de saída do WMS, idempotente. Se o WMS falha, a
  * decisão continua valendo (já está gravada): o log leva só a chave e o status HTTP, e a varredura do Cron
  * (`publishDecidedDockActions`) publica na próxima rodada.
  */
-async function publishDecision(deps: ApprovalDeps, key: string, file: CaseFile): Promise<void> {
+async function publishDockAction(deps: ApprovalDeps, key: string, file: CaseFile): Promise<void> {
   const event = { type: 'proposta_aprovada', invoiceAccessKey: key, proposal: file.proposal } as const;
   try {
     // #135 O lugar sai do destino: loja no app da loja, CD no WMS.
@@ -303,6 +321,37 @@ async function publishDecision(deps: ApprovalDeps, key: string, file: CaseFile):
     // #43 Só campos nomeados no log: a mensagem do erro pode trazer o corpo da resposta do PostgREST.
     const status = e instanceof SupabaseRestError ? ` (HTTP ${e.status})` : '';
     console.error(`#43 ação na doca da nota ${key} não publicada agora${status}; a varredura do Cron publica depois`);
+  }
+}
+
+/**
+ * #1/AC-1 a AC-5, AC-8 e #9/AC-1: a devolução da decisão chega à fila das notas de devolução, idempotente.
+ * Receber nunca devolve, então não lê nada. Se a leitura ou a publicação falha, a decisão continua valendo:
+ * o log leva só a chave e o status HTTP (nunca o texto do erro, que pode trazer o corpo da resposta) e a
+ * varredura do Cron publica na próxima rodada (#1/AC-6).
+ */
+async function publishReturn(deps: ApprovalDeps, key: string, file: CaseFile, decidedOn: string): Promise<void> {
+  const { returnOutbox, receipts, products } = deps;
+  if (!returnOutbox || !receipts || !products) return;
+  if (file.proposal.dockAction.kind === 'receber') return;
+  try {
+    await publishReturnNote(
+      {
+        invoice: file.invoice,
+        decision: {
+          classification: file.proposal.classification,
+          state: file.proposal.state,
+          dockAction: file.proposal.dockAction,
+          decidedOn,
+        },
+        receipts: await receipts(key),
+        products: await products(key),
+      },
+      returnOutbox,
+    );
+  } catch (e) {
+    const status = e instanceof SupabaseRestError ? ` (HTTP ${e.status})` : '';
+    console.error(`#9 devolução da nota ${key} não publicada agora${status}; a varredura do Cron publica depois`);
   }
 }
 

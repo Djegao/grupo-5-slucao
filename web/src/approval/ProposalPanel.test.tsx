@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposalPanel } from "./ProposalPanel";
 import type { ProposalDetailDto } from "../api/approval";
+import type { SupplierRequestPort } from "./supplier-request-state";
 
 // #134 A decisão pela ação no recebimento: Receber, Receber parcial e Recusar.
 
@@ -239,5 +240,45 @@ describe("#209 AC-5: nota já decidida abre só para leitura", () => {
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByRole("button", { name: /Registrar/ })).toBeNull();
     expect(screen.getByText(/decis/i)).toBeTruthy();
+  });
+});
+
+describe("#3 pedido ao fornecedor na gaveta da proposta decidida", () => {
+  const approval = { approver: "c", approverLevel: "coordenacao", dockAction: { kind: "receber" }, justification: "ok", decidedOn: "2026-11-15" };
+  const decided = () => proposal({ kind: "receber" }, { state: "na_lista_do_dia", approval });
+  const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80 · devolução", body: "Texto do e-mail" };
+  const port = (load: SupplierRequestPort["load"]): SupplierRequestPort => ({
+    load,
+    send: vi.fn(),
+    resend: vi.fn(),
+    discard: vi.fn(),
+    redo: vi.fn(),
+    saveText: vi.fn(),
+  });
+
+  it("#3/AC-1: com pedido, o bloco vem logo depois da Decisão registrada", async () => {
+    render(<ProposalPanel proposal={decided()} supplierRequest={{ port: port(async () => ({ status: "draft", email })), viewer: "ana@jachegou.test" }} />);
+    const block = await screen.findByRole("region", { name: "Pedido ao fornecedor" });
+    const alert = screen.getByText("Decisão registrada");
+    expect(alert.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("#3/AC-1: sem pedido na nota, a gaveta fica como era, sem o bloco", async () => {
+    const load = vi.fn(async () => null);
+    render(<ProposalPanel proposal={decided()} supplierRequest={{ port: port(load), viewer: "ana@jachegou.test" }} />);
+    await waitFor(() => expect(load).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "Pedido ao fornecedor" })).toBeNull();
+    expect(screen.getByText("Decisão registrada")).toBeTruthy();
+  });
+
+  it("#3/AC-1: sem a fonte do pedido (gaveta de antes da #17), nada é buscado nem desenhado", () => {
+    render(<ProposalPanel proposal={decided()} />);
+    expect(screen.queryByRole("region", { name: "Pedido ao fornecedor" })).toBeNull();
+  });
+
+  it("#3/AC-1: antes da decisão, o pedido não é buscado", () => {
+    const load = vi.fn(async () => null);
+    render(<ProposalPanel proposal={proposal({ kind: "receber" })} supplierRequest={{ port: port(load), viewer: "ana@jachegou.test" }} />);
+    expect(load).not.toHaveBeenCalled();
   });
 });

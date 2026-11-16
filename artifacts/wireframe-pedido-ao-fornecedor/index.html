@@ -34,7 +34,7 @@ table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid
 </style></head><body><main>
 <h1>Bloco "Pedido ao fornecedor" na gaveta da proposta</h1>
 <p class="lead">Wireframe da camada 1 da #3 (história de frontend; origem: formacao-fde-solucao-case#156; a API é a #2). Fixa estrutura, estados e fluxo, nunca o visual final. Componentes: <code>InvoiceDrawer</code> &gt; <code>ProposalPanel</code> &gt; novo bloco logo após o <code>Alert</code> "Decisão registrada"; <code>Block</code>, <code>DataList</code>, <code>AiSourceBadge source="ai" label="Claude"</code>, <code>Alert</code>, <code>Button</code> (padrão busy/erro de <code>run()</code>/<code>decisionError()</code> em devolucoes.tsx).</p>
-<div class="alert"><b>Status: aprovado como desenhado.</b> Aprovação: dono do grupo 5, 15/11/2026. Inclui o estado 11 (#3/AC-8) e a pasta artifacts/wireframe-pedido-ao-fornecedor/.</div>
+<div class="alert"><b>Status: aprovado como desenhado.</b> Aprovação: dono do grupo 5, 15/11/2026. Inclui o estado 11 (#3/AC-8) e a pasta artifacts/wireframe-pedido-ao-fornecedor/.<br><b>Emenda aprovada:</b> estado 12 "não foi possível carregar o pedido" (#3/AC-9). Aprovação: dono do grupo 5, 15/11/2026.</div>
 
 <h2>1. Lugar do bloco na gaveta</h2>
 <div class="grid"><figure><figcaption>Estrutura <small>(AC-1)</small></figcaption>
@@ -135,6 +135,11 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <figure><figcaption>10. Sem pedido <small>(bloco ausente · AC-1)</small></figcaption><div class="drawer"><div class="ctx">… Decisão registrada …</div>
 <div class="block absent">(nada é desenhado: nem título, nem espaço)</div>
 <div class="lock">Proposta decidida sem pedido (E7, match) ou ainda não decidida: a gaveta segue de "Decisão registrada" (ou do formulário "Sua decisão") direto para o resto.</div></div></figure>
+
+<figure><figcaption>12. Não foi possível carregar o pedido <small>(error · AC-9)</small></figcaption><div class="drawer"><div class="ctx">… Decisão registrada …</div>
+<div class="alert error"><b>Não foi possível carregar o pedido</b></div>
+<div class="btns"><span></span><div class="r"><button class="pri">Tentar de novo</button></div></div>
+<div class="lock">Ocupa o lugar do bloco (sem título nem selo, pois não há pedido carregado). Vale para a carga inicial que falha e para a sondagem do estado 2 (escrevendo) que falha 5 vezes seguidas; nesse caso a sondagem para. Mesmo padrão do <code>useLoad</code> (web/src/components/useLoad.ts). Tentar de novo recarrega o pedido e o bloco volta ao estado carregado (2, 3, 7, 8, 9 ou 11, conforme o pedido). Pendente: "Carregando…".</div></div></figure>
 </div>
 
 <h2>3. Fluxo entre os estados</h2>
@@ -161,6 +166,9 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
                                      └────────────────────────────────────────┘
    2 Escrevendo ── Claude falha ou número fora do catálogo ──▶ 11 Não foi possível preparar
    11 ── Refazer ──▶ 2 Escrevendo
+   (carga inicial do pedido falha) ──▶ 12 Não foi possível carregar o pedido
+   2 Escrevendo ── 5 falhas seguidas da sondagem (a sondagem para) ──▶ 12
+   12 ── Tentar de novo ──▶ recarrega; volta ao estado carregado (2, 3, 7, 8, 9 ou 11)
    10 Sem pedido: o bloco não existe (fora do fluxo).</div>
 
 <h2>4. Perguntas de design (todas decididas pelo dono do grupo 5, em 15/11/2026)</h2>
@@ -182,6 +190,7 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <tr><td>Emitida e enviada</td><td>Nota de devolução ND-n emitida e enviada por você às hh:mm · aguardando resposta até dd/mm</td></tr>
 <tr><td>Envio falho</td><td>A nota ND-n foi emitida, mas o e-mail não saiu: motivo.</td></tr>
 <tr><td>Descartado</td><td>Pedido descartado por você às hh:mm</td></tr>
-<tr><td>Não preparado</td><td>Não foi possível preparar o pedido: motivo</td></tr></table>
+<tr><td>Não preparado</td><td>Não foi possível preparar o pedido: motivo</td></tr>
+<tr><td>Não carregado</td><td>Não foi possível carregar o pedido · botão "Tentar de novo"</td></tr></table>
 <p class="note">Fora desta camada: a lista "Pedidos ao fornecedor" e a leitura da resposta (#157); a API (#2).</p>
 </main></body></html>

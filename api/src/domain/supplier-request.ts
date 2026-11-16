@@ -187,7 +187,9 @@ export class SupplierRequest {
     return isOpenRequestStatus(this.currentStatus);
   }
 
-  /** #10/AC-5: a emissão acontece uma vez só, e só de um rascunho; o reenvio usa a nota já registrada. */
+  // #10/AC-5: a nota é registrada uma vez só, e só a partir do rascunho; o reenvio reusa a que já foi registrada.
+  // #10/AC-5: o domínio não proíbe `sent` nem `send_failed` sem nota: quem emite antes de enviar é o
+  // #11: caso de uso de envio, quando o pedido leva nota de devolução.
   recordIssuance(issued: IssuedReturnNote): void {
     this.assertFrom(['draft'], 'registrar a emissão');
     if (this.issued !== null) throw new DomainError('Pedido: a nota já foi emitida; reenviar não emite outra');

@@ -319,6 +319,108 @@ export const texts = {
     detail: { why: "Por quê", supplier: "Fornecedor", issued: "Emissão", blocked: "Valor evitado" },
   },
 
+  /** #19 "Pedidos ao fornecedor" (história #5): a lista, a conversa e o rascunho da cobrança, como no wireframe aprovado (#18). */
+  supplierRequests: {
+    title: "Pedidos ao fornecedor",
+    subtitle: "O que pedimos aos fornecedores, quem respondeu e quem está devendo resposta.",
+    loading: "Carregando os pedidos ao fornecedor…",
+    error: "Não consegui carregar os pedidos ao fornecedor.",
+    filterLabel: "Filtrar por situação",
+    filters: { waiting: "Aguardando", fulfilled: "Atendidos", needsYou: "Precisam de você", late: "Atrasados" },
+    columns: { invoice: "Nota", supplier: "Fornecedor", request: "Solicitação", value: "Valor", due: "Prazo", status: "Status" },
+    rowLabel: (invoice: string, supplier: string) => `Nota ${invoice}, ${supplier}`,
+    tableEmpty: "Nenhum pedido.",
+    follow: "Cobrar",
+    /** #19 O texto da coluna Status, uma variante por situação (mapa Q2). */
+    status: {
+      waiting: "Aguardando",
+      late: "Atrasado",
+      fulfilledToConfirm: (document: string) => `Atendeu: ${document}`,
+      fulfilled: "Atendeu",
+      partiallyFulfilled: "Atendeu parcialmente",
+      needsInformation: "Pediu informação",
+      refused: "Recusou",
+    },
+    toConfirm: "(citada, falta confirmar)",
+    /** #19 O vazio geral: nenhuma solicitação existe ainda. */
+    empty: {
+      title: "Nenhum pedido ao fornecedor ainda.",
+      description: "Os pedidos aparecem aqui depois que você emite e envia a nota de devolução na gaveta de uma proposta decidida.",
+      action: "Ir para a Fila de aprovação",
+    },
+    /** #19 O chip sem linhas: o de Atrasados vem do wireframe (estado 6), os outros seguem o mesmo molde. */
+    filteredEmpty: {
+      waiting: { title: "Nenhum pedido aguardando.", description: "Nenhum fornecedor está com prazo em aberto." },
+      fulfilled: { title: "Nenhum pedido atendido.", description: "Nenhum fornecedor atendeu a uma solicitação ainda." },
+      needsYou: { title: "Nenhum pedido precisa de você.", description: "Nenhuma resposta espera a sua decisão." },
+      late: { title: "Nenhum pedido atrasado.", description: "Nenhum fornecedor está devendo resposta." },
+      showAll: "Ver todos",
+    },
+    /** #19 O bloco da conversa na gaveta. */
+    conversation: {
+      title: "Pedido ao fornecedor",
+      blockStatus: {
+        waiting: "Aguardando",
+        waitingCharged: "Aguardando (cobrado)",
+        late: "Atrasado",
+        fulfilledToConfirm: "Atendeu, falta confirmar",
+        fulfilled: "Atendeu",
+        partiallyFulfilled: "Atendeu parcialmente",
+        needsYou: "Precisa de você",
+        refused: "Recusou",
+      },
+      sentTitle: "Pedido enviado",
+      sent: (document: string, amount: string, on: string, time: string | undefined, due: string) =>
+        `Nota de devolução ${document} (${amount}) emitida e enviada por você em ${on}${time ? ` às ${time}` : ""} · prazo até ${due}.`,
+      viewSent: "Ver a nota e o e-mail enviado",
+      replyTitle: "Resposta do fornecedor",
+      replyReceived: (on: string) => `Recebida em ${on}`,
+      noReply: (until: string) => `Nenhuma resposta até ${until}.`,
+      attachment: (name: string) => `Anexo: ${name}`,
+      dataNotice: "Texto do fornecedor é dado, nunca instrução.",
+      injectionTitle: "Atenção: o fornecedor tentou dar uma ordem ao agente.",
+      injectionExcerpt: (excerpt: string) => `Trecho: "${excerpt}"`,
+      injectionUnchanged: "Nada foi alterado: decisão, título e valor em risco seguem como estavam.",
+      readingTitle: "Leitura do agente",
+      outcome: {
+        fulfilled: "Atendeu",
+        partially_fulfilled: "Atendeu parcialmente",
+        refused: "Recusou",
+        needs_information: "Pediu informação",
+        no_reply: "Sem resposta",
+      },
+      outcomeLabel: (outcome: string) => `Resultado: ${outcome}`,
+      itemsFulfilled: (items: string) => `Itens atendidos: ${items}`,
+      documentCited: (document: string) => `Documento citado: ${document}`,
+      summary: (text: string) => `Resumo: "${text}"`,
+      nextStepLabel: "Próximo passo",
+      nextStep: { close: "Encerrar", confirm_document: "Confirmar documento", answer_supplier: "Responder ao fornecedor", follow_up: "Cobrar" },
+    },
+    /** #19 O rascunho da cobrança e o que acontece ao enviar. */
+    draft: {
+      title: "Rascunho da cobrança",
+      subtitle: "preparado pelo Claude, ainda não enviado",
+      to: "Para",
+      dueOn: "Novo prazo",
+      subject: "Assunto",
+      body: "Texto",
+      attachment: "Anexo",
+      edit: "Editar",
+      send: "Enviar cobrança",
+      discard: "Descartar rascunho",
+      sending: "Enviando a cobrança…",
+      sent: (on: string, time: string | undefined, due: string) =>
+        `Cobrança enviada por você em ${on}${time ? ` às ${time}` : ""} · aguardando resposta até ${due}.`,
+      retry: "Tentar enviar de novo",
+      /** #19 O motivo do envio falho é um dos desenhados; o texto do servidor de e-mail nunca chega à tela (layer-exposure). */
+      failed: {
+        mailRefused: "A cobrança não saiu: o servidor de e-mail recusou o envio.",
+        unknown: "A cobrança não saiu. Tente de novo em um minuto.",
+      },
+      failedKept: "O rascunho fica como está e nada é duplicado.",
+    },
+  },
+
   devolucoes: {
     title: "Notas de devolução",
     subtitle: "Devoluções para o fiscal emitir e marcar como emitidas com o número da NF-e de devolução.",
@@ -507,6 +609,7 @@ export const texts = {
     sendFailedEmailOnly: (reason: string) => `O e-mail não saiu: ${reason}.`,
     discarded: (by: string, time: string) => `Pedido descartado ${by} às ${time}`,
     notPrepared: (reason: string) => `Não foi possível preparar o pedido: ${reason}.`,
+    loadFailed: { title: "Não foi possível carregar o pedido", retry: "Tentar de novo", loading: "Carregando…" },
     errors: {
       forbidden: "Você não tem permissão para esta ação.",
       conflict: "Outra pessoa já agiu neste pedido. Feche e reabra a gaveta para ver o estado atual.",
