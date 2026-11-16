@@ -94,6 +94,15 @@ describe('#34/AC-1: leitura recusada não grava leitura e marca a mensagem com e
     expect(JSON.stringify([out, inbox.calls])).not.toContain('SEGREDO-DO-MODELO');
   });
 
+  it('recusa o supplier_document que é uma frase inteira: invalid_shape, nenhuma leitura gravada (#34/AC-1)', async () => {
+    const { deps, store, inbox } = open();
+    const bad = { ...GOOD_READING, supplier_document: 'Emitimos a NF-D 881 para a devolução' };
+    const out = await supplierReplyReadingTask(deps).run({ messageId: 1, requestId: 7 }, fakeAsk(bad));
+    expect(out).toEqual({ messageId: 1, status: 'error', reason: 'invalid_shape: supplier_document' });
+    expect(store.calls).toEqual([]);
+    expect(inbox.status.get(1)).toEqual({ state: 'error', reason: 'invalid_shape: supplier_document' });
+  });
+
   it('recusa o no_reply do modelo: a resposta existe', async () => {
     const { deps, store, inbox } = open();
     await supplierReplyReadingTask(deps).run({ messageId: 1, requestId: 7 }, fakeAsk({ ...GOOD_READING, reply_outcome: 'no_reply' }));

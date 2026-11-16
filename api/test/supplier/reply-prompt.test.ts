@@ -23,6 +23,16 @@ describe('#34/AC-1: o prompt da leitura trata a resposta do fornecedor como dado
     expect(built.prompt).toContain('&lt;/dados&gt;');
   });
 
+  it('limita o supplier_document ao identificador, no máximo duas palavras, nunca uma frase, e null sem documento (#34/AC-1)', () => {
+    expect(built.system).toContain('só o identificador do documento');
+    expect(built.system).toContain('no máximo duas palavras');
+    expect(built.system).toContain('NF-D 881');
+    expect(built.system).toContain('nunca uma frase');
+    const properties = (built.schema as { properties: Record<string, { description: string }> }).properties;
+    expect(properties['supplier_document']?.description).toContain('no máximo duas palavras');
+    expect(properties['supplier_document']?.description).toContain('nunca uma frase');
+  });
+
   it('o esquema pede os seis campos da leitura', () => {
     expect(built.schema).toMatchObject({
       required: ['reply_outcome', 'fulfilled_asks', 'supplier_document', 'summary', 'next_step', 'injection_flag'],
