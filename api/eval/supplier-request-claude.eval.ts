@@ -1,7 +1,7 @@
 // #11 (#2): eval do e-mail ao fornecedor com o Claude de verdade, pelo mesmo cliente do Worker e pelo mesmo prompt.
-// Fora do gate: `npm run eval:supplier-request`. Precisa de BARTE_ACADEMY_CLAUDE_CODE_OAUTH_TOKEN ou
-// de BARTE_ACADEMY_ANTHROPIC_API_KEY no ambiente. Não grava em banco nem envia nada: só pede o texto e conta
-// quantas vezes o catálogo o recusa (validateRequestText). Esperado: nenhuma recusa nos casos abaixo.
+// #11: Fora do gate: `npm run eval:supplier-request`. Precisa de BARTE_ACADEMY_CLAUDE_CODE_OAUTH_TOKEN ou
+// #11: de BARTE_ACADEMY_ANTHROPIC_API_KEY no ambiente. Não grava em banco nem envia nada: só pede o texto e conta
+// #11: quantas vezes o catálogo o recusa (validateRequestText). Esperado: nenhuma recusa nos casos abaixo.
 import { env } from 'node:process';
 import { describe, expect, it } from 'vitest';
 import { ClaudeClient, credentialsFromEnv } from '../src/claude/client.js';
@@ -16,8 +16,8 @@ const CASES = [
   { name: 'uma linha em caixa', lines: [{ supplierCode: 'F02-005', amount: 2, unit: 'CX' as const }] },
 ];
 
-describe('eval do e-mail ao fornecedor com o Claude (#11)', () => {
-  it('conta as recusas do catálogo sobre o texto que o Claude escreve', async () => {
+describe('eval do e-mail ao fornecedor com o Claude (#11)', () => { // ADR-002
+  it('conta as recusas do catálogo sobre o texto que o Claude escreve', async () => { // ADR-002
     const credentials = credentialsFromEnv({
       BARTE_ACADEMY_ANTHROPIC_API_KEY: env.BARTE_ACADEMY_ANTHROPIC_API_KEY,
       BARTE_ACADEMY_CLAUDE_CODE_OAUTH_TOKEN: env.BARTE_ACADEMY_CLAUDE_CODE_OAUTH_TOKEN,

@@ -7,8 +7,8 @@ import { GOOD_TEXT, fakeAsk, fakeMailer, queueView, world } from './doubles.js';
 
 const db: Db = { select: async () => [], upsert: async () => [] };
 
-describe('#11/AC-1 a tarefa lista as devoluções pendentes sem pedido aberto', () => {
-  it('uma chave estável por devolução da fila', async () => {
+describe('#11/AC-1 a tarefa lista as devoluções pendentes sem pedido aberto', () => { // ADR-002
+  it('uma chave estável por devolução da fila', async () => { // ADR-002
     const w = world(fakeMailer(), [queueView(7), queueView(8, { status: 'emitida' })]);
     const { requests, dropped } = await supplierRequestDraftTask(w.deps).pending(db);
     expect(requests.map((r) => r.key)).toEqual(['return_note:7']);
@@ -16,14 +16,14 @@ describe('#11/AC-1 a tarefa lista as devoluções pendentes sem pedido aberto', 
     expect(dropped).toBe(0);
   });
 
-  it('pula a devolução cuja nota de origem já tem pedido aberto', async () => {
+  it('pula a devolução cuja nota de origem já tem pedido aberto', async () => { // ADR-002
     const w = world();
     const task = supplierRequestDraftTask(w.deps);
     await task.run({ queueId: 7 }, fakeAsk());
     expect((await task.pending(db)).requests).toEqual([]);
   });
 
-  it('devolução que a regra não monta falha para o laço registrar o erro, sem rascunho', async () => {
+  it('devolução que a regra não monta falha para o laço registrar o erro, sem rascunho', async () => { // ADR-002
     const lines = [{ supplierCode: 'X-1', description: 'x', quantity: { amount: 1, unit: 'UN' as const }, valueCents: null }];
     const w = world(fakeMailer(), [queueView(7, { lines })]);
     await expect(supplierRequestDraftTask(w.deps).run({ queueId: 7 }, fakeAsk())).rejects.toThrow();
@@ -31,14 +31,14 @@ describe('#11/AC-1 a tarefa lista as devoluções pendentes sem pedido aberto', 
   });
 });
 
-describe('#11/AC-2 texto do Claude recusado pelo catálogo', () => {
-  it('a tarefa volta normalmente com o pedido descartado (os motivos estão em draft.test.ts)', async () => {
+describe('#11/AC-2 texto do Claude recusado pelo catálogo', () => { // ADR-002
+  it('a tarefa volta normalmente com o pedido descartado (os motivos estão em draft.test.ts)', async () => { // ADR-002
     const w = world();
     const bad = { ...GOOD_TEXT, body: 'Devolvemos 999 caixas.' };
     await expect(supplierRequestDraftTask(w.deps).run({ queueId: 7 }, fakeAsk(bad))).resolves.toMatchObject({ status: 'discarded' });
   });
 
-  it('o descartado não conta como aberto: a devolução volta à lista da tarefa', async () => {
+  it('o descartado não conta como aberto: a devolução volta à lista da tarefa', async () => { // ADR-002
     const w = world();
     const task = supplierRequestDraftTask(w.deps);
     await task.run({ queueId: 7 }, fakeAsk({ subject: 'oi' }));
@@ -46,11 +46,11 @@ describe('#11/AC-2 texto do Claude recusado pelo catálogo', () => {
   });
 });
 
-describe('#11/AC-1 sem credencial, 401 ou 429 não deixa rascunho', () => {
+describe('#11/AC-1 sem credencial, 401 ou 429 não deixa rascunho', () => { // ADR-002
   it.each([
     ['auth', 401],
     ['rate_limit', 429],
-  ] as const)('o erro %s do Claude sobe como está e nada é criado', async (kind, status) => {
+  ] as const)('o erro %s do Claude sobe como está e nada é criado', async (kind, status) => { // ADR-002
     const w = world();
     const failure = new ClaudeError(kind, 'recusado', status);
     await expect(supplierRequestDraftTask(w.deps).run({ queueId: 7 }, fakeAsk(failure))).rejects.toBe(failure);
