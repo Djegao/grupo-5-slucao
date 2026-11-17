@@ -42,11 +42,11 @@ export type SupplierWorld = {
   readonly rest: SupabaseRest;
   readonly call: (method: string, path: string, init?: CallInit) => Promise<Reply>;
   readonly runCron: (ask?: Ask) => Promise<readonly string[]>;
-  /** #36: o laço do Cron com TODAS as tarefas registradas em tasksFor (a leitura, a cobrança e as demais); o `Ask` é o falso. */
   /** #36: muda o dia de hoje do Worker (o prazo da cobrança). */
   readonly setNow: (now: Date) => void;
   /** #36/AC-1: o fornecedor responde: uma mensagem pendente na caixa de entrada mock, ligada ao pedido (o que o script de exemplo faz). */
   readonly receive: (text: string, requestId?: number) => void;
+  /** #36: o laço do Cron com TODAS as tarefas registradas em tasksFor (a leitura, a cobrança e as demais); o `Ask` é o falso. */
   readonly runAllTasks: (ask: Ask) => Promise<readonly string[]>;
   readonly path: (suffix?: string, key?: string) => string;
   readonly rows: (table: string) => Record<string, unknown>[];

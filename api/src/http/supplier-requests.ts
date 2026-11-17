@@ -12,8 +12,9 @@
 // #13:   POST  /api/supplier-requests/{accessKey}/send     {}       200 { request }   só de rascunho: emite (mock), fila emitida, e-mail;
 // #13:           o resultado é `sent` ou `send_failed` (falha do envio é um estado, continua 200)
 // #36:           e do pedido `sent` com a leitura no_reply e a cobrança rascunhada (#4/AC-3): envia a cobrança, com `by` do Access; 200 { request }
-// #36:           com followUp.sent (ou followUp.failure, o motivo curto, se o envio falhou: continua 200); 409 conflict { reason } not_no_reply (o
-// #36:           pedido enviado não tem a leitura no_reply: o motivo da #13, not_draft, vale) | no_draft | already_sent | send_in_progress;
+// #36:           com followUp.sent (ou followUp.failure, o motivo curto, se o envio falhou: continua 200);
+// #36:           409 conflict { reason } no_draft | already_sent | send_in_progress; not_draft, da #13, quando a leitura não é no_reply;
+// #36:           not_no_reply só numa corrida entre as duas leituras do pedido (a rota vê no_reply e o caso de uso, já não);
 // #36:           422 invalid { reason: 'text_invalid' }. Só esta rota envia a cobrança: nem o Cron nem as tarefas do Claude a enviam.
 // #13:   POST  /api/supplier-requests/{accessKey}/resend   {}       200 { request }   só de send_failed; nunca emite outra nota
 // #13:   POST  /api/supplier-requests/{accessKey}/discard  { reason?: string }   200 { request }   só de rascunho; reason aparado, até 500

@@ -138,8 +138,8 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
   });
 });
 
-describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', () => {
-  it('#36/AC-2: 200 { request } com followUp.sent, quem enviou e quando', async () => {
+describe('#36/AC-3 POST /api/supplier-requests/{accessKey}/send da cobrança', () => {
+  it('#36/AC-3: 200 { request } com followUp.sent, quem enviou e quando', async () => {
     const mailer = fakeMailer();
     const w = await overdueWorld({ mailer });
     const reply = await w.call('POST', w.path('/send'), { body: {} });
@@ -147,20 +147,20 @@ describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect((reply.body.request as Json).followUp).toMatchObject({ drafted: true, sent: true, sentBy: 'ana@jachegou.test', sentAt: AFTER_DUE.toISOString(), failure: null });
   });
 
-  it('#36/AC-2: segundo envio é 409 conflict already_sent', async () => {
+  it('#36/AC-3: segundo envio é 409 conflict already_sent', async () => {
     const w = await overdueWorld();
     await w.call('POST', w.path('/send'), { body: {} });
     expect((await w.call('POST', w.path('/send'), { body: {} })).body).toEqual({ error: 'conflict', reason: 'already_sent' });
   });
 
-  it('#36/AC-2: no_reply sem rascunho é 409 conflict no_draft', async () => {
+  it('#36/AC-3: no_reply sem rascunho é 409 conflict no_draft', async () => {
     const w = await sentWorld();
     w.setNow(AFTER_DUE);
     await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE });
     expect(await w.call('POST', w.path('/send'), { body: {} })).toMatchObject({ status: 409, body: { error: 'conflict', reason: 'no_draft' } });
   });
 
-  it('#36/AC-2: com a reivindicação de outro envio de pé, 409 conflict send_in_progress e nenhum e-mail', async () => {
+  it('#36/AC-3: com a reivindicação de outro envio de pé, 409 conflict send_in_progress e nenhum e-mail', async () => {
     const mailer = fakeMailer();
     const w = await overdueWorld({ mailer });
     const row = w.rows('outbox_supplier_emails')[0] as Json;
@@ -174,7 +174,7 @@ describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect(mailer.sent).toHaveLength(0);
   });
 
-  it('#36/AC-2: o rascunho que já não confere com o catálogo é 422 invalid text_invalid e nada sai', async () => {
+  it('#36/AC-3: o rascunho que já não confere com o catálogo é 422 invalid text_invalid e nada sai', async () => {
     const mailer = fakeMailer();
     const w = await overdueWorld({ mailer });
     const row = w.rows('outbox_supplier_emails')[0] as Json;
@@ -185,7 +185,7 @@ describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect(mailer.sent).toHaveLength(0);
   });
 
-  it('#36/AC-2: a falha do envio é 200 com followUp.failure curto, e o texto do provedor não sai', async () => {
+  it('#36/AC-3: a falha do envio é 200 com followUp.failure curto, e o texto do provedor não sai', async () => {
     const mailer = fakeMailer();
     const w = await overdueWorld({ mailer });
     mailer.outcomes.push({ ok: false, reason: 'resend_unavailable' });
@@ -194,7 +194,7 @@ describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect((reply.body.request as Json).followUp).toMatchObject({ sent: false, failure: 'resend_unavailable' });
   });
 
-  it('#36/AC-2: a falha do envio com o texto do provedor guarda só o motivo próprio da porta', async () => {
+  it('#36/AC-3: a falha do envio com o texto do provedor guarda só o motivo próprio da porta', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const mailer = fakeMailer();
     const w = await overdueWorld({ mailer });
@@ -204,7 +204,7 @@ describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect(JSON.stringify(reply.body)).not.toContain('caixa cheia');
   });
 
-  it('#36/AC-2: a falha do banco no envio é 502 com o correlationId, sem o texto da dependência, e nenhum e-mail sai', async () => {
+  it('#36/AC-3: a falha do banco no envio é 502 com o correlationId, sem o texto da dependência, e nenhum e-mail sai', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const mailer = fakeMailer();
     const w = await overdueWorld({ mailer });
@@ -217,14 +217,14 @@ describe('#36/AC-2 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect(mailer.sent).toHaveLength(0);
   });
 
-  it('#36/AC-2: o pedido enviado com resposta lida mantém a recusa da #13, 409 not_draft', async () => {
+  it('#36/AC-3: o pedido enviado com resposta lida mantém a recusa da #13, 409 not_draft', async () => {
     const w = await sentWorld();
     w.receive('Emitimos a NF-D 881.');
     await w.runAllTasks(replyAsk());
     expect((await w.call('POST', w.path('/send'), { body: {} })).body).toEqual({ error: 'conflict', reason: 'not_draft' });
   });
 
-  it('#36/AC-2: nota sem pedido é 404, identidade sem e-mail é 403 e corpo sem JSON é 415', async () => {
+  it('#36/AC-3: nota sem pedido é 404, identidade sem e-mail é 403 e corpo sem JSON é 415', async () => {
     const empty = await supplierWorld({ emptyQueue: true });
     expect((await empty.call('POST', empty.path('/send'), { body: {} })).status).toBe(404);
     const service = await supplierWorld({ email: '' });

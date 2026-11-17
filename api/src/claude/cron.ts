@@ -10,21 +10,18 @@ import { runTasks, type RunResult } from './runner.js';
 import { tasksFor } from './tasks/index.js';
 
 /**
- * #171 Pedidos por tarefa a cada rodada. Cada pedido custa 2 subrequests (a Messages API e o upsert) e a rodada
- * lê umas 7 vezes antes: 2 tarefas × 5 × 2 + 7 = 27, dentro dos 50 do plano gratuito. A rodada vai depois da captura.
- * #12 A tarefa do rascunho do pedido ao fornecedor tem limite próprio de 2 (`SUPPLIER_DRAFT_LIMIT`). Conta dela: leituras
- * #12 4 (claude_suggestions, a fila, as notas de origem da fila e os pedidos abertos só dessas notas, numa leitura) e, por pedido,
- * #12 5 (a nota de origem e o fornecedor, a Messages API, o insert do pedido e o upsert da sugestão; a fila e o pedido aberto
- * #12 não são relidos). 4 + 2 × 5 = 14.
- * #12 Rodada no pior caso, com as outras duas no limite delas: 27 + 14 = 41, dentro dos 50 e sem crescer com as devoluções pendentes.
- * #36 A leitura da resposta e o rascunho da cobrança (#4) entraram, com limite de 1 pedido cada (`SUPPLIER_REPLY_LIMIT`). Conta da leitura:
- * #36 4 leituras (claude_suggestions, a caixa de entrada, os pedidos enviados e as notas deles) e, por mensagem, 8 (a mensagem, o pedido e a nota,
- * #36 a leitura gravada e relida, o status da mensagem, a Messages API e o upsert da sugestão) = 12. Conta da cobrança: 3 leituras e, por pedido,
- * #36 6 (o pedido e a nota, a Messages API, o rascunho lido e gravado, o upsert) = 9. Com 27 + 14 + 12 + 9 = 62 os 50 não cabem; por isso
- * #36 `CRON_LIMIT` caiu de 5 para 1: 2 × 1 × 2 + 7 = 11, e a rodada no pior caso é 11 + 14 + 12 + 9 = 46. Os 4 que sobram são da varredura do
- * #36 prazo (api/src/cron/supplier-sweep.ts): 2 leituras e uma gravação por pedido marcado, que o caso de uso (#34) não limita: um teto ali é a próxima mudança da camada de baixo (#36).
+ * #171 Teto de pedidos por tarefa a cada rodada: vale o menor entre ele e o limite da própria tarefa (runner.ts). Hoje as tarefas
+ * #36 trazem o limite delas (api/src/claude/tasks/index.ts e api/src/supplier/draft-task.ts) e o teto só protege uma tarefa nova sem limite.
+ * #36 Conta de subrequests da rodada no pior caso, com cada tarefa no limite dela (os 50 do plano gratuito), cada pedido com o que gasta:
+ * #36   casamento de descrição e ordem provável (1 pedido cada): 7 leituras + 2 × 1 × 2 (a Messages API e o upsert) = 11
+ * #36   rascunho do pedido ao fornecedor (#12, limite 2): 4 leituras + 2 × 5 = 14
+ * #36   leitura da resposta (#4, limite 1): 4 leituras + 1 × 8 = 12
+ * #36   rascunho da cobrança (#4, limite 1): 3 leituras + 1 × 6 = 9
+ * #36   varredura do prazo (SUPPLIER_SWEEP_PER_ROUND = 1, api/src/cron/supplier-sweep.ts): 2 leituras + 1 × 2 = 4
+ * #36 Total: 11 + 14 + 12 + 9 + 4 = 50, no limite dos 50 e sem crescer com o que está pendente. O rascunho do #12 fica nos 2 dele. A
+ * #36 conta custa o casamento de descrição e a ordem provável irem de 5 para 1 por rodada (o que vai ao relatório da #36).
  */
-export const CRON_LIMIT = 1;
+export const CRON_LIMIT = 2;
 
 /** #171 Orçamento da rodada: o Claude é periférico e a captura é o caminho crítico, então a rodada para cedo. */
 export const ROUND_BUDGET_MS = 2 * 60_000;

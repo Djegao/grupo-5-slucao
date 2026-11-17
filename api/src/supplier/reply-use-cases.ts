@@ -17,18 +17,22 @@ export type SendFollowUpResult =
   | { readonly kind: 'send_failed'; readonly reason: string };
 
 export type ReplyUseCases = {
-  /** #34/AC-3: cada pedido `sent` sem leitura depois do prazo vira no_reply com follow_up; sem Claude, sem envio. */
-  sweepOverdue(): Promise<{ readonly marked: readonly number[] }>;
+  /**
+   * #34/AC-3: cada pedido `sent` sem leitura depois do prazo vira no_reply com follow_up; sem Claude, sem envio.
+   * #36/AC-4: marca no máximo `limit` pedidos por chamada (os de menor id); a chamada seguinte marca os próximos.
+   */
+  sweepOverdue(limit?: number): Promise<{ readonly marked: readonly number[] }>;
   /** #34/AC-4: envia a cobrança rascunhada; só uma pessoa chama, e fica gravado quem e quando. */
   sendFollowUp(id: number, by: string): Promise<SendFollowUpResult>;
   /** #34/AC-5: os pedidos de um filtro, com a leitura, e as contagens de todos os filtros. */
   listRequests(filter: RequestFilter, today: string): Promise<ReplyList>;
 };
 
-async function sweepOverdue(deps: ReplyDeps): Promise<{ readonly marked: readonly number[] }> {
+async function sweepOverdue(deps: ReplyDeps, limit: number = Infinity): Promise<{ readonly marked: readonly number[] }> {
   const today = todayIso(deps.clock.now());
   const marked: number[] = [];
   for (const request of await deps.requests.listSent()) {
+    if (marked.length >= limit) break; // #36/AC-4: o teto da rodada; o resto fica para a próxima
     const overdue = overdueReading(request, request.reading, today);
     if (overdue === null) continue;
     // #34/AC-3: sem mensagem de origem (null): o OLTP só grava se o pedido ainda não tem leitura.
@@ -122,7 +126,7 @@ async function listRequests(deps: ReplyDeps, filter: RequestFilter, today: strin
 
 /** #34: os casos de uso ligados às portas. */
 export const createReplyUseCases = (deps: ReplyDeps): ReplyUseCases => ({
-  sweepOverdue: () => sweepOverdue(deps),
+  sweepOverdue: (limit) => sweepOverdue(deps, limit),
   sendFollowUp: (id, by) => sendFollowUp(deps, id, by),
   listRequests: (filter, today) => listRequests(deps, filter, today),
 });

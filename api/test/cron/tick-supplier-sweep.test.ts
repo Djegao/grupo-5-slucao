@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SUPPLIER_SWEEP_PER_ROUND } from '../../src/cron/supplier-sweep.js';
 import { tick } from '../../src/cron/tick.js';
 import { FakePostgrest } from '../support/fake-postgrest.js';
 import { kitTables } from '../support/kit.js';
 import { sentRow } from '../supplier/supabase-reply-support.js';
 import { invoiceRow } from '../supplier/supabase-support.js';
 
-// #36/AC-2: o passo da varredura do prazo dos pedidos ao fornecedor (#4/AC-2) na rodada do Cron, sobre o kit e o PostgREST falso.
+// #36/AC-4: o passo da varredura do prazo dos pedidos ao fornecedor (#4/AC-2) na rodada do Cron, sobre o kit e o PostgREST falso.
 
 const ENV = { BARTE_ACADEMY_SUPABASE_URL: 'https://fake.supabase.co', BARTE_ACADEMY_SUPABASE_SECRET_KEY: 'sb_secret_fake' };
 const CRON = { cron: '*/15 * * * *' };
@@ -16,8 +17,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function round(today: string): { fake: FakePostgrest; run: () => Promise<unknown> } {
-  const fake = new FakePostgrest({ ...kitTables(), invoices: [invoiceRow()], outbox_supplier_emails: [sentRow(1)] });
+function round(today: string, requests = 1): { fake: FakePostgrest; run: () => Promise<unknown> } {
+  const sent = Array.from({ length: requests }, (_, index) => sentRow(index + 1));
+  const fake = new FakePostgrest({ ...kitTables(), invoices: [invoiceRow()], outbox_supplier_emails: sent });
   fake.unique('supplier_reply_readings', ['request_id'], (row) => row.message_id === null || row.message_id === undefined);
   vi.stubGlobal('fetch', fake.fetch);
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -27,7 +29,7 @@ function round(today: string): { fake: FakePostgrest; run: () => Promise<unknown
   return { fake, run: () => tick(CRON, ENV) };
 }
 
-describe('#36/AC-2 a rodada do Cron varre o prazo dos pedidos ao fornecedor, mesmo sem o Claude', () => {
+describe('#36/AC-4 a rodada do Cron varre o prazo dos pedidos ao fornecedor, mesmo sem o Claude', () => {
   it('#4/AC-2: sem credencial do Claude, o pedido enviado depois do prazo vira no_reply com follow_up, e nenhum rascunho de cobrança é gravado', async () => {
     const { fake, run } = round('2026-11-18');
 
@@ -53,5 +55,21 @@ describe('#36/AC-2 a rodada do Cron varre o prazo dos pedidos ao fornecedor, mes
     await run();
 
     expect(fake.rows('supplier_reply_readings')).toHaveLength(0);
+  });
+});
+
+describe('#36/AC-4 a varredura do prazo tem teto por rodada, para caber nas subrequests do Worker', () => {
+  it('#4/AC-2: com vários pedidos atrasados, a rodada marca só o teto (SUPPLIER_SWEEP_PER_ROUND) e a seguinte marca o próximo', async () => {
+    const { fake, run } = round('2026-11-18', 3);
+
+    await run();
+    expect(fake.rows('supplier_reply_readings').map((row) => row.request_id)).toEqual([1]);
+
+    await run();
+    expect(fake.rows('supplier_reply_readings').map((row) => row.request_id)).toEqual([1, 2]);
+  });
+
+  it('#36/AC-4: o teto da varredura é 1 pedido por rodada', () => {
+    expect(SUPPLIER_SWEEP_PER_ROUND).toBe(1);
   });
 });

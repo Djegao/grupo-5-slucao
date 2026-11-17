@@ -19,7 +19,7 @@ export const SUPPLIER_DRAFT_TASK = 'supplier-request-draft';
 /** #11/AC-1: o nome da chave estável por devolução da fila. */
 export const draftKey = (queueId: number): string => `return_note:${queueId}`;
 
-/** #12: pedidos por rodada: com 2, a rodada inteira fica em 41 subrequests dos 50 (contas em api/src/claude/cron.ts). */
+/** #12: pedidos por rodada: com 2, o rascunho custa 14 das 50 subrequests da rodada (contas em api/src/claude/cron.ts). */
 export const SUPPLIER_DRAFT_LIMIT = 2;
 
 export const supplierRequestDraftTask = (deps: SupplierDeps): ClaudeTask<SupplierDraftInput, SupplierDraftOutput> => ({

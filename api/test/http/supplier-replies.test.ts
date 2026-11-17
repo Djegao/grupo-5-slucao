@@ -237,7 +237,7 @@ describe('#4/AC-7 as respostas de exemplo do script', () => {
   });
 });
 
-describe('#4 canto: sem credencial do Claude, ou com 401 ou 429, nenhuma leitura nem cobrança é gravada', () => {
+describe('#36/AC-4 #4 canto: sem credencial do Claude, ou com 401 ou 429, nenhuma leitura nem cobrança é gravada', () => {
   it('#4/AC-1: sem credencial a rodada pula as tarefas: a mensagem fica pendente e não há leitura', async () => {
     const w = await sentWorld();
     w.receive('Emitimos a NF-D 881.');
@@ -263,7 +263,7 @@ describe('#4 canto: sem credencial do Claude, ou com 401 ou 429, nenhuma leitura
   });
 });
 
-describe('#36 o registro de tarefas do Cron tem a leitura e a cobrança, com teto próprio para caber nas subrequests do Worker', () => {
+describe('#36/AC-4 o registro de tarefas do Cron tem a leitura e a cobrança, com teto próprio para caber nas subrequests do Worker', () => {
   it('#36/AC-1: tasksFor registra supplier-reply-reading e supplier-follow-up-draft, cada uma com limit', async () => {
     const w = await supplierWorld();
     const tasks = tasksFor(w.rest);
