@@ -4,7 +4,9 @@ import {
   buildSupplierRequestFacts,
   filterOf,
   guardNextStep,
+  NEXT_STEPS,
   overdueReading,
+  REPLY_OUTCOMES,
   validateReading,
   validateRequestText,
   type NextStep,
@@ -232,12 +234,38 @@ describe('#33/AC-5: todo pedido enviado cai em um filtro só', () => {
     expect(filterOf(sent, read({ replyOutcome: 'fulfilled', supplierDocument: '881', nextStep: 'confirm_document' }), DUE)).toBe('needs_you');
     expect(filterOf(sent, read({ replyOutcome: 'fulfilled', nextStep: 'answer_supplier' }), DUE)).toBe('needs_you');
   });
-  it('toda combinação de leitura e dia cai em um filtro', () => {
-    const outcomes = ['fulfilled', 'partially_fulfilled', 'refused', 'needs_information', 'no_reply'] as const;
-    const steps = ['close', 'confirm_document', 'answer_supplier', 'follow_up'] as const;
-    const readings = [null, ...outcomes.flatMap((o) => steps.map((n) => read({ replyOutcome: o, nextStep: n })))];
+  it('#50/AC-1: atendido sem documento com next_step answer_supplier precisa de você', () => {
+    expect(filterOf(sent, read({ replyOutcome: 'fulfilled', supplierDocument: null, nextStep: 'answer_supplier' }), DUE)).toBe('needs_you');
+  });
+  it('#50/AC-2: atendido sem documento com next_step follow_up precisa de você', () => {
+    expect(filterOf(sent, read({ replyOutcome: 'fulfilled', supplierDocument: null, nextStep: 'follow_up' }), DUE)).toBe('needs_you');
+  });
+  it('#50/AC-3: toda combinação de leitura, documento e dia cai em exatamente um dos quatro filtros', () => {
+    const filters = ['awaiting', 'answered', 'needs_you', 'overdue'];
+    const readings: (SupplierReading | null)[] = [null];
+    for (const o of REPLY_OUTCOMES) {
+      for (const n of NEXT_STEPS) {
+        for (const supplierDocument of [null, '881']) {
+          const raw = read({ replyOutcome: o, nextStep: n, supplierDocument });
+          // #50/AC-3: a leitura crua e a que a validação guardaria (guardNextStep)
+          readings.push(raw, { ...raw, nextStep: guardNextStep(o, supplierDocument, n) });
+        }
+      }
+    }
     for (const x of readings) {
-      for (const today of ['2026-11-13', DUE, '2026-11-18']) expect(filterOf(sent, x, today)).not.toBeNull();
+      for (const today of ['2026-11-13', DUE, '2026-11-18']) {
+        const placed = filterOf(sent, x, today);
+        expect(placed, JSON.stringify({ x, today })).not.toBeNull();
+        expect(filters.filter((f) => f === placed)).toHaveLength(1);
+      }
+    }
+  });
+  it('#50/AC-3: o pedido sem leitura cai em um filtro nos três dias, e o que não foi enviado em nenhum', () => {
+    for (const today of ['2026-11-13', DUE, '2026-11-18']) expect(filterOf(sent, null, today)).not.toBeNull();
+    for (const status of ['draft', 'send_failed', 'discarded'] as const) {
+      for (const x of [null, read({}), read({ replyOutcome: 'no_reply', nextStep: 'follow_up' })]) {
+        for (const today of ['2026-11-13', DUE, '2026-11-18']) expect(filterOf({ status, dueOn: DUE }, x, today)).toBeNull();
+      }
     }
   });
   it('o que não foi enviado não está em filtro nenhum', () => {
