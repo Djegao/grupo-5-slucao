@@ -92,8 +92,8 @@ export type StoreCall = { readonly op: string; readonly args: readonly unknown[]
 export type FakeStore = ReplyDeps['requests'] & {
   rows: Map<number, ReplyRequest>;
   calls: StoreCall[];
-  /** #34/AC-4: os pedidos com o envio da cobrança reivindicado (o que a transição guardada do OLTP faz). */
-  claimed: Set<number>;
+  /** #34/AC-4, #35: a ficha da reivindicação de cada pedido com o envio da cobrança reivindicado (a transição guardada do OLTP). */
+  claims: Map<number, string>;
   /** #34/AC-4: liga a falha da gravação do carimbo, depois de o e-mail sair. */
   failStamp: { on: boolean };
 };
@@ -101,7 +101,8 @@ export type FakeStore = ReplyDeps['requests'] & {
 export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
   const map = new Map(rows.map((r) => [r.id, r]));
   const calls: StoreCall[] = [];
-  const claimed = new Set<number>();
+  const claims = new Map<number, string>();
+  let issued = 0;
   const failStamp = { on: false };
   const readingFrom = new Map<number, number>();
   const patch = (id: number, op: string, args: unknown[], change: (r: ReplyRequest) => ReplyRequest): Promise<void> => {
@@ -113,13 +114,15 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
   return {
     rows: map,
     calls,
-    claimed,
+    claims,
     failStamp,
-    claimFollowUpSend: (id) => {
-      calls.push({ op: 'claimFollowUpSend', args: [id] });
-      const taken = claimed.has(id) || map.get(id)?.followUp.sent != null;
-      if (!taken) claimed.add(id);
-      return Promise.resolve(!taken);
+    claimFollowUpSend: (id, by) => {
+      calls.push({ op: 'claimFollowUpSend', args: [id, by] });
+      const taken = claims.has(id) || map.get(id)?.followUp.sent != null;
+      if (taken) return Promise.resolve(null);
+      issued += 1;
+      claims.set(id, `claim-${issued}`);
+      return Promise.resolve(`claim-${issued}`);
     },
     get: (id) => Promise.resolve(map.get(id) ?? null),
     listSent: () => Promise.resolve([...map.values()].filter((r) => r.status === 'sent')),
@@ -137,13 +140,24 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
       patch(id, 'saveFollowUpDraft', [id, text], (row) => ({ ...row, followUp: { ...row.followUp, draft: text } })),
     recordFollowUpRejection: (id, reason) =>
       patch(id, 'recordFollowUpRejection', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, rejection: reason } })),
-    recordFollowUpFailure: (id, reason) => {
-      claimed.delete(id); // #34/AC-4: a falha solta a reivindicação, para a pessoa poder tentar de novo
-      return patch(id, 'recordFollowUpFailure', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, failure: reason } }));
+    // #35: a gravação da falha e a do carimbo só valem para quem ainda detém a ficha; a de quem a perdeu volta `lost` e não grava.
+    recordFollowUpFailure: async (id, claim, reason, by) => {
+      if (claims.get(id) !== claim) {
+        calls.push({ op: 'recordFollowUpFailure', args: [id, claim, reason, by] });
+        return 'lost';
+      }
+      claims.delete(id); // #34/AC-4: a falha solta a reivindicação, para a pessoa poder tentar de novo
+      await patch(id, 'recordFollowUpFailure', [id, claim, reason, by], (row) => ({ ...row, followUp: { ...row.followUp, failure: reason } }));
+      return 'recorded';
     },
-    recordFollowUpSent: (id, stamp: FollowUpStamp) => {
-      if (failStamp.on) return Promise.reject(new Error('banco fora do ar'));
-      return patch(id, 'recordFollowUpSent', [id, stamp], (row) => ({ ...row, followUp: { ...row.followUp, sent: stamp, failure: null } }));
+    recordFollowUpSent: async (id, claim, stamp: FollowUpStamp) => {
+      if (failStamp.on) throw new Error('banco fora do ar');
+      if (claims.get(id) !== claim) {
+        calls.push({ op: 'recordFollowUpSent', args: [id, claim, stamp] });
+        return 'lost';
+      }
+      await patch(id, 'recordFollowUpSent', [id, claim, stamp], (row) => ({ ...row, followUp: { ...row.followUp, sent: stamp, failure: null } }));
+      return 'recorded';
     },
   };
 };

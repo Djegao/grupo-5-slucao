@@ -58,10 +58,9 @@ export const supplierReplyReadingTask = (deps: ReplyDeps): ClaudeTask<ReadingInp
       await deps.inbox.markError(messageId, reason);
       return { messageId, status: 'error', reason };
     }
-    // #34/AC-1: recordReading e markRead não são atômicos aqui: a atomicidade é da unidade de trabalho do OLTP.
-    // #34/AC-1: se markRead falhar, a mensagem segue pendente e a nova rodada a lê de novo e troca a leitura por uma equivalente.
-    // #34/AC-1: o OLTP tem de dar um UPDATE condicional no id da mensagem guardada (ver ReplyRequestStore.recordReading):
-    // #34/AC-1: o runner roda as chaves novas antes das retentativas, e a leitura antiga não pode trocar a nova.
+    // #34/AC-1: recordReading e markRead não são atômicos aqui: são duas tabelas, e cada gravação é uma requisição (#35).
+    // #34/AC-1: se markRead falhar, a mensagem segue pendente e a nova rodada a lê de novo; a segunda leitura da mesma mensagem é descartada.
+    // #35: o runner roda as chaves novas antes das retentativas: a leitura antiga é gravada, mas perde pela ordem das mensagens.
     const recorded = await deps.requests.recordReading(request.id, checked.reading, messageId);
     await deps.inbox.markRead(messageId);
     if (recorded === 'superseded') return { messageId, status: 'superseded' };

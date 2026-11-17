@@ -73,8 +73,14 @@ export type ReplyRequest = {
   readonly followUp: FollowUpState;
 };
 
-/** #34/AC-1: `superseded` é a leitura que não foi gravada porque o pedido guarda uma de mensagem mais nova. */
+/** #34/AC-1, #35: `superseded` é a leitura gravada no log que não é a atual: o pedido tem uma de mensagem mais nova. */
 export type ReadingRecorded = 'recorded' | 'superseded';
+
+/** #35: a ficha da reivindicação do envio: o que a prende a quem a ganhou (como a da #12). Nunca sai do armazém nem entra em log. */
+export type FollowUpClaim = string;
+
+/** #35: `lost` quer dizer que a reivindicação já não é de quem gravou (venceu e outro a retomou, ou foi solta): nada foi gravado. */
+export type ClaimWrite = 'recorded' | 'lost';
 
 /**
  * #34/AC-2: a gravação do pedido. Só há escrita da leitura e da cobrança: não existe método para a
@@ -85,27 +91,34 @@ export interface ReplyRequestStore {
   /** #34: os pedidos `sent`; é de onde saem a varredura, a tarefa da cobrança e a lista. */
   listSent(): Promise<ReplyRequest[]>;
   /**
-   * #34/AC-1: grava a leitura do pedido. `messageId` é a mensagem de onde ela veio; o OLTP tem de garantir
-   * um UPDATE condicional na própria linha (não ler e depois gravar): troca a leitura só quando `messageId`
-   * é maior ou igual ao id da mensagem que gerou a leitura guardada, e do contrário não grava e devolve
-   * `superseded`. Quando a leitura guardada não veio de mensagem (a da varredura do prazo, origem nula), a
-   * leitura de qualquer mensagem é gravada: a resposta tardia vence o no_reply (#34). No OLTP a condição é
-   * `reading_message_id is null or reading_message_id <= $messageId`; `<=` sozinho é falso em NULL (#34). O runner (#66) roda as chaves novas antes das retentativas, então uma leitura antiga
-   * pode chegar depois de uma nova. `null` é a varredura do prazo: só grava se o pedido não tem leitura.
+   * #34/AC-1, #35: grava a leitura do pedido como um fato novo (append-only), numa requisição só, sem ler antes.
+   * `messageId` é a mensagem de onde ela veio. A leitura atual do pedido é derivada pela ordem das mensagens:
+   * a de maior id vence, e a leitura de qualquer mensagem vence a da varredura do prazo (origem nula), então a
+   * resposta tardia vence o no_reply (#34). Uma leitura antiga que chega depois de uma nova (o runner #66 roda as
+   * chaves novas antes das retentativas) é gravada e perde pela ordem. `superseded` quer dizer: gravada no log,
+   * mas não é a leitura atual. A mesma mensagem lida duas vezes mantém a primeira leitura. `null` é a varredura
+   * do prazo: grava um único no_reply por pedido e, se já havia um, devolve `superseded`.
    */
   recordReading(id: number, reading: SupplierReading, messageId: number | null): Promise<ReadingRecorded>;
   saveFollowUpDraft(id: number, text: SupplierRequestText): Promise<void>;
   recordFollowUpRejection(id: number, reason: string): Promise<void>;
   /**
-   * #34/AC-4: reivindica o envio da cobrança antes do e-mail sair: true para quem ganhou, false se já
-   * há envio reivindicado ou carimbado. O OLTP tem de garantir que é uma transição guardada e atômica
-   * (um UPDATE condicional por pedido), para duas chamadas ao mesmo tempo não ganharem as duas.
+   * #34/AC-4: reivindica o envio da cobrança antes do e-mail sair. Devolve a ficha da reivindicação (#35, o `send_claim` da #12)
+   * para quem ganhou, e `null` se já há envio reivindicado dentro do prazo ou carimbado. O OLTP tem de garantir que é uma transição
+   * guardada e atômica (um UPDATE condicional por pedido), e `by` entra no histórico (#35), para duas chamadas ao mesmo tempo não
+   * ganharem as duas. A reivindicação vence com o prazo (#35): a ficha é o que prende a falha e o carimbo a quem a ganhou.
    */
-  claimFollowUpSend(id: number): Promise<boolean>;
-  /** #34/AC-4: grava o motivo da falha e solta a reivindicação, para a pessoa poder tentar de novo. */
-  recordFollowUpFailure(id: number, reason: string): Promise<void>;
-  /** #34/AC-4: grava o carimbo; a reivindicação fica presa depois dele, e só a falha do envio a solta. */
-  recordFollowUpSent(id: number, stamp: FollowUpStamp): Promise<void>;
+  claimFollowUpSend(id: number, by: string): Promise<FollowUpClaim | null>;
+  /**
+   * #34/AC-4: grava o motivo da falha e solta a reivindicação, para a pessoa poder tentar de novo; `by` entra no histórico (#35).
+   * #35: só vale para quem ainda detém a ficha; com a reivindicação vencida e retomada por outro, volta `lost` e não grava nada.
+   */
+  recordFollowUpFailure(id: number, claim: FollowUpClaim, reason: string, by: string): Promise<ClaimWrite>;
+  /**
+   * #34/AC-4: grava o carimbo; a reivindicação fica presa depois dele, e só a falha do envio a solta.
+   * #35: só vale para quem ainda detém a ficha; com a reivindicação perdida, volta `lost` e não grava nada.
+   */
+  recordFollowUpSent(id: number, claim: FollowUpClaim, stamp: FollowUpStamp): Promise<ClaimWrite>;
 }
 
 /** #34/AC-4: o e-mail da cobrança, com a forma do MailMessage de #11, para o adaptador de #11 servir aqui. */

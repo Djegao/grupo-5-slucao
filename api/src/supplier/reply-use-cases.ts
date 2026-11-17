@@ -54,6 +54,12 @@ async function dispatch(deps: ReplyDeps, requestId: number, message: FollowUpMai
   }
 }
 
+/** #35: quem perdeu a reivindicação não grava; o log leva só a operação e o pedido (nunca a ficha) e o resultado é o conflito. */
+function lostClaim(requestId: number, operation: string): SendFollowUpResult {
+  console.error('#35 a reivindicação da cobrança foi perdida antes de gravar o resultado', { operation, requestId });
+  return { kind: 'conflict', reason: 'send_in_progress' };
+}
+
 async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<SendFollowUpResult> {
   const request = await deps.requests.get(id);
   if (request === null) return { kind: 'not_found' };
@@ -64,7 +70,8 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
   const text = validateRequestText(draft, catalogOf(request));
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
   // #34/AC-4: a reivindicação vem antes do e-mail; quem não a ganha não envia, e a que fica presa após o envio impede o segundo e-mail.
-  if (!(await deps.requests.claimFollowUpSend(id))) return { kind: 'conflict', reason: 'send_in_progress' };
+  const claim = await deps.requests.claimFollowUpSend(id, by);
+  if (claim === null) return { kind: 'conflict', reason: 'send_in_progress' };
   const result = await dispatch(deps, id, {
     invoiceAccessKey: request.invoiceAccessKey,
     supplierId: request.note.supplierId,
@@ -75,12 +82,14 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
     dueOn: request.dueOn,
   });
   if (!result.ok) {
-    await deps.requests.recordFollowUpFailure(id, result.reason);
+    // #35: a reivindicação venceu e outro a retomou durante o envio: a falha não é mais deste pedido de envio, e quem manda agora é o outro.
+    if ((await deps.requests.recordFollowUpFailure(id, claim, result.reason, by)) === 'lost') return lostClaim(id, 'follow-up-failure');
     return { kind: 'send_failed', reason: result.reason };
   }
   const stamp: FollowUpStamp = { by, at: deps.clock.now(), channel: result.channel, providerMessageId: result.providerMessageId };
-  // #34/AC-4: se esta gravação falhar, o e-mail já saiu e a reivindicação fica presa: melhor nenhum reenvio que um segundo e-mail.
-  await deps.requests.recordFollowUpSent(id, stamp);
+  // #34/AC-4: se esta gravação falhar, o e-mail já saiu e a reivindicação só vence depois de LEASE_MS: um envio posterior pode mandar um segundo e-mail, risco aceito e documentado em supabase/persistence-supplier-reply.md (#35).
+  // #35: se a reivindicação foi perdida no meio, o carimbo é do outro envio: este e-mail saiu, mas não grava nem se declara enviado.
+  if ((await deps.requests.recordFollowUpSent(id, claim, stamp)) === 'lost') return lostClaim(id, 'follow-up-stamp');
   return { kind: 'ok', request: { ...request, followUp: { ...request.followUp, sent: stamp, failure: null } } };
 }
 

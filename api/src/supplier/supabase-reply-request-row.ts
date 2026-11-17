@@ -1,0 +1,145 @@
+import { arrayOf, isInteger, isIsoDate, isString, isUnknown, nullable, oneOf, shaped, type Guard, type Shape } from '../connectors/guards.js';
+import { SupabaseRestError } from '../connectors/supabase-rest.js';
+import type { RequestStatus, RequestType, SupplierRequestText } from '../domain/index.js';
+import type { FollowUpState, ReplyRequest } from './reply-ports.js';
+import { currentReading, isReadingRow, readingFromRow, READINGS_TABLE } from './supabase-reply-reading.js';
+import { noteFromJson } from './supabase-notes.js';
+
+// #35: o pedido ao fornecedor (outbox_supplier_emails, #12) como a leitura da resposta o vê: a linha com as colunas follow_up_*,
+// #35: o fornecedor e as leituras embutidos pelo PostgREST numa requisição só (supabase/persistence-supplier-reply.md, QR1 e QR2).
+
+export const OUTBOX_TABLE = 'outbox_supplier_emails';
+
+/** #35: o PostgREST ordena o recurso embutido por `<recurso>.order`; o adaptador não depende dela (currentReading escolhe), só a pede. */
+export const READINGS_ORDER = { [`${READINGS_TABLE}.order`]: 'message_id.desc.nullslast' } as const;
+
+/** #35: as colunas da cobrança, as que as gravações da cobrança e só elas podem tocar. */
+export const FOLLOW_UP_COLUMNS =
+  'follow_up_draft,follow_up_rejection,follow_up_claimed_at,follow_up_sent_by,follow_up_sent_at,follow_up_channel,follow_up_provider_message_id,follow_up_failure';
+
+/** #35 QR1/QR2: o pedido, o fornecedor pela chave estrangeira do pedido e as leituras pela chave estrangeira nomeada. */
+export const REQUEST_SELECT = [
+  'id,invoice_access_key,request_type,recipient,subject,asks,note,due_on,status,supplier_id',
+  FOLLOW_UP_COLUMNS,
+  'kit_fornecedores(razao_social)',
+  `${READINGS_TABLE}!supplier_reply_readings_request_fkey(id,message_id,reply_outcome,fulfilled_asks,supplier_document,summary,next_step,injection_flag)`,
+].join(',');
+
+export type FollowUpColumns = {
+  follow_up_draft: SupplierRequestText | null;
+  follow_up_rejection: string | null;
+  follow_up_claimed_at: string | null;
+  follow_up_sent_by: string | null;
+  follow_up_sent_at: string | null;
+  follow_up_channel: 'mock' | 'resend' | null;
+  follow_up_provider_message_id: string | null;
+  follow_up_failure: string | null;
+};
+
+const isText = shaped<SupplierRequestText>({ subject: isString, body: isString, asks: arrayOf(isString) } satisfies Shape<SupplierRequestText>);
+
+export const followUpShape: Shape<FollowUpColumns> = {
+  follow_up_draft: nullable(isText),
+  follow_up_rejection: nullable(isString),
+  follow_up_claimed_at: nullable(isString),
+  follow_up_sent_by: nullable(isString),
+  follow_up_sent_at: nullable(isString),
+  follow_up_channel: nullable(oneOf<'mock' | 'resend'>('mock', 'resend')), // ADR-002
+  follow_up_provider_message_id: nullable(isString),
+  follow_up_failure: nullable(isString),
+};
+
+export type RequestRow = FollowUpColumns & {
+  id: number;
+  invoice_access_key: string;
+  request_type: RequestType;
+  recipient: string;
+  subject: string;
+  asks: string[];
+  note: unknown;
+  due_on: string;
+  status: RequestStatus;
+  kit_fornecedores: { razao_social: string } | null;
+  supplier_reply_readings: unknown[];
+};
+
+const isSupplier = shaped<{ razao_social: string }>({ razao_social: isString });
+const isReadings: Guard<unknown[]> = (v): v is unknown[] => Array.isArray(v) && v.every(isReadingRow);
+
+export const isRequestRow = shaped<RequestRow>({
+  ...followUpShape,
+  id: isInteger,
+  invoice_access_key: isString,
+  request_type: oneOf<RequestType>('return_note'), // ADR-002
+  recipient: isString,
+  subject: isString,
+  asks: arrayOf(isString),
+  note: isUnknown,
+  due_on: isIsoDate,
+  status: oneOf<RequestStatus>('draft', 'sent', 'send_failed', 'discarded'), // ADR-002
+  kit_fornecedores: nullable(isSupplier),
+  supplier_reply_readings: isReadings,
+} satisfies Shape<RequestRow>);
+
+const corrupt = (detail: string): never => {
+  throw new SupabaseRestError('parse', OUTBOX_TABLE, 0, detail);
+};
+
+const instant = (value: string): Date => {
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? corrupt('carimbo da cobrança fora do formato') : at;
+};
+
+/** #35: o estado da cobrança nas colunas; o carimbo só existe com as quatro partes (a migração garante). */
+export function followUpOf(row: FollowUpColumns): FollowUpState {
+  const { follow_up_sent_at: at, follow_up_sent_by: by, follow_up_channel: channel, follow_up_provider_message_id: providerMessageId } = row;
+  const complete = at !== null && by !== null && channel !== null && providerMessageId !== null;
+  return {
+    draft: row.follow_up_draft,
+    rejection: row.follow_up_rejection,
+    sent: complete ? { by, at: instant(at), channel, providerMessageId } : null,
+    failure: row.follow_up_failure,
+  };
+}
+
+/** #35: a linha lida e o número da nota de origem viram o pedido da leitura; a leitura atual vem da projeção do log. */
+export function toReplyRequest(row: RequestRow, invoiceNumber: string): ReplyRequest {
+  return {
+    id: row.id,
+    invoiceAccessKey: row.invoice_access_key,
+    invoiceNumber,
+    supplierName: row.kit_fornecedores?.razao_social ?? null,
+    requestType: row.request_type,
+    to: row.recipient,
+    note: noteFromJson(row.note, OUTBOX_TABLE),
+    asks: row.asks,
+    subject: row.subject,
+    dueOn: row.due_on,
+    status: row.status,
+    reading: currentReading(row.supplier_reply_readings.map(readingFromRow))?.reading ?? null,
+    followUp: followUpOf(row),
+  };
+}
+
+/** #35: o histórico leva o `state` da última entrada, copiado: a cobrança não muda o estado do pedido (#12). */
+export function lastState(history: readonly unknown[]): unknown {
+  const last = history.at(-1);
+  return typeof last === 'object' && last !== null && 'state' in last ? last.state : null;
+}
+
+/** #35: o estado da cobrança depois da gravação, como entra no histórico: nomes e marcas, nunca o texto do rascunho. */
+export type FollowUpSummary = {
+  readonly drafted: boolean;
+  readonly rejection: string | null;
+  readonly claimed: boolean;
+  readonly sent: boolean;
+  readonly failure: string | null;
+};
+
+export const followUpSummary = (row: FollowUpColumns): FollowUpSummary => ({
+  drafted: row.follow_up_draft !== null,
+  rejection: row.follow_up_rejection,
+  claimed: row.follow_up_claimed_at !== null,
+  sent: row.follow_up_sent_at !== null,
+  failure: row.follow_up_failure,
+});
