@@ -10,6 +10,16 @@ const writing = { status: "writing" } as const;
 
 let calls: { method: string; path: string; body: unknown }[] = [];
 
+/** #17 Um fetch que nunca responde e só termina quando o sinal aborta, como o do navegador. */
+function stalledFetch() {
+  return vi.fn(
+    (_path: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      }),
+  );
+}
+
 function serve(response: () => Response): void {
   calls = [];
   vi.stubGlobal(
@@ -38,11 +48,11 @@ describe("#17 porta do pedido ao fornecedor sobre a API", () => {
     expect(await supplierRequestApi.load(KEY, new AbortController().signal)).toBeNull();
   });
 
-  it("#17/AC-1: 404 na leitura é sem pedido; outro erro continua erro", async () => {
-    serve(() => Response.json({ error: "not_found" }, { status: 404 }));
-    expect(await supplierRequestApi.load(KEY, new AbortController().signal)).toBeNull();
-    serve(() => Response.json({ error: "internal_error" }, { status: 500 }));
-    await expect(supplierRequestApi.load(KEY, new AbortController().signal)).rejects.toBeInstanceOf(ApiError);
+  it("#17/AC-1: o contrato responde 200 com request nulo para a nota sem pedido; 404 e 500 são falha de carga", async () => {
+    for (const status of [404, 500]) {
+      serve(() => Response.json({ error: "falha" }, { status }));
+      await expect(supplierRequestApi.load(KEY, new AbortController().signal)).rejects.toBeInstanceOf(ApiError);
+    }
   });
 
   it("#17/AC-4 e AC-5: send, resend, discard e redo são POST com corpo vazio e devolvem o pedido", async () => {
@@ -66,19 +76,27 @@ describe("#17 porta do pedido ao fornecedor sobre a API", () => {
     expect((error as ApiError).status).toBe(422);
   });
 
-  it("#17/AC-4: a ação que nunca responde termina em falha no prazo (REL-1)", async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        (_path: string, init: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
-          }),
-      ),
-    );
-    const outcome = supplierRequestApi.send(KEY).catch((e: unknown) => e);
-    await vi.advanceTimersByTimeAsync(DEFAULT_TIMEOUT_MS);
-    expect(await outcome).toBeInstanceOf(ApiError);
-  });
+  // #17/AC-4 Prazos por ação: o redo espera o Claude (até 45 s, api/src/claude/client.ts), o envio emite, grava e manda o e-mail.
+  const DEADLINES = [
+    ["send", 30_000],
+    ["resend", 30_000],
+    ["redo", 50_000],
+    ["discard", DEFAULT_TIMEOUT_MS],
+  ] as const;
+
+  for (const [action, deadline] of DEADLINES) {
+    it(`#17/AC-4: ${action} que nunca responde termina em ApiError de status 0 aos ${deadline / 1000} s, nem antes`, async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("fetch", stalledFetch());
+      let settled: unknown;
+      void supplierRequestApi[action](KEY).catch((e: unknown) => {
+        settled = e;
+      });
+      await vi.advanceTimersByTimeAsync(deadline - 1);
+      expect(settled).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBeInstanceOf(ApiError);
+      expect((settled as ApiError).status).toBe(0);
+    });
+  }
 });

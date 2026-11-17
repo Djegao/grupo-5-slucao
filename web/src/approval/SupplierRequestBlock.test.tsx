@@ -126,10 +126,23 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
     expect(screen.getByText(/E-mail enviado por você às \d{2}h\d{2} · aguardando resposta até 18\/11/)).toBeTruthy();
   });
 
-  it("#3/AC-4: a API pode entregar enviada sem quem nem quando (nulos): a linha não mostra data inválida nem o texto null", () => {
+  it("#3/AC-4: sem carimbo (sentBy e sentAt nulos) a linha não traz quem nem a hora", () => {
     setup({ status: "sent", returnNote, email, attachment, sentBy: null, sentAt: null });
-    expect(block().textContent).not.toMatch(/null|Invalid|NaN/); // #17
-    expect(screen.getByText(/emitida e enviada/)).toBeTruthy();
+    expect(screen.getByText("Nota de devolução ND-0012 emitida e enviada · aguardando resposta até 18/11")).toBeTruthy();
+    expect(block().textContent).not.toMatch(/null|Invalid|NaN|--h--|outra pessoa/); // #17
+  });
+
+  it("#3/AC-4: sem carimbo e sem nota, o e-mail enviado também fica sem quem e sem hora", () => {
+    setup({ status: "sent", ...mailOnly, sentBy: null, sentAt: null });
+    expect(screen.getByText("E-mail enviado · aguardando resposta até 18/11")).toBeTruthy();
+  });
+
+  it("#3/AC-4: só um dos dois carimbos nulos tira só a parte que falta", () => {
+    setup({ status: "sent", returnNote, email, sentBy: "bia@jachegou.test", sentAt: null });
+    expect(screen.getByText("Nota de devolução ND-0012 emitida e enviada por bia@jachegou.test · aguardando resposta até 18/11")).toBeTruthy();
+    cleanup();
+    setup({ status: "sent", returnNote, email, sentBy: null, sentAt: SENT_AT });
+    expect(screen.getByText(/^Nota de devolução ND-0012 emitida e enviada às \d{2}h\d{2} · aguardando resposta até 18\/11$/)).toBeTruthy();
   });
 
   it("#3/AC-5: um código de falha que a tela não conhece vira a frase genérica, nunca o código", () => {
@@ -210,6 +223,19 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
     expect(screen.queryByRole("button", { name: "Emitir e enviar" })).toBeNull();
     fireEvent.click(button("Refazer"));
     expect(on.onRedo).toHaveBeenCalledTimes(1);
+  });
+
+  it("#3/AC-7: sem carimbo (discardedBy e discardedAt nulos) diz só Pedido descartado, e Refazer segue", () => {
+    const on = setup({ status: "discarded", discardedAt: null, discardedBy: null });
+    expect(screen.getByText("Pedido descartado")).toBeTruthy();
+    expect(block().textContent).not.toMatch(/null|Invalid|NaN|--h--|outra pessoa/); // #17
+    fireEvent.click(button("Refazer"));
+    expect(on.onRedo).toHaveBeenCalledTimes(1);
+  });
+
+  it("#3/AC-7: descartado por outra pessoa, sem hora, diz quem e não a hora", () => {
+    setup({ status: "discarded", discardedAt: null, discardedBy: "bia@jachegou.test" });
+    expect(screen.getByText("Pedido descartado por bia@jachegou.test")).toBeTruthy();
   });
 
   it("#3/AC-7: refazendo desabilita o botão e mostra Refazendo…", () => {

@@ -29,6 +29,8 @@ function emptyApi(input: RequestInfo | URL): Promise<Response> {
   if (path.startsWith("/api/propostas/")) return Promise.resolve(Response.json({ error: "not_found" }, { status: 404 }));
   if (path === "/api/fila") return Promise.resolve(Response.json({ approver: { email: null, level: null }, items: [] }));
   if (path.startsWith("/api/doca") || path.startsWith("/api/recebimento-loja")) return Promise.resolve(Response.json({ destination: null, date: "2026-11-15", destinations: [], awaiting: 0, rows: [] }));
+  // #17 A gaveta de proposta decidida pergunta pelo pedido ao fornecedor; o contrato responde 200 com request nulo.
+  if (path.startsWith("/api/supplier-requests/")) return Promise.resolve(Response.json({ request: null }));
   if (path === "/api/return-notes") return Promise.resolve(Response.json({ notes: [] }));
   if (path === "/api/duplicates") return Promise.resolve(Response.json({ duplicates: [], count: 0 }));
   if (path === "/api/hoje") return Promise.resolve(Response.json({ day: "2026-11-15", items: [], total: { cents: 0 } }));

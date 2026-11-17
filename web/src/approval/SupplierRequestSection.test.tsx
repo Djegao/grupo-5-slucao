@@ -134,6 +134,17 @@ describe("#3 pedido ao fornecedor: emitir e enviar", () => {
     expect(region().textContent).not.toMatch(/Failed to fetch|interno/);
   });
 
+  it("#3/AC-4: o envio que estoura o prazo mostra o que o servidor concluiu, com a mensagem fixa e sem o texto do erro", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(draft).mockResolvedValue({ status: "sent", sentBy: VIEWER, sentAt: SENT_AT, returnNote: note, email });
+    const send = vi.fn(async () => Promise.reject(new ApiError(0, null, "prazo https://interno")));
+    show(port(draft, { load, send }));
+    await screen.findByRole("button", { name: t.actions.sendWithNote });
+    click(t.actions.sendWithNote);
+    expect(await screen.findByText(t.errors.timeout)).toBeTruthy();
+    expect(await screen.findByText(/Nota de devolução ND-0012 emitida e enviada/)).toBeTruthy();
+    expect(region().textContent).not.toMatch(/interno/);
+  });
+
   it("#3/AC-4: tentar de novo depois do erro limpa a mensagem anterior", async () => {
     const send = vi.fn<SupplierRequestPort["send"]>().mockRejectedValueOnce(new ApiError(409, null, "x"));
     send.mockResolvedValue({ status: "sent", sentBy: VIEWER, sentAt: SENT_AT, email });

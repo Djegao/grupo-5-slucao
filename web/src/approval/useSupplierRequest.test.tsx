@@ -54,6 +54,40 @@ describe("#3 gancho useSupplierRequest", () => {
     expect(result.current.request?.status).toBe("draft");
   });
 
+  it("#3/AC-4: a ação que estoura o prazo (status 0) recarrega o pedido, e o que o servidor concluiu aparece com a mensagem fixa", async () => {
+    const sent: SupplierRequestView = { status: "sent", sentBy: "ana", sentAt: "2026-11-15T13:40:00Z", email };
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(draft).mockResolvedValue(sent);
+    const p = port({ load, send: vi.fn(async () => Promise.reject(new ApiError(0, null, "não consegui falar com a API"))) });
+    const { result } = renderHook(() => useSupplierRequest(p, KEY));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    act(() => result.current.onSend());
+    await waitFor(() => expect(result.current.request?.status).toBe("sent"));
+    expect(result.current.error).toBe(texts.supplierRequest.errors.timeout);
+    expect(result.current.pending).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("#3/AC-4: o status 0 com a releitura também falha mantém o estado de antes e a mensagem fixa", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(draft).mockRejectedValue(new ApiError(0, null, "x"));
+    const p = port({ load, send: vi.fn(async () => Promise.reject(new ApiError(0, null, "x"))) });
+    const { result } = renderHook(() => useSupplierRequest(p, KEY));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    act(() => result.current.onSend());
+    await waitFor(() => expect(result.current.error).toBe(texts.supplierRequest.errors.timeout));
+    expect(result.current.request?.status).toBe("draft");
+    expect(result.current.loadFailed).toBe(false);
+  });
+
+  it("#3/AC-4: recusa com status que não é 0 não recarrega", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValue(draft);
+    const p = port({ load, send: vi.fn(async () => Promise.reject(new ApiError(409, null, "x"))) });
+    const { result } = renderHook(() => useSupplierRequest(p, KEY));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    act(() => result.current.onSend());
+    await waitFor(() => expect(result.current.error).toBe(texts.supplierRequest.errors.conflict));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it("#3/AC-6: onEdit entrega o estado editing e onCancelEdit devolve o rascunho", async () => {
     const { result } = renderHook(() => useSupplierRequest(port(), KEY));
     await waitFor(() => expect(result.current.request?.status).toBe("draft"));

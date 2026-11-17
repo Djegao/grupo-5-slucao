@@ -32,7 +32,7 @@ describe("#17 cliente da API: prazo e PATCH", () => {
   it("#17/AC-6: o prazo pode ser trocado por chamada", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", stalledFetch());
-    const outcome = apiGet("/api/fila", { timeoutMs: 50 }).catch((e: unknown) => e);
+    const outcome = apiGet("/api/supplier-requests/x", { timeoutMs: 50 }).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(50);
     expect(((await outcome) as ApiError).status).toBe(0);
   });
@@ -40,7 +40,7 @@ describe("#17 cliente da API: prazo e PATCH", () => {
   it("#17/AC-6: quem cancela com o próprio sinal continua recebendo o cancelamento, não uma falha", async () => {
     vi.stubGlobal("fetch", stalledFetch());
     const controller = new AbortController();
-    const outcome = apiGet("/api/fila", { signal: controller.signal }).catch((e: unknown) => e);
+    const outcome = apiGet("/api/supplier-requests/x", { signal: controller.signal }).catch((e: unknown) => e);
     controller.abort();
     const error = await outcome;
     expect(error).toBeInstanceOf(DOMException);
