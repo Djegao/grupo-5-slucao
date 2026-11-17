@@ -62,15 +62,15 @@ function sentView(row: ReadingRowDto): SentRequestDetailDto {
     reading: null,
     followUp: {
       drafted: true,
-      sent: false,
+      sent: row.followUp.sent,
       draft: {
         subject: `Cobrança: nota de devolução da NF ${row.invoiceNumber}`,
         body: "Olá, não recebemos retorno. Pode nos responder até 20/11?",
         template: "Olá, não recebemos retorno. Pode nos responder até 20/11?",
         asks: [],
       },
-      sentBy: null,
-      sentAt: null,
+      sentBy: row.followUp.sent ? "analista@barte.com" : null,
+      sentAt: row.followUp.sent ? "2026-11-16T13:12:00.000Z" : null,
       failure: null,
     },
   };
@@ -231,15 +231,13 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     expect(screen.getByRole("radio", { name: /^Aguardando/ }).textContent).toMatch(/2/);
   });
 
-  it("#5/AC-4: a linha que o servidor já cobrou (followUp.sent) mostra 'Aguardando (cobrado)', sem 'Cobrar', e a gaveta não oferece cobrar de novo", async () => {
+  it("#5/AC-4: a linha que o servidor já cobrou (followUp.sent) segue em Atrasados como 'Atrasado (cobrado)', sem 'Cobrar', e a gaveta não oferece cobrar de novo", async () => {
     requests = [{ ...SUPPLIER_REQUESTS[0]!, row: { ...SUPPLIER_REQUESTS[0]!.row, followUp: { drafted: true, sent: true } } }];
     renderRoute();
     fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
-    // #21 O servidor ainda a lê no filtro Atrasados, mas já cobrada ela é Aguardando: sai do chip e aparece em "Ver todos".
-    fireEvent.click(await screen.findByRole("button", { name: "Ver todos" }));
     const row = (await screen.findByText("NF 59738")).closest("tr")!;
     expect(within(row).queryByRole("button", { name: "Cobrar" })).toBeNull();
-    expect(within(row).getByText(/Aguardando/)).toBeTruthy();
+    expect(within(row).getByText("Atrasado (cobrado)")).toBeTruthy();
     fireEvent.click(row);
     const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
     expect(within(region).queryByRole("button", { name: /Cobrar/ })).toBeNull();
