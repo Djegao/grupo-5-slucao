@@ -289,7 +289,7 @@ describe('#34/AC-1: a leitura de uma mensagem mais antiga nunca troca a de uma m
     };
     const answers = [newer, GOOD_READING];
     let call = 0;
-    const ask = (async () => answers[call++]) as unknown as Ask;
+    const ask: Ask = async <T>() => answers[call++] as T;
     await runTasks({ db, ask, tasks: [supplierReplyReadingTask(deps)], log: () => undefined, now: () => NOW });
     expect(call).toBe(2);
     expect(store.rows.get(7)?.reading).toMatchObject({ replyOutcome: 'refused', nextStep: 'answer_supplier' });
