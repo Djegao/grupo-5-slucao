@@ -20,8 +20,9 @@ import { tasksFor } from './tasks/index.js';
  * #36 Os 50 do plano gratuito contam só a rodada do Claude e a varredura, não a invocação inteira: a captura, proposeChecked, as
  * #36 publicações e as notas de devolução gastam subrequests antes (api/src/cron/tick.ts, runRound). Se o Worker publicado de fato roda
  * #36 sob esse limite é pergunta de infraestrutura da pessoa, não do código; a medida de 57 já o passa, e o teste a registra como lacuna.
- * #36 A rodada é de melhor esforço, pelo desenho fail-closed da #171: passado o limite do Worker, um fetch lança e a rodada não grava
- * #36 nada. A ordem de tasksFor decide qual tarefa passa fome primeiro: as duas da #4 (a leitura e a cobrança) são as últimas.
+ * #36 A rodada é de melhor esforço, pelo desenho fail-closed da #171: passado o limite do Worker, todo fetch seguinte lança: a chave em
+ * #36 curso e as que vêm depois dela não gravam nada, as anteriores (de qualquer tarefa) já gravaram, e a regra decide sozinha o que ficou
+ * #36 sem sugestão. A ordem de tasksFor decide qual tarefa passa fome primeiro: as duas da #4 (a leitura e a cobrança) são as últimas.
  */
 export const CRON_LIMIT = 2;
 
