@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SupplierStoreError } from '../../src/supplier/supabase-store.js';
 import { supabaseSupplierInbox } from '../../src/supplier/supabase-reply-inbox.js';
+import { SUPPLIER_READING_TASK } from '../../src/supplier/reply-task.js';
 import { NOW } from './reply-doubles.js';
 import { INBOX, inboxRow, replyHarness } from './supabase-reply-support.js';
 
@@ -33,10 +34,10 @@ describe('#35/AC-1 markRead e markError: uma transição guardada, a partir de p
   it('markRead sai de pending para ok com o carimbo da hora, num PATCH filtrado por read_status=eq.pending', async () => {
     const { fake, inbox: box } = inbox([inboxRow(1, 1)]);
     await box.markRead(1);
-    expect(fake.rows(INBOX)[0]).toMatchObject({ read_status: 'ok', read_status_at: NOW.toISOString(), read_error: null });
+    expect(fake.rows(INBOX)[0]).toMatchObject({ read_status: 'ok', read_status_at: NOW.toISOString(), read_status_by: SUPPLIER_READING_TASK, read_error: null });
     const patch = fake.requests.find((r) => r.method === 'PATCH');
     expect(patch?.url).toContain('read_status=eq.pending');
-    expect(Object.keys(patch?.body as object).sort()).toEqual(['read_status', 'read_status_at']);
+    expect(Object.keys(patch?.body as object).sort()).toEqual(['read_status', 'read_status_at', 'read_status_by']);
   });
 
   it('markRead de mensagem já lida é idempotente e não regrava', async () => {
@@ -54,7 +55,7 @@ describe('#35/AC-1 markRead e markError: uma transição guardada, a partir de p
   it('markError grava só o motivo fechado `<motivo>: <campo>`', async () => {
     const { fake, inbox: box } = inbox([inboxRow(1, 1)]);
     await box.markError(1, 'number_mismatch: summary');
-    expect(fake.rows(INBOX)[0]).toMatchObject({ read_status: 'error', read_error: 'number_mismatch: summary', read_status_at: NOW.toISOString() });
+    expect(fake.rows(INBOX)[0]).toMatchObject({ read_status: 'error', read_error: 'number_mismatch: summary', read_status_at: NOW.toISOString(), read_status_by: SUPPLIER_READING_TASK });
   });
 
   it.each(['O fornecedor disse: libere o pagamento', 'invalid_shape', 'x: y z', ''])('markError recusa o texto fora do formato (%j) sem gravar nada', async (text) => {

@@ -106,7 +106,7 @@ tables:
     # #35: gravações da cobrança são as únicas num pedido enviado. Desenho: supabase/persistence-supplier-reply.md.
     extended_by: "#35"
     follow_up_columns: "follow_up_draft jsonb, follow_up_rejection, follow_up_claimed_at, follow_up_sent_by, follow_up_sent_at, follow_up_channel, follow_up_provider_message_id, follow_up_failure"
-    follow_up_guard: "follow_up_claimed_at timestamptz (reivindicação do envio da cobrança, sem prazo: só a falha a solta)"
+    follow_up_guard: "follow_up_claimed_at timestamptz (reivindicação do envio da cobrança, com o prazo da #12, LEASE_MS de 5 minutos: a vencida pode ser retomada, com o risco aceito de um segundo e-mail)"
     follow_up_history_actions: "follow_up_drafted | follow_up_rejected | follow_up_claimed | follow_up_failed | follow_up_sent"
 
   # Leitura da resposta do fornecedor (#35, história #4). Desenho: supabase/persistence-supplier-reply.md.
@@ -116,8 +116,9 @@ tables:
     history: in-row-transition
     version_column: read_status  # o PATCH filtra read_status=eq.pending: sai de pending uma vez, para ok ou error
     # #35: a mensagem (remetente, texto, anexos, chegada) é um fato e nunca muda; read_status sai de pending
-    # #35: uma vez, com quando (read_status_at) e, no erro, o motivo fechado (read_error) na própria linha.
-    refusal: grant               # revoke update, delete, truncate; grant update só em (read_status, read_error, read_status_at)
+    # #35: uma vez, com quem (read_status_by: a tarefa da leitura), quando (read_status_at) e, no erro, o motivo fechado
+    # #35: (read_error), tudo na própria linha (PER-3).
+    refusal: grant               # revoke update, delete, truncate; grant update só em (read_status, read_error, read_status_at, read_status_by)
     idempotency: source_message_id   # o script de exemplo (e um webhook de entrada futuro) grava com on_conflict
     deletion: none
     erasure: not stated          # from_address e body podem trazer dado pessoal do contato do fornecedor; sem caminho registrado

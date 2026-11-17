@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SupplierStoreError } from '../../src/supplier/supabase-store.js';
+import { LEASE_MS, SupplierStoreError } from '../../src/supplier/supabase-store.js';
 import { supabaseSupplierInbox } from '../../src/supplier/supabase-reply-inbox.js';
 import { supabaseReplyRequestStore } from '../../src/supplier/supabase-reply-store.js';
 import { returnNote } from '../domain/supplier-request-fixtures.js';
@@ -12,9 +12,9 @@ const TASK = 'supplier-follow-up-draft';
 const ANA = 'ana@jachegou.example';
 const STAMP = { by: ANA, at: new Date('2026-11-20T16:00:00Z'), channel: 'mock', providerMessageId: 'mock-9' } as const;
 
-const setup = (outbox: Record<string, unknown>[], extra: Record<string, Record<string, unknown>[]> = {}) => {
+const setup = (outbox: Record<string, unknown>[], extra: Record<string, Record<string, unknown>[]> = {}, now: Date = NOW) => {
   const h = replyHarness({ [OUTBOX]: outbox, ...extra });
-  return { ...h, store: supabaseReplyRequestStore(h.rest, { now: () => NOW }) };
+  return { ...h, store: supabaseReplyRequestStore(h.rest, { now: () => now }) };
 };
 
 const outboxRow = (fake: ReturnType<typeof replyHarness>['fake'], id = 1) => fake.rows(OUTBOX).find((r) => r.id === id) as Record<string, unknown>;
@@ -237,6 +237,23 @@ describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômi
     expect(results.sort()).toEqual([false, true]);
     expect(outboxRow(fake)).toMatchObject({ follow_up_claimed_at: NOW.toISOString(), version: 4 });
     expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_claimed', follow_up: { claimed: true } });
+  });
+
+  it('#35 a reivindicação tem prazo (o da #12): dentro dele volta false; vencida, é retomada', async () => {
+    const claimed = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString() };
+    const inside = setup([sentRow(1, claimed)], {}, new Date(NOW.getTime() + LEASE_MS - 1000));
+    expect(await inside.store.claimFollowUpSend(1, ANA)).toBe(false);
+    expect(outboxRow(inside.fake)).toMatchObject({ follow_up_claimed_at: NOW.toISOString(), version: 3 });
+    const later = new Date(NOW.getTime() + LEASE_MS + 1000);
+    const expired = setup([sentRow(1, claimed)], {}, later);
+    expect(await expired.store.claimFollowUpSend(1, ANA)).toBe(true);
+    expect(outboxRow(expired.fake)).toMatchObject({ follow_up_claimed_at: later.toISOString(), version: 4 });
+  });
+
+  it('#35 a reivindicação vencida de um envio que já saiu não é retomada: o carimbo impede o segundo e-mail', async () => {
+    const sent = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString(), follow_up_sent_by: ANA, follow_up_sent_at: NOW.toISOString(), follow_up_channel: 'mock', follow_up_provider_message_id: 'mock-9' };
+    const { store } = setup([sentRow(1, sent)], {}, new Date(NOW.getTime() + 10 * LEASE_MS));
+    expect(await store.claimFollowUpSend(1, ANA)).toBe(false);
   });
 
   it('o histórico leva quem reivindicou', async () => {

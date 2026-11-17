@@ -79,6 +79,7 @@ export const inboxRow = (id: number, requestId: number, over: Record<string, unk
   read_status: 'pending',
   read_error: null,
   read_status_at: null,
+  read_status_by: null,
   created_at: '2026-11-13T09:00:00Z',
   ...over,
 });

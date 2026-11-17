@@ -20,7 +20,9 @@ function compare(a: unknown, b: unknown): number {
   return x === y ? 0 : x < y ? -1 : 1;
 }
 
-/** #35 `order=a.desc.nullslast,b`: ordena as linhas como o PostgREST; o nulo vai por último (o fake não distingue nullsfirst). */
+/** #35 `order=a.desc.nullslast,b`: ordena as linhas como o PostgREST; o nulo vai por último (o fake não distingue nullsfirst).
+ * #35 Difere do PostgreSQL, que no DESC põe o nulo primeiro sem a cláusula: nenhum adaptador da #35 ordena DESC numa coluna anulável
+ * #35 sem `nullslast` explícito (READINGS_ORDER), então o fake e o banco concordam. Um adaptador novo que o faça deve dizer o nulo. */
 function sortRows(rows: Row[], order: string): Row[] {
   const specs = order.split(',').map((spec) => {
     const [column = '', ...modifiers] = spec.split('.');

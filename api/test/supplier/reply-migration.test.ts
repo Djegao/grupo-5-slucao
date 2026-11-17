@@ -32,9 +32,13 @@ describe('#35/AC-1 inbox_supplier_messages: a caixa de entrada mock', () => { //
     expect(t).toContain("(read_status = 'pending') = (read_status_at is null)");
     expect(t).toContain("(read_status = 'error') = (read_error is not null)");
   });
-  it('a mensagem é imutável: só as três colunas da transição podem ser atualizadas, e nada é apagado', () => { // ADR-002
+  it('a transição guarda quem a fez (PER-3): read_status_by, nulo só enquanto pendente', () => { // ADR-002
+    expect(t).toContain('read_status_by text');
+    expect(t).toContain("(read_status = 'pending') = (read_status_by is null)");
+  });
+  it('a mensagem é imutável: só as quatro colunas da transição podem ser atualizadas, e nada é apagado', () => { // ADR-002
     expect(flat).toContain('revoke update, delete, truncate on public.inbox_supplier_messages from anon, authenticated, service_role');
-    expect(flat).toContain('grant update (read_status, read_error, read_status_at) on public.inbox_supplier_messages to service_role');
+    expect(flat).toContain('grant update (read_status, read_error, read_status_at, read_status_by) on public.inbox_supplier_messages to service_role');
   });
   it('o índice parcial das pendentes serve a listagem', () => { // ADR-002
     expect(flat).toContain("create index inbox_supplier_messages_pending_idx on public.inbox_supplier_messages (id) where read_status = 'pending'");

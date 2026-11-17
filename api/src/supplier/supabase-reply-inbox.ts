@@ -1,6 +1,7 @@
 import { isInteger, isString, oneOf, parseRows, shaped, type Shape } from '../connectors/guards.js';
 import type { SupabaseRest } from '../connectors/supabase-rest.js';
 import type { Clock, InboxMessage, SupplierInbox } from './reply-ports.js';
+import { SUPPLIER_READING_TASK } from './reply-task.js';
 import { guarded, refused } from './supabase-reply-call.js';
 
 // #35: a caixa de entrada mock (inbox_supplier_messages), modo upsert-with-history/in-row-transition: a mensagem não muda e
@@ -39,7 +40,9 @@ export function supabaseSupplierInbox(rest: SupabaseRest, clock: Clock): Supplie
   /** #35: a transição guardada; com 0 linhas relê, e só a mensagem já no mesmo estado final é idempotente. */
   async function transition(id: number, operation: string, to: 'ok' | 'error', reason: string | null): Promise<void> {
     const at = clock.now().toISOString();
-    const body = to === 'ok' ? { read_status: 'ok', read_status_at: at } : { read_status: 'error', read_error: reason, read_status_at: at };
+    // #35 PER-3: quem fez a transição é a tarefa da leitura (não há ato humano aqui), gravada na própria linha com o quando.
+    const by = SUPPLIER_READING_TASK;
+    const body = to === 'ok' ? { read_status: 'ok', read_status_at: at, read_status_by: by } : { read_status: 'error', read_error: reason, read_status_at: at, read_status_by: by };
     const updated = await guarded(() => rest.update(TABLE, { id: `eq.${id}`, read_status: 'eq.pending' }, body));
     if (updated.length > 0) return;
     const [now] = await guarded(async () =>

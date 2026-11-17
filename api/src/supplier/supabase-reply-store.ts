@@ -4,6 +4,7 @@ import type { SupplierReading, SupplierRequestText } from '../domain/index.js';
 import { SUPPLIER_FOLLOW_UP_TASK } from './follow-up-task.js';
 import type { Clock, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
 import { guarded, pgCode, refused } from './supabase-reply-call.js';
+import { LEASE_MS } from './supabase-store.js';
 import { READINGS_TABLE, readingToRow } from './supabase-reply-reading.js';
 import {
   FOLLOW_UP_COLUMNS,
@@ -32,7 +33,17 @@ const SHORT_REASON = /^[a-z][a-z0-9_]{0,39}$/;
 const SENT = { status: 'eq.sent' } as const;
 /** #35/AC-3: a cobrança não se repete: só grava rascunho ou recusa quem ainda não tem nenhum dos dois. */
 const NO_TEXT = { ...SENT, follow_up_draft: 'is.null', follow_up_rejection: 'is.null' } as const;
-const CLAIMABLE = { ...SENT, follow_up_draft: 'not.is.null', follow_up_claimed_at: 'is.null', follow_up_sent_at: 'is.null' } as const;
+/**
+ * #35: a reivindicação do envio tem o prazo da #12 (`LEASE_MS`, o do `send_claim`): sem reivindicação, ou com uma mais velha que o
+ * #35: prazo, o envio pode ser reivindicado de novo. Risco aceito: se o processo que a perdeu chegou a enviar e morreu antes de
+ * #35: gravar o carimbo, o segundo e-mail sai. Com o carimbo gravado (`follow_up_sent_at`) a reivindicação nunca vence.
+ */
+const claimable = (at: Date): Filters => ({
+  ...SENT,
+  follow_up_draft: 'not.is.null',
+  follow_up_sent_at: 'is.null',
+  or: `(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.${new Date(at.getTime() - LEASE_MS).toISOString()})`,
+});
 const CLAIMED = { ...SENT, follow_up_claimed_at: 'not.is.null', follow_up_sent_at: 'is.null' } as const;
 
 type WriteRow = FollowUpColumns & { id: number; version: number; history: unknown[] };
@@ -173,7 +184,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
 
     async claimFollowUpSend(id, by) {
       const at = clock.now();
-      const change: FollowUpChange = { action: 'follow_up_claimed', by, at, guard: CLAIMABLE, columns: { follow_up_claimed_at: at.toISOString() } };
+      const change: FollowUpChange = { action: 'follow_up_claimed', by, at, guard: claimable(at), columns: { follow_up_claimed_at: at.toISOString() } };
       return (await writeFollowUp(id, change)) === 'ok';
     },
 

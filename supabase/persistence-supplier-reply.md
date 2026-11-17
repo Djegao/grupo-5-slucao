@@ -39,7 +39,7 @@ O que a cobrança perde por não ver a leitura na mesma linha: a reivindicação
 
 | Tabela | Modo | Por quê: fato ou entidade editada | Histórico: forma e lugar | Versão | Inquilino |
 |---|---|---|---|---|---|
-| `inbox_supplier_messages` (nova) | upsert-with-history, `in-row-transition` | a mensagem (remetente, texto, anexos, chegada) é um fato que nunca muda; `read_status` sai de `pending` uma vez, para `ok` ou `error` | na própria linha: quando (`read_status_at`) e, no erro, o motivo fechado (`read_error`); o estado anterior é sempre `pending` | `read_status` (o `PATCH` filtra `read_status=eq.pending`) | nenhum |
+| `inbox_supplier_messages` (nova) | upsert-with-history, `in-row-transition` | a mensagem (remetente, texto, anexos, chegada) é um fato que nunca muda; `read_status` sai de `pending` uma vez, para `ok` ou `error` | na própria linha: quem (`read_status_by`, a tarefa da leitura), quando (`read_status_at`) e, no erro, o motivo fechado (`read_error`); o estado anterior é sempre `pending` | `read_status` (o `PATCH` filtra `read_status=eq.pending`) | nenhum |
 | `supplier_reply_readings` (nova) | append-only | fato: a mensagem M foi lida assim, ou o prazo venceu sem resposta | nenhum: o log é a tabela; `UPDATE`/`DELETE` recusados por grant | n/a | nenhum |
 | `outbox_supplier_emails` (#12, só colunas `follow_up_*`) | upsert-with-history (mantido) | a cobrança é editada pelo ciclo do envio | `history jsonb` da #12; cada gravação da cobrança acrescenta uma entrada no mesmo `PATCH` | `version` (#12) | nenhum |
 
@@ -54,11 +54,12 @@ O que a cobrança perde por não ver a leitura na mesma linha: a reivindicação
 - `received_at timestamptz not null default now()`: quando chegou; o script grava a hora que quiser.
 - `read_status text not null default 'pending'`, `check (read_status in ('pending', 'ok', 'error'))` `-- ADR-002`.
 - `read_error text`, `check (read_error is null or read_error ~ '^[a-z_]+: [a-z_]+$')`. O banco só aceita o motivo fechado `<motivo>: <campo>` que `reply-task.ts` monta. O texto do modelo ou do fornecedor não cabe nesse formato.
-- `read_status_at timestamptz`: quando saiu de `pending` (ADR-005). Não há `by`, porque a leitura não é ato humano.
+- `read_status_at timestamptz`: quando saiu de `pending` (ADR-005).
+- `read_status_by text`: quem fez a transição (PER-3). A leitura não é ato humano: grava o nome da tarefa (`SUPPLIER_READING_TASK`, `reply-task.ts`), nunca uma pessoa. Nulo só enquanto `pending`.
 - `created_at timestamptz not null default now()` (ADR-005).
 - `unique (id, request_id)` (`inbox_supplier_messages_id_request_key`): o alvo da FK composta das leituras.
-- Coerência: `(read_status = 'pending') = (read_status_at is null)`; `(read_status = 'error') = (read_error is not null)`.
-- Recusa: `revoke update, delete, truncate on public.inbox_supplier_messages from anon, authenticated, service_role;` e depois `grant update (read_status, read_error, read_status_at) on public.inbox_supplier_messages to service_role;`. O privilégio de coluna basta para o `PATCH` da transição. O privilégio de tabela vem revogado antes, porque "the table-level grant is unaffected by a column-level operation" ([GRANT, Notes](https://www.postgresql.org/docs/17/sql-grant.html)). A `service_role` tem `BYPASSRLS`, então quem recusa é o grant, como em `issued_return_notes` (#12).
+- Coerência: `(read_status = 'pending') = (read_status_at is null)`; `(read_status = 'pending') = (read_status_by is null)`; `(read_status = 'error') = (read_error is not null)`.
+- Recusa: `revoke update, delete, truncate on public.inbox_supplier_messages from anon, authenticated, service_role;` e depois `grant update (read_status, read_error, read_status_at, read_status_by) on public.inbox_supplier_messages to service_role;`. O privilégio de coluna basta para o `PATCH` da transição. O privilégio de tabela vem revogado antes, porque "the table-level grant is unaffected by a column-level operation" ([GRANT, Notes](https://www.postgresql.org/docs/17/sql-grant.html)). A `service_role` tem `BYPASSRLS`, então quem recusa é o grant, como em `issued_return_notes` (#12).
 
 ### `supplier_reply_readings`: colunas
 
@@ -86,7 +87,7 @@ Todas anuláveis e sem default, num único `alter table ... add column ..., add 
 
 - `follow_up_draft jsonb`, `check (follow_up_draft is null or jsonb_typeof(follow_up_draft) = 'object')`: o `SupplierRequestText` `{subject, body, asks}` na forma com `{{chave}}`, como o pedido guarda.
 - `follow_up_rejection text`, `check (follow_up_rejection is null or follow_up_rejection ~ '^[a-z_]+: [a-z_]+$')`: o motivo fechado da recusa do texto (#34/AC-3).
-- `follow_up_claimed_at timestamptz`: a reivindicação do envio. Não tem prazo: só a falha a solta (porta `recordFollowUpFailure`). Ela continua depois do envio para impedir um segundo e-mail.
+- `follow_up_claimed_at timestamptz`: a reivindicação do envio. Tem o prazo da #12 (`LEASE_MS`, 5 minutos, o mesmo do `send_claim`): o filtro do `PATCH` da reivindicação aceita a linha sem reivindicação ou com uma mais velha que o prazo (`follow_up_claimed_at.lt.<agora - prazo>`), e a falha (`recordFollowUpFailure`) também a solta. Depois do envio ela continua gravada e nunca vence, porque o filtro exige `follow_up_sent_at is null`: é ela, com o carimbo, que impede um segundo e-mail. **Risco aceito:** se o processo que perdeu a reivindicação chegou a enviar e morreu antes de gravar o carimbo, a retomada envia um segundo e-mail.
 - `follow_up_sent_by text`, `follow_up_sent_at timestamptz`, `follow_up_channel text check (follow_up_channel in ('mock', 'resend'))` `-- ADR-002`, `follow_up_provider_message_id text`: o carimbo do envio (ADR-005, ato humano).
 - `follow_up_failure text`, `check (follow_up_failure is null or follow_up_failure ~ '^[a-z][a-z0-9_]{0,39}$')`: o mesmo `SHORT_REASON` de `reply-use-cases.ts`. O texto do provedor não cabe nesse formato.
 - Coerência:
@@ -142,7 +143,7 @@ O embedding segue as FKs. A ordem do recurso embutido usa a sintaxe de "Embedded
 
 **QF1** `saveFollowUpDraft` / `recordFollowUpRejection`: guarda `status=eq.sent&follow_up_draft=is.null&follow_up_rejection=is.null`. Com 0 linhas, o adaptador relê. Se já há rascunho ou recusa, não grava e volta (#35/AC-3: a cobrança não se repete). Se a versão andou por outro motivo, lança.
 
-**QF2** `claimFollowUpSend`: guarda `status=eq.sent&follow_up_draft=not.is.null&follow_up_claimed_at=is.null&follow_up_sent_at=is.null`. Corpo: `follow_up_claimed_at`, a versão nova e a entrada `follow_up_claimed`. Uma linha devolvida dá `true`; 0 linhas dá `false`. No Read Committed, o segundo `UPDATE` da mesma linha espera o primeiro confirmar e reavalia o `WHERE` na versão nova ([Transaction Isolation, 13.2.1](https://www.postgresql.org/docs/17/transaction-iso.html), como na #12). Só um ganha.
+**QF2** `claimFollowUpSend`: guarda `status=eq.sent&follow_up_draft=not.is.null&follow_up_sent_at=is.null&or=(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.<agora - LEASE_MS>)` (o prazo da #12: a reivindicação vencida é retomada; ver o risco aceito nas colunas). Corpo: `follow_up_claimed_at`, a versão nova e a entrada `follow_up_claimed`. Uma linha devolvida dá `true`; 0 linhas dá `false`. No Read Committed, o segundo `UPDATE` da mesma linha espera o primeiro confirmar e reavalia o `WHERE` na versão nova ([Transaction Isolation, 13.2.1](https://www.postgresql.org/docs/17/transaction-iso.html), como na #12). Só um ganha.
 
 **QF3** `recordFollowUpFailure`: guarda `follow_up_claimed_at=not.is.null&follow_up_sent_at=is.null`. Corpo: `follow_up_claimed_at: null`, `follow_up_failure`, versão e histórico. **QF4** `recordFollowUpSent`: a mesma guarda. Corpo: o carimbo, `follow_up_failure: null`, a reivindicação mantida, versão e histórico. Em QF3 e QF4, 0 linhas lança: com a reivindicação de pé, nenhum outro escritor grava a linha, então a versão só anda se o dado estiver corrompido. Se QF4 falhar, a reivindicação fica presa e não sai segundo e-mail, como o caso de uso quer.
 
@@ -199,7 +200,7 @@ Nenhum. `strategies.tenancy.strategy: none`. As duas tabelas novas seguem a conv
 |---|---|---|
 | PER-1 | `inbox_supplier_messages` e `supplier_reply_readings` entram no registro; `outbox_supplier_emails` ganha `extended_by: "#35"` | nenhum |
 | PER-2 | `supplier_reply_readings`: o adaptador só faz `select` e `insert`; o `revoke` recusa o resto | nenhum |
-| PER-3 | QF1 a QF4 acrescentam a entrada de histórico no mesmo `PATCH`; a caixa guarda a transição na linha | o `by` da reivindicação e da falha só existe depois da mudança de porta abaixo |
+| PER-3 | QF1 a QF4 acrescentam a entrada de histórico no mesmo `PATCH`; a caixa guarda a transição na linha, com quem (`read_status_by`), quando e o motivo | o `by` da reivindicação e da falha só existe depois da mudança de porta abaixo. A caixa guarda o `by` (`read_status_by`) na própria linha |
 | PER-4 | `version=eq.<lida>` em QF1 a QF4; `read_status=eq.pending` em QI3 | o teste de versão velha roda contra o `FakePostgrest` |
 | PER-5 | nenhum `delete` nas três tabelas; `revoke delete` nas duas novas | nenhum |
 | PER-6 | a leitura atual vem de `currentReading`, sobre as leituras ordenadas; o teste a remonta | nenhum |
@@ -219,7 +220,7 @@ Nenhum. `strategies.tenancy.strategy: none`. As duas tabelas novas seguem a conv
 
 - **Texto da migração:**
   - o `revoke update, delete, truncate` em `supplier_reply_readings`;
-  - o `revoke` e o `grant update (read_status, read_error, read_status_at)` em `inbox_supplier_messages`;
+  - o `revoke` e o `grant update (read_status, read_error, read_status_at, read_status_by)` em `inbox_supplier_messages`;
   - os `check` `-- ADR-002`, os formatos fechados de `read_error`, `follow_up_rejection` e `follow_up_failure`;
   - o índice único parcial `where message_id is null` com o predicado exato;
   - `unique (message_id)`, a FK composta, RLS ligado nas duas tabelas novas.
@@ -229,10 +230,11 @@ Nenhum. `strategies.tenancy.strategy: none`. As duas tabelas novas seguem a conv
   - a mesma mensagem duas vezes deixa uma linha e devolve `recorded`.
 - **QR4:** a segunda varredura do mesmo pedido devolve `superseded` (o fake responde 409 `23505`). A varredura num pedido com leitura de mensagem grava e devolve `superseded`.
 - **QI3:** `markRead` de mensagem já `ok` é idempotente. `markError` com um texto fora do formato é recusado pelo banco (texto da migração) e nunca é gravado pelo adaptador.
-- **QF2:** duas reivindicações na mesma versão: uma ganha, a outra volta `false`. Depois de QF4, nova reivindicação volta `false`. Depois de QF3, volta `true`.
+- **QF2:** duas reivindicações na mesma versão: uma ganha, a outra volta `false`. Depois de QF4, nova reivindicação volta `false`. Depois de QF3, volta `true`. Dentro do prazo (`LEASE_MS`) a reivindicação de pé recusa, e vencida é retomada.
+- **Online** (`api/test/supplier/online-reply.test.ts`, pula sem as credenciais): o catálogo (`service_role` sem `UPDATE`/`DELETE` em `supplier_reply_readings` e só as colunas concedidas em `inbox_supplier_messages`), o `EXPLAIN` de QI1 e das leituras por pedido com os índices nomeados, e um `PATCH` de versão velha que atinge 0 linhas.
 - **QF1:** com rascunho ou recusa já gravados, não grava de novo (#35/AC-3).
 - **#4/AC-6 e #35/AC-2:** nenhuma requisição do fake fora das três tabelas, e nenhum `PATCH` em `outbox_supplier_emails` leva coluna fora de `follow_up_*`, `version`, `history` e `updated_at`.
-- **Script:** rodar duas vezes deixa quatro mensagens.
+- **Script** (`scripts/sample_supplier_replies.py` e `scripts/sample_supplier_replies_test.py`): rodar duas vezes deixa quatro mensagens.
 - **`FakePostgrest`:** o construtor confere se ele já entende embutido com ordem (`<tabela>.order=`), `gt.`, `not.is.null`, `limit` e o 409 `23505` de índice parcial, e estende o que faltar.
 
 ## Mudanças de porta (camada de casos de uso, #34)
@@ -246,7 +248,7 @@ Nenhum. `strategies.tenancy.strategy: none`. As duas tabelas novas seguem a conv
 - **Texto da #35.** O "What" e o AC-2 falam das "colunas da leitura do pedido". Com este desenho, a leitura mora em `supplier_reply_readings`, e só `follow_up_*` fica no pedido. Quem atualiza o texto da issue e o nome dos testes: o tech lead da #4 (Athena).
 - **Mudanças de porta acima.** Quem decide: o tech lead da #4. Quem faz: o construtor da camada.
 - **A cobrança e uma resposta lida no meio.** Uma resposta lida entre o `get` e a reivindicação deixa a cobrança sair (acima). A janela maior, a resposta que está na caixa e ainda não foi lida pelo Cron, existe em qualquer desenho. Quem decide se a reivindicação deve recusar quando há mensagem `pending` do pedido: o tech lead da #4. Isso seria uma consulta a mais antes da reivindicação, não uma guarda atômica.
-- **Reivindicação presa.** `follow_up_claimed_at` não tem prazo. Um processo que morre entre a reivindicação e QF3/QF4 prende a cobrança do pedido, e não há caminho na aplicação para soltá-la. Soltar é um passo do dono do banco (um `PATCH` com histórico), ou um prazo como o da #12 com o risco de segundo e-mail. Quem decide: o mantenedor.
+- **Reivindicação presa: resolvida.** A reivindicação tem o prazo da #12 (`LEASE_MS`, 5 minutos). Um processo que morre entre a reivindicação e QF3/QF4 prende a cobrança só até o prazo; depois, a reivindicação seguinte a retoma. O custo, aceito, é o segundo e-mail se o processo morto chegou a enviar antes de gravar o carimbo.
 - **Ordem dos ids da caixa.** "A mensagem mais nova vence" usa a ordem de inserção. Com um escritor (o script) ela é a ordem de chegada. Com um webhook concorrente, duas inserções podem confirmar fora da ordem dos ids. Quem decide se `received_at` passa a desempatar: a issue do webhook de entrada (backlog do épico).
 - **QR1b e o tamanho da URL.** `invoices?access_key=in.(...)` cresce com os pedidos. A alternativa é a FK `outbox_supplier_emails.invoice_access_key → invoices`. Quem decide: o mantenedor (é a tabela da #12).
 - **Apagamento (LGPD).** `from_address` e `body` da caixa podem trazer dado pessoal do contato do fornecedor, e `follow_up_sent_by` identifica uma pessoa. Não há caminho de apagamento registrado no projeto. Quem decide: o mantenedor.

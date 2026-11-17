@@ -3,8 +3,8 @@
 -- #35 O desenho e o modo de cada tabela: supabase/persistence-supplier-reply.md e supabase/persistence-modes.yaml.
 -- #35 Nenhuma tabela nova representa o pedido: as chaves estrangeiras apontam para outbox_supplier_emails (#12).
 
--- #4/AC-1 A mensagem da caixa de entrada mock: um fato que nunca muda. Só read_status, read_error e read_status_at saem de
--- #4/AC-1 `pending` uma vez, para `ok` ou `error` (a transição fica na própria linha, sem histórico à parte).
+-- #4/AC-1 A mensagem da caixa de entrada mock: um fato que nunca muda. Só read_status, read_error, read_status_at e read_status_by
+-- #4/AC-1 saem de `pending` uma vez, para `ok` ou `error` (a transição fica na própria linha, sem histórico à parte).
 create table public.inbox_supplier_messages (
   id bigint generated always as identity,
   request_id bigint not null,
@@ -16,6 +16,8 @@ create table public.inbox_supplier_messages (
   read_status text not null default 'pending',
   read_error text,
   read_status_at timestamptz,
+  -- #35 PER-3: quem fez a transição (o nome da tarefa da leitura, não uma pessoa); nulo só enquanto pendente.
+  read_status_by text,
   created_at timestamptz not null default now(),
   constraint inbox_supplier_messages_pkey primary key (id),
   constraint inbox_supplier_messages_request_fkey foreign key (request_id) references public.outbox_supplier_emails (id),
@@ -28,6 +30,7 @@ create table public.inbox_supplier_messages (
   -- #4/AC-1 O motivo é o fechado `<motivo>: <campo>` da regra; o texto do modelo ou do fornecedor não cabe neste formato.
   constraint inbox_supplier_messages_error_format_check check (read_error is null or read_error ~ '^[a-z_]+: [a-z_]+$'),
   constraint inbox_supplier_messages_pending_check check ((read_status = 'pending') = (read_status_at is null)),
+  constraint inbox_supplier_messages_by_check check ((read_status = 'pending') = (read_status_by is null)),
   constraint inbox_supplier_messages_error_check check ((read_status = 'error') = (read_error is not null))
 );
 alter table public.inbox_supplier_messages enable row level security;
@@ -37,7 +40,7 @@ create index inbox_supplier_messages_pending_idx on public.inbox_supplier_messag
 
 -- #35 service_role tem BYPASSRLS: o que recusa é o grant. O privilégio de tabela sai antes, porque o de coluna não o desfaz.
 revoke update, delete, truncate on public.inbox_supplier_messages from anon, authenticated, service_role;
-grant update (read_status, read_error, read_status_at) on public.inbox_supplier_messages to service_role;
+grant update (read_status, read_error, read_status_at, read_status_by) on public.inbox_supplier_messages to service_role;
 
 -- #4/AC-1 A leitura: um fato (a mensagem M foi lida assim, ou o prazo venceu sem resposta), num log append-only.
 -- #4/AC-1 A leitura atual do pedido é a de maior message_id; a da varredura (message_id nulo) só vale sem leitura de mensagem.
@@ -108,6 +111,8 @@ alter table public.outbox_supplier_emails
   ),
   add constraint outbox_supplier_emails_follow_up_text_check check (follow_up_draft is null or follow_up_rejection is null),
   add constraint outbox_supplier_emails_follow_up_claim_check check (follow_up_claimed_at is null or follow_up_draft is not null),
+  -- #35 A reivindicação tem o prazo da #12 (LEASE_MS, 5 minutos), aplicado pelo adaptador no filtro do PATCH: a vencida pode ser
+  -- #35 retomada. Risco aceito: se quem a perdeu chegou a enviar e morreu antes do carimbo, sai um segundo e-mail.
   -- #4/AC-4 O envio mantém a reivindicação (impede o segundo e-mail) e limpa a falha.
   add constraint outbox_supplier_emails_follow_up_kept_claim_check check (follow_up_sent_at is null or follow_up_claimed_at is not null),
   add constraint outbox_supplier_emails_follow_up_cleared_failure_check check (follow_up_sent_at is null or follow_up_failure is null),
