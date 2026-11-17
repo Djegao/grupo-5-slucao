@@ -1,12 +1,12 @@
 /**
- * O substituto de `@barte-ai-services/shell-kit/server`: a chamada que pede o contexto da moldura ao Shell.
+ * O substituto de `@barte-ai-services/shell-kit/server`: a chamada que pede o contexto da moldura ao Shell (#53).
  */
 import { CONTEXT_VERSION, type ShellContext } from "./index";
 
 export interface FetchShellContextOptions {
-  /** A origem do Shell. */
+  /** A origem do Shell. (#53) */
   shellUrl: string;
-  /** O cabeçalho `cookie` da pessoa, quando a chamada vem do servidor; no navegador o cookie vai sozinho. */
+  /** O cabeçalho `cookie` da pessoa, quando a chamada vem do servidor; no navegador o cookie vai sozinho. (#53) */
   cookie: string;
 }
 
@@ -17,7 +17,26 @@ export async function fetchShellContext({ shellUrl, cookie }: FetchShellContextO
     headers: cookie ? { cookie } : {},
   });
   if (!response.ok) throw new Error(`O Shell respondeu ${response.status}`);
-  const context = (await response.json()) as ShellContext;
-  if (context.version !== CONTEXT_VERSION) throw new Error("O Shell mandou uma versão de contexto desconhecida");
-  return context;
+  const body: unknown = await response.json();
+  if (!isObject(body)) throw new Error("O Shell mandou um contexto fora da forma conhecida");
+  if (body.version !== CONTEXT_VERSION) throw new Error("O Shell mandou uma versão de contexto desconhecida");
+  if (!isShellContext(body)) throw new Error("O Shell mandou um contexto fora da forma conhecida");
+  return body;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Confere só o que a tela lê do contexto; o resto passa como veio (#53). */
+function isShellContext(body: Record<string, unknown>): body is Record<string, unknown> & ShellContext {
+  const { user, brand, navigation, account_menu, administration } = body;
+  return (
+    isObject(user) &&
+    typeof user.name === "string" &&
+    isObject(brand) &&
+    Array.isArray(navigation) &&
+    Array.isArray(account_menu) &&
+    Array.isArray(administration)
+  );
 }
