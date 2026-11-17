@@ -8,6 +8,8 @@ import {
   type ReturnNoteDraft,
 } from '../domain/index.js';
 import type { RequestRecord, SourceInvoice } from '../supplier/ports.js';
+import type { ReplyRequest } from '../supplier/reply-ports.js';
+import { followUpOf, readingOf, type WireFollowUp, type WireReading } from './supplier-reply-view.js';
 
 export type WireMoney = { readonly text: string };
 
@@ -34,12 +36,16 @@ type WireContent = {
 export type WireRequest =
   | { readonly status: 'writing' }
   | ({ readonly status: 'draft' } & WireContent) // ADR-002
-  | ({ readonly status: 'sent'; readonly sentBy: string | null; readonly sentAt: string | null } & WireContent) // ADR-002
+  // #36: o pedido enviado ganha a leitura da resposta (#4) e a cobrança; os campos da #13 ficam como estavam.
+  | ({ readonly status: 'sent'; readonly sentBy: string | null; readonly sentAt: string | null; readonly reading: WireReading | null; readonly followUp: WireFollowUp } & WireContent) // ADR-002
   | ({ readonly status: 'send_failed'; readonly failure: string } & WireContent) // ADR-002
   | { readonly status: 'discarded'; readonly discardedAt: string | null; readonly discardedBy: string | null } // ADR-002
   | { readonly status: 'failed'; readonly failure: 'number_mismatch' | 'invalid_shape' };
 
 export type ViewResult = { readonly ok: true; readonly view: WireRequest } | { readonly ok: false; readonly reason: 'source_missing' | 'text_invalid' };
+
+/** #36: o pedido enviado sem a leitura da #35 à mão (não deve ocorrer): a cobrança vazia. */
+const NO_FOLLOW_UP: WireFollowUp = { drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null };
 
 /** #13: o dinheiro em reais, em texto pt-BR, feito no servidor a partir do valor da nota. */
 const money = (reais: number): WireMoney => ({ text: Money.fromReais(reais).toString() });
@@ -71,7 +77,7 @@ function agentFailure(reason: string | null): 'number_mismatch' | 'invalid_shape
 const bornDiscarded = (record: RequestRecord): boolean => record.request.status === 'discarded' && record.request.subject === ''; // ADR-002
 
 /** #13: monta a visão; sem a nota de origem (e do e-mail do fornecedor) ou com texto que já não confere, diz por quê. */
-export function viewOf(record: RequestRecord, source: SourceInvoice | null): ViewResult {
+export function viewOf(record: RequestRecord, source: SourceInvoice | null, reply: ReplyRequest | null = null): ViewResult {
   const { request } = record;
   if (request.status === 'discarded') { // ADR-002
     if (bornDiscarded(record)) return { ok: true, view: { status: 'failed', failure: agentFailure(request.discardReason) } };
@@ -92,7 +98,8 @@ export function viewOf(record: RequestRecord, source: SourceInvoice | null): Vie
     ...(issued === null ? {} : { attachment: { name: `${issued.noteId}.json`, url: noteUrl(request.invoiceAccessKey) } }),
   };
   if (request.status === 'sent') { // ADR-002
-    return { ok: true, view: { status: 'sent', sentBy: record.audit?.sentBy ?? null, sentAt: record.audit?.sentAt ?? null, ...content } }; // ADR-002
+    const sent = { sentBy: record.audit?.sentBy ?? null, sentAt: record.audit?.sentAt ?? null };
+    return { ok: true, view: { status: 'sent', ...sent, reading: readingOf(reply?.reading ?? null), followUp: reply === null ? NO_FOLLOW_UP : followUpOf(reply), ...content } }; // ADR-002
   }
   if (request.status === 'send_failed') { // ADR-002
     return { ok: true, view: { status: 'send_failed', failure: request.sendFailureReason ?? 'send_failed', ...content } }; // ADR-002

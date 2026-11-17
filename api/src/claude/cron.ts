@@ -10,15 +10,21 @@ import { runTasks, type RunResult } from './runner.js';
 import { tasksFor } from './tasks/index.js';
 
 /**
- * #171 Pedidos por tarefa a cada rodada. Cada pedido custa 2 subrequests (a Messages API e o upsert) e a rodada
- * lê umas 7 vezes antes: 2 tarefas × 5 × 2 + 7 = 27, dentro dos 50 do plano gratuito. A rodada vai depois da captura.
- * #12 A tarefa do rascunho do pedido ao fornecedor tem limite próprio de 2 (`SUPPLIER_DRAFT_LIMIT`). Conta dela: leituras
- * #12 4 (claude_suggestions, a fila, as notas de origem da fila e os pedidos abertos só dessas notas, numa leitura) e, por pedido,
- * #12 5 (a nota de origem e o fornecedor, a Messages API, o insert do pedido e o upsert da sugestão; a fila e o pedido aberto
- * #12 não são relidos). 4 + 2 × 5 = 14.
- * #12 Rodada no pior caso, com as outras duas no limite delas: 27 + 14 = 41, dentro dos 50 e sem crescer com as devoluções pendentes.
+ * #171 Teto de pedidos por tarefa a cada rodada: vale o menor entre ele e o limite da própria tarefa (runner.ts). Hoje as tarefas
+ * #36 trazem o limite delas (api/src/claude/tasks/index.ts e api/src/supplier/draft-task.ts) e o teto só protege uma tarefa nova sem limite.
+ * #36 Conta de subrequests, com a fila cheia de cada tarefa e cada uma no limite dela (PostgREST + Messages API), medida por
+ * #36 api/test/claude/budget.test.ts sobre tasksFor de verdade:
+ * #36   casamento de descrição (limite 1): 5 + 1 = 6; ordem provável (limite 1): 11 + 1 = 12; rascunho do #12 (limite 2): 12 + 2 = 14;
+ * #36   leitura da resposta (#4, limite 1): 11 + 1 = 12; rascunho da cobrança (#4, limite 1): 8 + 1 = 9; a rodada: 53.
+ * #36   varredura do prazo (SUPPLIER_SWEEP_PER_ROUND = 1, api/src/cron/supplier-sweep.ts): 4. Total medido: 57.
+ * #36 Os 50 do plano gratuito contam só a rodada do Claude e a varredura, não a invocação inteira: a captura, proposeChecked, as
+ * #36 publicações e as notas de devolução gastam subrequests antes (api/src/cron/tick.ts, runRound). O Worker é tratado como o plano
+ * #36 gratuito (50 subrequests): a medida de 57 passa desse limite, e o teste a registra como lacuna; trazer a rodada inteira a 50 é da #48 (Cron dentro de 50 subrequests).
+ * #36 A rodada é de melhor esforço, pelo desenho fail-closed da #171: passado o limite do Worker, todo fetch seguinte lança: a chave em
+ * #36 curso e as que vêm depois dela não gravam nada, as anteriores (de qualquer tarefa) já gravaram, e a regra decide sozinha o que ficou
+ * #36 sem sugestão. A ordem de tasksFor decide qual tarefa passa fome primeiro: as duas da #4 (a leitura e a cobrança) vêm antes da ordem provável e do rascunho do #12, que são as últimas.
  */
-export const CRON_LIMIT = 5;
+export const CRON_LIMIT = 2;
 
 /** #171 Orçamento da rodada: o Claude é periférico e a captura é o caminho crítico, então a rodada para cedo. */
 export const ROUND_BUDGET_MS = 2 * 60_000;

@@ -22,6 +22,20 @@ describe('#34/AC-3 (#4/AC-2): a varredura do prazo vira no_reply o pedido enviad
     expect(store.rows.get(7)?.reading).toMatchObject({ replyOutcome: 'no_reply', nextStep: 'follow_up' });
   });
 
+  it('com um teto, marca só os primeiros atrasados e a chamada seguinte marca o próximo', async () => {
+    const { deps, store } = parts([replyRequest(7), replyRequest(8), replyRequest(9)]);
+    const useCases = createReplyUseCases(deps);
+    expect(await useCases.sweepOverdue(2)).toEqual({ marked: [7, 8] });
+    expect(await useCases.sweepOverdue(2)).toEqual({ marked: [9] });
+    expect(store.calls.map((c) => c.op)).toEqual(['recordReading', 'recordReading', 'recordReading']);
+  });
+
+  it('com teto 0 não marca nada', async () => {
+    const { deps, store } = parts([replyRequest(7)]);
+    expect(await createReplyUseCases(deps).sweepOverdue(0)).toEqual({ marked: [] });
+    expect(store.calls).toEqual([]);
+  });
+
   it('no dia do prazo ainda está no prazo, e pedido que não foi enviado fica como está', async () => {
     const { deps, store } = parts([replyRequest(7, { dueOn: TODAY }), replyRequest(8, { status: 'draft' })]);
     expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [] });

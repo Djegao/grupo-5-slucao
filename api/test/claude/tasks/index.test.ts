@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { runClaudeRound } from '../../../src/claude/cron.js';
+import { CRON_LIMIT, runClaudeRound } from '../../../src/claude/cron.js';
+import { MAX_PER_RUN } from '../../../src/claude/runner.js';
 import { tasksFor } from '../../../src/claude/tasks/index.js';
 import type { Db } from '../../../src/claude/db.js';
+import { PROBABLE_ORDER_TASK } from '../../../src/connectors/probable-order-suggestions.js';
 import { SUPPLIER_DRAFT_TASK, type SupplierDraftInput } from '../../../src/supplier/draft-task.js';
 import { GOOD_TEXT, SUPPLIER_EMAIL, draftInput, fakeAsk } from '../../supplier/doubles.js';
 import { harness, invoiceRow, queueRow, supplierRow } from '../../supplier/supabase-support.js';
@@ -45,5 +47,38 @@ describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude'
     expect(round.ran).toBe(false);
     expect(fake.requests).toEqual([]);
     expect(fake.rows('outbox_supplier_emails')).toEqual([]);
+  });
+});
+
+describe('#36/AC-4 o teto efetivo de cada tarefa numa rodada do Cron é o menor entre o da tarefa e o da rodada', () => {
+  it('#36/AC-4: a conta de subrequests de api/src/claude/cron.ts vale: 1, 1, 2, 1, 1', () => {
+    const { rest } = harness();
+    const effective = Object.fromEntries(tasksFor(rest).map((t) => [t.name, Math.min(t.limit ?? MAX_PER_RUN, CRON_LIMIT)]));
+    expect(effective).toEqual({
+      'description-match': 1,
+      [PROBABLE_ORDER_TASK]: 1,
+      [SUPPLIER_DRAFT_TASK]: 2,
+      'supplier-reply-reading': 1,
+      'supplier-follow-up-draft': 1,
+    });
+  });
+
+  it('#36/AC-4: o casamento de descrição e a ordem provável têm limite próprio de 1, e a rodada é só um teto de 2', () => {
+    const { rest } = harness();
+    const byName = new Map(tasksFor(rest).map((t) => [t.name, t]));
+    expect(byName.get('description-match')?.limit).toBe(1);
+    expect(byName.get(PROBABLE_ORDER_TASK)?.limit).toBe(1);
+    expect(CRON_LIMIT).toBe(2);
+  });
+
+  it('#36/AC-4: as duas tarefas da #4 vêm antes da ordem provável, para não passarem fome primeiro quando o Worker esgota as subrequests', () => {
+    const { rest } = harness();
+    expect(tasksFor(rest).map((t) => t.name)).toEqual([
+      'description-match',
+      'supplier-reply-reading',
+      'supplier-follow-up-draft',
+      PROBABLE_ORDER_TASK,
+      SUPPLIER_DRAFT_TASK,
+    ]);
   });
 });
