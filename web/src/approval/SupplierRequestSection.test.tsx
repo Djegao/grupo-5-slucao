@@ -12,7 +12,7 @@ import type { SupplierRequestPort } from "./supplier-request-state";
 const KEY = "35261100000000000000550010000080001000080001";
 const VIEWER = "ana@jachegou.test";
 const SENT_AT = "2026-11-15T13:40:00Z";
-const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução", body: "Na NF 20046 veio item trocado." };
+const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução", body: "Na NF 20046 veio item trocado.", template: "Na NF {{numero}} veio item trocado." };
 const note = { number: "ND-0012", lines: [], total: { text: "R$ 2.463,20" } };
 const draft: SupplierRequestView = { status: "draft", returnNote: note, email };
 const t = texts.supplierRequest;
@@ -34,7 +34,7 @@ function port(initial: SupplierRequestView | null, over: Partial<SupplierRequest
     resend: vi.fn(async () => ({ status: "sent", sentBy: VIEWER, sentAt: SENT_AT, returnNote: note, email }) as SupplierRequestView),
     discard: vi.fn(async () => ({ status: "discarded", discardedAt: SENT_AT }) as SupplierRequestView),
     redo: vi.fn(async () => ({ status: "writing" }) as SupplierRequestView),
-    saveText: vi.fn(async (_key: string, text: string) => ({ status: "draft", returnNote: note, email: { ...email, body: text } }) as SupplierRequestView),
+    saveTemplate: vi.fn(async (_key: string, template: string) => ({ status: "draft", returnNote: note, email: { ...email, body: template, template } }) as SupplierRequestView),
     ...over,
   };
 }
@@ -134,6 +134,17 @@ describe("#3 pedido ao fornecedor: emitir e enviar", () => {
     expect(region().textContent).not.toMatch(/Failed to fetch|interno/);
   });
 
+  it("#3/AC-4: o envio que estoura o prazo mostra o que o servidor concluiu, com a mensagem fixa e sem o texto do erro", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(draft).mockResolvedValue({ status: "sent", sentBy: VIEWER, sentAt: SENT_AT, returnNote: note, email });
+    const send = vi.fn(async () => Promise.reject(new ApiError(0, null, "prazo https://interno")));
+    show(port(draft, { load, send }));
+    await screen.findByRole("button", { name: t.actions.sendWithNote });
+    click(t.actions.sendWithNote);
+    expect(await screen.findByText(t.errors.timeout)).toBeTruthy();
+    expect(await screen.findByText(/Nota de devolução ND-0012 emitida e enviada/)).toBeTruthy();
+    expect(region().textContent).not.toMatch(/interno/);
+  });
+
   it("#3/AC-4: tentar de novo depois do erro limpa a mensagem anterior", async () => {
     const send = vi.fn<SupplierRequestPort["send"]>().mockRejectedValueOnce(new ApiError(409, null, "x"));
     send.mockResolvedValue({ status: "sent", sentBy: VIEWER, sentAt: SENT_AT, email });
@@ -147,14 +158,14 @@ describe("#3 pedido ao fornecedor: emitir e enviar", () => {
 });
 
 describe("#3 pedido ao fornecedor: envio falho e reenvio", () => {
-  const failed: SupplierRequestView = { status: "send_failed", failure: "caixa cheia", returnNote: note, email };
+  const failed: SupplierRequestView = { status: "send_failed", failure: "resend_unavailable", returnNote: note, email };
 
   it("#3/AC-5: o envio que falha mostra a nota emitida e Tentar enviar de novo", async () => {
     const p = port(draft, { send: vi.fn(async () => failed) });
     show(p);
     await screen.findByRole("button", { name: t.actions.sendWithNote });
     click(t.actions.sendWithNote);
-    expect(await screen.findByText(t.sendFailedWithNote("ND-0012", "caixa cheia"))).toBeTruthy();
+    expect(await screen.findByText(t.sendFailedWithNote("ND-0012", t.sendFailureReasons.resend_unavailable))).toBeTruthy();
     expect(button(t.actions.resend)).toBeTruthy();
   });
 
@@ -202,14 +213,14 @@ describe("#3 pedido ao fornecedor: editar só o texto", () => {
     fireEvent.change(screen.getByRole("textbox", { name: t.email.bodyLabel }), { target: { value: "Texto corrigido" } });
     click(t.actions.save);
     expect(await screen.findByText("Texto corrigido")).toBeTruthy();
-    expect(p.saveText).toHaveBeenCalledWith(KEY, "Texto corrigido");
+    expect(p.saveTemplate).toHaveBeenCalledWith(KEY, "Texto corrigido");
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(button(t.actions.sendWithNote).disabled).toBe(false);
   });
 
   it("#3/AC-6: durante o salvamento o principal diz Salvando… e tudo fica travado", async () => {
     const pending = deferred<SupplierRequestView>();
-    show(port(draft, { saveText: vi.fn(() => pending.promise) }));
+    show(port(draft, { saveTemplate: vi.fn(() => pending.promise) }));
     await screen.findByRole("button", { name: t.actions.edit });
     click(t.actions.edit);
     click(t.actions.save);
@@ -220,7 +231,7 @@ describe("#3 pedido ao fornecedor: editar só o texto", () => {
   });
 
   it("#3/AC-6: o servidor recusa o texto (422): o erro aparece e a edição segue aberta com o texto digitado", async () => {
-    const p = port(draft, { saveText: vi.fn(async () => Promise.reject(new ApiError(422, "numeros_divergem", "número 99 não confere"))) });
+    const p = port(draft, { saveTemplate: vi.fn(async () => Promise.reject(new ApiError(422, "numeros_divergem", "número 99 não confere"))) });
     show(p);
     await screen.findByRole("button", { name: t.actions.edit });
     click(t.actions.edit);
@@ -240,7 +251,7 @@ describe("#3 pedido ao fornecedor: editar só o texto", () => {
     click(t.actions.cancelEdit);
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByText("descartado")).toBeNull();
-    expect(p.saveText).not.toHaveBeenCalled();
+    expect(p.saveTemplate).not.toHaveBeenCalled();
   });
 });
 
@@ -267,9 +278,9 @@ describe("#3 pedido ao fornecedor: descartar e refazer", () => {
   });
 
   it("#3/AC-8: com o pedido que não foi possível preparar, Refazer volta a escrevendo", async () => {
-    const p = port({ status: "failed", failure: "sem divergência" });
+    const p = port({ status: "failed", failure: "number_mismatch" });
     show(p);
-    expect(await screen.findByText(t.notPrepared("sem divergência"))).toBeTruthy();
+    expect(await screen.findByText(t.notPrepared(t.notPreparedReasons.number_mismatch))).toBeTruthy();
     click(t.actions.redo);
     expect(await screen.findByText(t.writing)).toBeTruthy();
     expect(p.redo).toHaveBeenCalledWith(KEY);
