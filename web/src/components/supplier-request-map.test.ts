@@ -105,6 +105,23 @@ describe("#21 linhas e contagens do servidor", () => {
     }
   });
 
+  it("#5/AC-2: atendeu na fila 'precisa de você' ramifica pelo próximo passo: confirmar, responder ou cobrar", () => {
+    const outcome = (nextStep: ReadingDto["nextStep"]) => rowOf(dto({ reading: reading({ replyOutcome: "fulfilled", nextStep }) }), "needs_you");
+    expect(outcome("confirm_document").status).toBe("fulfilledToConfirm");
+    expect(outcome("answer_supplier").status).toBe("fulfilledToAnswer");
+    expect(outcome("follow_up").status).toBe("fulfilledToFollowUp");
+    for (const step of ["answer_supplier", "follow_up"] as const) expect(countByChip([outcome(step)]).needsYou).toBe(1);
+  });
+
+  it("#5/AC-2: o bloco da gaveta diz 'falta responder' e 'falta cobrar' nessas situações", () => {
+    const status = (nextStep: ReadingDto["nextStep"]) => {
+      const row = rowOf(dto({ reading: reading({ replyOutcome: "fulfilled", nextStep }) }), "needs_you");
+      return conversationOf(row, detail(), "2026-11-15").status;
+    };
+    expect(status("answer_supplier")).toBe("fulfilledToAnswer");
+    expect(status("follow_up")).toBe("fulfilledToFollowUp");
+  });
+
   it("#5/AC-2: o documento citado vai na situação 'atendeu: ND 881'", () => {
     const row = rowOf(dto({ reading: reading({ supplierDocument: "ND 881", nextStep: "confirm_document" }) }), "needs_you");
     expect(row).toMatchObject({ status: "fulfilledToConfirm", document: "ND 881" });

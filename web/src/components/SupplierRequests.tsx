@@ -8,7 +8,6 @@ import { SupplierRequestList } from "./SupplierRequestList";
 import {
   applyCharges,
   countByChip,
-  countsAfterCharges,
   INITIAL_STATE,
   screenReducer,
   visibleRows,
@@ -179,9 +178,9 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
     if (drawerState === "error") return <DrawerPending failed message={drawerError ?? drawerTexts.errors.unknown} onRetry={onDrawerRetry} />;
     const loaded = drawerState === "ready" ? conversationOf(row) : null;
     if (!loaded) return <DrawerPending failed={false} message={drawerTexts.loading} />;
-    // #5/AC-4 Pedido já cobrado nesta sessão: o bloco fica "Aguardando (cobrado)" e sem próximo passo (estado 9 do wireframe, #20).
+    // #5/AC-4 Pedido cobrado nesta sessão vale como o que o servidor já cobrou: atrasado lê "Atrasado (cobrado)", os demais mantêm o status, e nenhum tem próximo passo (#20).
     const conversation: SupplierConversationView = charged[row.id]
-      ? { ...loaded, status: "waitingCharged", reading: { ...loaded.reading, nextStep: null } }
+      ? { ...loaded, status: row.status === "late" ? "lateCharged" : loaded.status, reading: { ...loaded.reading, nextStep: null } }
       : loaded;
     const base = draftOf(row);
     return (
@@ -204,7 +203,7 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
       <SupplierRequestList
         state={state}
         filter={screen.filter}
-        counts={counts ? countsAfterCharges(counts, rows, charged) : countByChip(current)}
+        counts={counts ?? countByChip(current)}
         rows={visibleRows(current, screen.filter)}
         onFilterChange={(filter) => {
           dispatch({ type: "filter", filter });

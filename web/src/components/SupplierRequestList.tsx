@@ -22,6 +22,8 @@ const STATUS_TONE: Record<SupplierRowStatus, "waiting" | "positive" | "negative"
   waiting: "waiting",
   late: "negative",
   fulfilledToConfirm: "info",
+  fulfilledToAnswer: "info",
+  fulfilledToFollowUp: "info",
   fulfilled: "positive",
   partiallyFulfilled: "waiting",
   needsInformation: "info",

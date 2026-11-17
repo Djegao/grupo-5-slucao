@@ -352,6 +352,10 @@ export const texts = {
       /** #21 Cobrado pelo servidor e ainda atrasado nele: segue em Atrasados, sem "Cobrar" (#5/AC-4). */
       lateCharged: "Atrasado (cobrado)",
       fulfilledToConfirm: (document: string) => `Atendeu: ${document}`,
+      /** #21 Atendeu e o próximo passo da leitura é responder ao fornecedor (#5/AC-2). */
+      fulfilledToAnswer: "Atendeu, falta responder",
+      /** #21 Atendeu e o próximo passo da leitura é cobrar (#5/AC-2). */
+      fulfilledToFollowUp: "Atendeu, falta cobrar",
       fulfilled: "Atendeu",
       partiallyFulfilled: "Atendeu parcialmente",
       needsInformation: "Pediu informação",
@@ -386,6 +390,10 @@ export const texts = {
         /** #21 O servidor já enviou a cobrança e ainda conta o pedido atrasado: o chip é o dele, e a tela só avisa que foi cobrado. */
         lateCharged: "Atrasado (cobrado)",
         fulfilledToConfirm: "Atendeu, falta confirmar",
+        /** #21 Atendeu e o próximo passo da leitura é responder ao fornecedor (#5/AC-2). */
+        fulfilledToAnswer: "Atendeu, falta responder",
+        /** #21 Atendeu e o próximo passo da leitura é cobrar (#5/AC-2). */
+        fulfilledToFollowUp: "Atendeu, falta cobrar",
         fulfilled: "Atendeu",
         partiallyFulfilled: "Atendeu parcialmente",
         needsYou: "Precisa de você",

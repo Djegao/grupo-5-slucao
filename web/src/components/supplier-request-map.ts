@@ -74,7 +74,9 @@ function rowStatus(row: ReadingRowDto, filter: ReplyFilterDto): Situation {
     case "partially_fulfilled":
       return { status: "partiallyFulfilled" };
     default:
-      // #36 Atendeu com documento citado nunca fecha sozinho: fica para a pessoa confirmar.
+      // #5/AC-2 Atendeu nunca fecha sozinho (#36): o próximo passo da leitura diz o que falta, e a linha o diz em vez de sempre pedir confirmação.
+      if (row.reading?.nextStep === "answer_supplier") return { status: "fulfilledToAnswer" };
+      if (row.reading?.nextStep === "follow_up") return { status: "fulfilledToFollowUp" };
       return { status: "fulfilledToConfirm", document: row.reading?.supplierDocument ?? "—" };
   }
 }
@@ -109,6 +111,8 @@ const BLOCK_STATUS: Record<SupplierRequestRow["status"], SupplierBlockStatus> = 
   waiting: "waiting",
   late: "late",
   fulfilledToConfirm: "fulfilledToConfirm",
+  fulfilledToAnswer: "fulfilledToAnswer",
+  fulfilledToFollowUp: "fulfilledToFollowUp",
   fulfilled: "fulfilled",
   partiallyFulfilled: "partiallyFulfilled",
   needsInformation: "needsYou",

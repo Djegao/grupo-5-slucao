@@ -217,7 +217,7 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     expect(calls.some((call) => call.method === "POST")).toBe(false);
   });
 
-  it("#5/AC-4: 'Enviar cobrança' faz um POST em .../send, sem texto, e a linha cobrada passa a Aguardando com as contagens acertadas", async () => {
+  it("#5/AC-4: 'Enviar cobrança' faz um POST em .../send, sem texto, e a linha cobrada segue em Atrasados como 'Atrasado (cobrado)', sem 'Cobrar', com as contagens do servidor (#5/AC-2)", async () => {
     renderRoute();
     fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
     const row = (await screen.findByText("NF 59738")).closest("tr")!;
@@ -227,8 +227,11 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     expect(await screen.findByText(/Cobrança enviada por você/)).toBeTruthy();
     const posts = calls.filter((call) => call.method === "POST");
     expect(posts).toEqual([{ method: "POST", path: `/api/supplier-requests/${keyOf(1)}/send` }]);
-    expect(screen.getByRole("radio", { name: /^Atrasados/ }).textContent).toMatch(/1/);
-    expect(screen.getByRole("radio", { name: /^Aguardando/ }).textContent).toMatch(/2/);
+    const charged = (await screen.findByText("NF 59738")).closest("tr")!;
+    expect(within(charged).getByText("Atrasado (cobrado)")).toBeTruthy();
+    expect(within(charged).queryByRole("button", { name: "Cobrar" })).toBeNull();
+    expect(screen.getByRole("radio", { name: /^Atrasados/ }).textContent).toMatch(/2/);
+    expect(screen.getByRole("radio", { name: /^Aguardando/ }).textContent).toMatch(/1/);
   });
 
   it("#5/AC-4: a linha que o servidor já cobrou (followUp.sent) segue em Atrasados como 'Atrasado (cobrado)', sem 'Cobrar', e a gaveta não oferece cobrar de novo", async () => {

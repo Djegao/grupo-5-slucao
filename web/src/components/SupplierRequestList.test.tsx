@@ -123,6 +123,20 @@ describe("#19 SupplierRequestList", () => {
     expect(screen.getByText("(citada, falta confirmar)")).toBeTruthy();
   });
 
+  it("#5/AC-2: atendeu com próximo passo responder ou cobrar diz 'Atendeu, falta responder' e 'Atendeu, falta cobrar', sem a nota de documento", () => {
+    renderList({
+      filter: "all",
+      rows: [
+        { ...late, id: "e", invoiceNumber: "5", status: "fulfilledToAnswer" },
+        { ...late, id: "f", invoiceNumber: "6", status: "fulfilledToFollowUp" },
+      ],
+    });
+    expect(screen.getByText("Atendeu, falta responder")).toBeTruthy();
+    expect(screen.getByText("Atendeu, falta cobrar")).toBeTruthy();
+    expect(screen.queryByText("(citada, falta confirmar)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cobrar" })).toBeNull();
+  });
+
   it("#18: carregando mostra o aviso de carga e os chips sem contagem inventada", () => {
     renderList({ state: "loading", rows: [] });
     expect(screen.getByText("Carregando os pedidos ao fornecedor…")).toBeTruthy();

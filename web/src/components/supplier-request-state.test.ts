@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyCharges,
   countByChip,
-  countsAfterCharges,
   INITIAL_STATE,
   screenReducer,
   visibleRows,
@@ -18,7 +17,7 @@ function row(id: string, status: SupplierRowStatus, dueOn: string): SupplierRequ
   return status === "fulfilledToConfirm" ? { ...base, status, document: "ND 881" } : { ...base, status };
 }
 
-const ALL_STATUSES: SupplierRowStatus[] = ["waiting", "late", "fulfilledToConfirm", "fulfilled", "partiallyFulfilled", "needsInformation", "refused"];
+const ALL_STATUSES: SupplierRowStatus[] = ["waiting", "late", "fulfilledToConfirm", "fulfilledToAnswer", "fulfilledToFollowUp", "fulfilled", "partiallyFulfilled", "needsInformation", "refused"];
 const rows = ALL_STATUSES.map((status, index) => row(`r-${status}`, status, `2026-11-${String(20 - index).padStart(2, "0")}`));
 
 function run(actions: ScreenAction[], from: ScreenState = INITIAL_STATE): ScreenState {
@@ -174,37 +173,18 @@ describe("#20 a linha depois da cobrança", () => {
     expect(run([{ type: "openFollowUp", id: "r-late" }], closed)).toEqual(closed);
   });
 
-  it("#5/AC-2: a atrasada cobrada passa a Aguardando com o novo prazo e sai de Atrasados: 2 viram 1, Aguardando 1 vira 2 (Q7)", () => {
+  it("#5/AC-2: a atrasada cobrada nesta sessão segue atrasada, com o prazo que veio, marcada como cobrada, e as contagens não mudam (#5/AC-4)", () => {
     const input = [row("a", "late", "2026-11-12"), row("b", "late", "2026-11-14"), row("c", "waiting", "2026-11-20")];
     const after = applyCharges(input, { a: { dueOn: "2026-11-20", sentOn: "2026-11-15" } });
-    expect(after[0]).toEqual({ id: "a", invoiceNumber: "a", supplier: "F07 Limpeza", request: "Nota de devolução", amountCents: 1000, dueOn: "2026-11-20", status: "waiting" });
-    expect(countByChip(after)).toEqual({ waiting: 2, late: 1, fulfilled: 0, needsYou: 0 });
+    expect(after[0]).toEqual({ ...input[0], alreadyCharged: true });
+    expect(after[0]?.dueOn).toBe("2026-11-12");
+    expect(countByChip(after)).toEqual(countByChip(input));
     expect(after[1]).toBe(input[1]);
+    expect(after[2]).toBe(input[2]);
   });
 
   it("#5/AC-2: sem cobrança feita a lista volta como veio", () => {
     expect(applyCharges(rows, {})).toBe(rows);
-  });
-});
-
-describe("#21 contagens do servidor e cobranças da sessão", () => {
-  const server = { waiting: 1, fulfilled: 0, needsYou: 1, late: 2 };
-  const late = [row("a", "late", "2026-11-12"), row("b", "late", "2026-11-14")];
-
-  it("#5/AC-2: sem cobrança, as contagens são as do servidor, sem recontar as linhas", () => {
-    expect(countsAfterCharges(server, late, {})).toEqual(server);
-    expect(countsAfterCharges(server, [], {})).toEqual(server);
-  });
-
-  it("#5/AC-2: a linha cobrada sai de Atrasados e entra em Aguardando (Q7); a outra segue como o servidor contou", () => {
-    const charged = { a: { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
-    expect(countsAfterCharges(server, late, charged)).toEqual({ waiting: 2, fulfilled: 0, needsYou: 1, late: 1 });
-  });
-
-  it("#5/AC-2: a linha cobrada que já estava em Aguardando não muda nada, e a contagem nunca fica negativa", () => {
-    const charged = { w: { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
-    expect(countsAfterCharges(server, [row("w", "waiting", "2026-11-20")], charged)).toEqual(server);
-    expect(countsAfterCharges({ ...server, late: 0 }, late, { a: charged.w })).toEqual({ waiting: 2, fulfilled: 0, needsYou: 1, late: 0 });
   });
 });
 
@@ -214,8 +194,6 @@ describe("#21 cobranças que o servidor já fez", () => {
   it("#5/AC-4: a linha que o servidor já cobrou fica no chip dele: sem cobrança da sessão, nem a linha nem as contagens mudam", () => {
     expect(applyCharges([lateCharged], {})).toEqual([lateCharged]);
     expect(applyCharges([lateCharged], {})[0]?.status).toBe("late");
-    const server = { waiting: 0, fulfilled: 0, needsYou: 0, late: 1 };
-    expect(countsAfterCharges(server, [lateCharged], {})).toEqual(server);
     expect(visibleRows([lateCharged], "late")).toEqual([lateCharged]);
   });
 
@@ -223,7 +201,7 @@ describe("#21 cobranças que o servidor já fez", () => {
     const other = row("r-other", "late", "2026-11-12");
     const session = { "r-other": { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
     expect(applyCharges([lateCharged, other], session)[0]).toEqual(lateCharged);
-    expect(countsAfterCharges({ waiting: 0, fulfilled: 0, needsYou: 0, late: 2 }, [lateCharged, other], session)).toEqual({ waiting: 1, fulfilled: 0, needsYou: 0, late: 1 });
+    expect(applyCharges([lateCharged, other], session)[1]).toEqual({ ...other, alreadyCharged: true });
   });
 
   it("#5/AC-4: o envio feito leva quem enviou à fase enviado", () => {

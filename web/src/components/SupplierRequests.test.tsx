@@ -183,7 +183,7 @@ describe("#20 SupplierRequests: gaveta", () => {
 });
 
 describe("#20 SupplierRequests: cobrar", () => {
-  it("#5/AC-4: cenário: escolhe Atrasados, vê dois, cobra, edita o texto, envia e vê a cobrança enviada; a linha sai de Atrasados", async () => {
+  it("#5/AC-4: cenário: escolhe Atrasados, vê dois, cobra, edita o texto, envia e vê a cobrança enviada; a linha segue em Atrasados como 'Atrasado (cobrado)' (#5/AC-2)", async () => {
     const pending = deferred<SendResult>();
     const { send } = renderScreen({ send: vi.fn<Send>(() => pending.promise) });
     chooseLate();
@@ -205,10 +205,12 @@ describe("#20 SupplierRequests: cobrar", () => {
 
     pending.resolve(SENT);
     expect(await screen.findByText("Cobrança enviada por você em 15/11 às 10:12 · aguardando resposta até 20/11.")).toBeTruthy();
-    expect(screen.getByText("Aguardando (cobrado)")).toBeTruthy();
-    expect(chip(/^Atrasados/).textContent).toMatch(/1/);
-    expect(chip(/^Aguardando/).textContent).toMatch(/2/);
-    expect(within(screen.getByRole("table")).queryByText("NF 59738")).toBeNull();
+    // #5/AC-2 A linha cobrada vale como a que o servidor já cobrou: segue em Atrasados, com o prazo que veio, sem "Cobrar" (#21).
+    expect(within(rowOf("59738")).getByText("Atrasado (cobrado)")).toBeTruthy();
+    expect(within(rowOf("59738")).queryByRole("button", { name: "Cobrar" })).toBeNull();
+    expect(within(rowOf("59738")).getByText("14/11")).toBeTruthy();
+    expect(chip(/^Atrasados/).textContent).toMatch(/2/);
+    expect(chip(/^Aguardando/).textContent).toMatch(/1/);
   });
 
   it("#5/AC-4: editar mexe só no texto: para, assunto, prazo e anexo não viram campo", () => {
@@ -276,18 +278,18 @@ describe("#20 SupplierRequests: cobrar", () => {
     expect(chip(/^Atrasados/).textContent).toMatch(/2/);
   });
 
-  it("#5/AC-4: reabrir a linha cobrada mostra o bloco como 'Aguardando (cobrado)', sem novo rascunho", async () => {
+  it("#5/AC-4: reabrir a linha cobrada mostra o bloco como 'Atrasado (cobrado)' (#5/AC-2), sem novo rascunho", async () => {
     renderScreen();
     chooseLate();
     clickCobrar("59738");
     fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
     await screen.findByText(/Cobrança enviada por você/);
-    fireEvent.click(chip(/^Aguardando/));
     // #5/AC-4 Fecha a gaveta antes: `openRow` no id que já está aberto devolve o estado como está, e não reabriria nada.
     fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
     expect(screen.queryByRole("region", { name: "Conversa e leitura do pedido" })).toBeNull();
     fireEvent.click(rowOf("59738"));
-    expect(screen.getByText("Aguardando (cobrado)")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Conversa e leitura do pedido" });
+    expect(within(region).getByText("Atrasado (cobrado)")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
   });
 
@@ -297,7 +299,6 @@ describe("#20 SupplierRequests: cobrar", () => {
     clickCobrar("59738");
     fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
     await screen.findByText(/Cobrança enviada por você/);
-    fireEvent.click(chip(/^Aguardando/));
     // #5/AC-4 Fecha antes de reabrir, como no teste de reabrir a linha cobrada (#20).
     fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
     fireEvent.click(rowOf("59738"));
@@ -331,14 +332,14 @@ describe("#21 SupplierRequests: contagens e filtro do servidor, gaveta lida da A
     expect(onFilterChange).toHaveBeenLastCalledWith("all");
   });
 
-  it("#5/AC-4: depois de cobrar, as contagens do servidor se acertam só por essa cobrança: Atrasados 9 vira 8 e Aguardando 7 vira 8", async () => {
+  it("#5/AC-4: depois de cobrar, as contagens são as do servidor, sem acerto da sessão: Atrasados 9 e Aguardando 7 (#5/AC-2)", async () => {
     renderScreen({ counts: SERVER_COUNTS });
     chooseLate();
     clickCobrar("59738");
     fireEvent.click(await screen.findByRole("button", { name: "Enviar cobrança" }));
     await screen.findByText(/Cobrança enviada por você/);
-    expect(chip(/^Atrasados/).textContent).toMatch(/8/);
-    expect(chip(/^Aguardando/).textContent).toMatch(/8/);
+    expect(chip(/^Atrasados/).textContent).toMatch(/9/);
+    expect(chip(/^Aguardando/).textContent).toMatch(/7/);
   });
 
   it("#21: a gaveta avisa qual linha abriu e, ao fechar, nenhuma", () => {

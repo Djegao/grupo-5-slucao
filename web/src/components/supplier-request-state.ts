@@ -8,6 +8,8 @@ const CHIP_OF_STATUS: Record<SupplierRowStatus, SupplierFilter> = {
   waiting: "waiting",
   late: "late",
   fulfilledToConfirm: "needsYou",
+  fulfilledToAnswer: "needsYou",
+  fulfilledToFollowUp: "needsYou",
   fulfilled: "fulfilled",
   partiallyFulfilled: "needsYou",
   needsInformation: "needsYou",
@@ -19,26 +21,6 @@ export function countByChip(rows: SupplierRequestRow[]): Record<SupplierFilter, 
   const counts: Record<SupplierFilter, number> = { waiting: 0, fulfilled: 0, needsYou: 0, late: 0 };
   for (const row of rows) counts[CHIP_OF_STATUS[row.status]] += 1;
   return counts;
-}
-
-/**
- * #21 As contagens do servidor (#36), acertadas só pelo que esta sessão cobrou: a linha cobrada saiu do chip em que o servidor a contou e foi
- * para Aguardando (Q7). A linha que o servidor já cobrou (`alreadyCharged`) não entra aqui: fica no chip e na contagem em que ele a pôs.
- * `rows` são as linhas como vieram, antes de `applyCharges`.
- */
-export function countsAfterCharges(
-  counts: Record<SupplierFilter, number>,
-  rows: SupplierRequestRow[],
-  charged: Record<string, ChargedRequest>,
-): Record<SupplierFilter, number> {
-  const adjusted = { ...counts };
-  for (const row of rows) {
-    const from = CHIP_OF_STATUS[row.status];
-    if (!(row.id in charged) || from === "waiting") continue;
-    adjusted[from] = Math.max(0, adjusted[from] - 1);
-    adjusted.waiting += 1;
-  }
-  return adjusted;
 }
 
 /** #5/AC-1 As linhas do chip (todas em `all`), por prazo crescente (Q8); prazos iguais ficam na ordem recebida. */
@@ -57,15 +39,10 @@ export interface ChargedRequest {
   sentTime?: string;
 }
 
-/** #5/AC-2 A linha cobrada nesta sessão passa a Aguardando com o novo prazo e sai de Atrasados (Q7, estado 9 do wireframe); as demais ficam como vieram. */
+/** #5/AC-2 A linha cobrada nesta sessão vale como a que o servidor já cobrou: segue na situação e no prazo que veio, marcada `alreadyCharged` (sem "Cobrar", "Atrasado (cobrado)"); as demais ficam como vieram. */
 export function applyCharges(rows: SupplierRequestRow[], charged: Record<string, ChargedRequest>): SupplierRequestRow[] {
   if (Object.keys(charged).length === 0) return rows;
-  return rows.map((row): SupplierRequestRow => {
-    const charge = charged[row.id];
-    if (!charge) return row;
-    const { id, invoiceNumber, supplier, request, amountCents } = row;
-    return { id, invoiceNumber, supplier, request, amountCents, dueOn: charge.dueOn, status: "waiting" };
-  });
+  return rows.map((row): SupplierRequestRow => (charged[row.id] ? { ...row, alreadyCharged: true } : row));
 }
 
 /** #5/AC-4 O rascunho aberto: a fase, se o texto está liberado e o texto editado (`null` enquanto vale o do rascunho). */
