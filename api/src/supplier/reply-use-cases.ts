@@ -64,7 +64,7 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
   const text = validateRequestText(draft, catalogOf(request));
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
   // #34/AC-4: a reivindicação vem antes do e-mail; quem não a ganha não envia, e a que fica presa após o envio impede o segundo e-mail.
-  if (!(await deps.requests.claimFollowUpSend(id))) return { kind: 'conflict', reason: 'send_in_progress' };
+  if (!(await deps.requests.claimFollowUpSend(id, by))) return { kind: 'conflict', reason: 'send_in_progress' };
   const result = await dispatch(deps, id, {
     invoiceAccessKey: request.invoiceAccessKey,
     supplierId: request.note.supplierId,
@@ -75,7 +75,7 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
     dueOn: request.dueOn,
   });
   if (!result.ok) {
-    await deps.requests.recordFollowUpFailure(id, result.reason);
+    await deps.requests.recordFollowUpFailure(id, result.reason, by);
     return { kind: 'send_failed', reason: result.reason };
   }
   const stamp: FollowUpStamp = { by, at: deps.clock.now(), channel: result.channel, providerMessageId: result.providerMessageId };

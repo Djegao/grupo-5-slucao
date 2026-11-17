@@ -1,0 +1,359 @@
+import { describe, expect, it } from 'vitest';
+import { SupplierStoreError } from '../../src/supplier/supabase-store.js';
+import { supabaseSupplierInbox } from '../../src/supplier/supabase-reply-inbox.js';
+import { supabaseReplyRequestStore } from '../../src/supplier/supabase-reply-store.js';
+import { returnNote } from '../domain/supplier-request-fixtures.js';
+import { GOOD_FOLLOW_UP, NOW, noReply, reading } from './reply-doubles.js';
+import { INBOX, OUTBOX, READINGS, inboxRow, readingRow, replyHarness, sentRow } from './supabase-reply-support.js';
+
+// #35: o adaptador do pedido na leitura da resposta sobre o PostgREST falso: cada gravação é uma requisição, numa tabela.
+
+const TASK = 'supplier-follow-up-draft';
+const ANA = 'ana@jachegou.example';
+const STAMP = { by: ANA, at: new Date('2026-11-20T16:00:00Z'), channel: 'mock', providerMessageId: 'mock-9' } as const;
+
+const setup = (outbox: Record<string, unknown>[], extra: Record<string, Record<string, unknown>[]> = {}) => {
+  const h = replyHarness({ [OUTBOX]: outbox, ...extra });
+  return { ...h, store: supabaseReplyRequestStore(h.rest, { now: () => NOW }) };
+};
+
+const outboxRow = (fake: ReturnType<typeof replyHarness>['fake'], id = 1) => fake.rows(OUTBOX).find((r) => r.id === id) as Record<string, unknown>;
+const lastEntry = (row: Record<string, unknown>) => (row.history as Record<string, unknown>[]).at(-1) as Record<string, unknown>;
+
+describe('#35/AC-1 listSent: todo pedido enviado, com a leitura atual, a cobrança, a nota e o fornecedor', () => {
+  it('lê só os enviados, na ordem do id, e monta a leitura atual pela ordem das mensagens', async () => {
+    const { store } = setup(
+      [sentRow(2), sentRow(1), sentRow(3, { status: 'draft', sent_by: null, sent_at: null, channel: null, provider_message_id: null })],
+      { [READINGS]: [readingRow(1, 1, 5), readingRow(2, 1, 7), readingRow(3, 2, null)] },
+    );
+    const list = await store.listSent();
+    expect(list.map((r) => r.id)).toEqual([1, 2]);
+    expect(list[0]?.reading?.summary).toBe('Leitura da mensagem 7.');
+    expect(list[1]?.reading).toEqual(noReply());
+    expect(list[0]).toMatchObject({
+      invoiceNumber: '43894',
+      supplierName: 'Bebidas Rio Claro S.A.',
+      requestType: 'return_note',
+      to: 'compras@bebidas-rio-claro.example',
+      status: 'sent',
+      dueOn: '2026-11-17',
+      followUp: { draft: null, rejection: null, sent: null, failure: null },
+    });
+    expect(list[0]?.note.total).toBe(returnNote().total);
+  });
+
+  it('a leitura vem na mesma requisição do pedido, pelo embutido ordenado, e o número da nota na seguinte', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await store.listSent();
+    const urls = fake.requests.map((r) => decodeURIComponent(r.url));
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain('outbox_supplier_emails?');
+    expect(urls[0]).toContain('status=eq.sent');
+    expect(urls[0]).toContain('supplier_reply_readings!supplier_reply_readings_request_fkey(');
+    expect(urls[0]).toContain('supplier_reply_readings.order=message_id.desc.nullslast');
+    expect(urls[0]).toContain('kit_fornecedores(razao_social)');
+    expect(urls[1]).toContain('invoices?');
+    expect(urls[1]).toContain('access_key=in.(');
+  });
+
+  it('o estado da cobrança vem das colunas follow_up_*: rascunho, recusa, carimbo e falha', async () => {
+    const { store } = setup([
+      sentRow(1, { follow_up_draft: GOOD_FOLLOW_UP }),
+      sentRow(2, { follow_up_rejection: 'number_mismatch: body' }),
+      sentRow(3, {
+        follow_up_draft: GOOD_FOLLOW_UP,
+        follow_up_claimed_at: '2026-11-20T16:00:00Z',
+        follow_up_sent_by: ANA,
+        follow_up_sent_at: '2026-11-20T16:00:00Z',
+        follow_up_channel: 'mock',
+        follow_up_provider_message_id: 'mock-9',
+      }),
+      sentRow(4, { follow_up_draft: GOOD_FOLLOW_UP, follow_up_failure: 'mailbox_full' }),
+    ]);
+    const [a, b, c, d] = await store.listSent();
+    expect(a?.followUp).toMatchObject({ draft: GOOD_FOLLOW_UP, sent: null });
+    expect(b?.followUp).toMatchObject({ draft: null, rejection: 'number_mismatch: body' });
+    expect(c?.followUp.sent).toEqual({ by: ANA, at: new Date('2026-11-20T16:00:00Z'), channel: 'mock', providerMessageId: 'mock-9' });
+    expect(d?.followUp.failure).toBe('mailbox_full');
+  });
+
+  it('sem pedidos enviados, não pergunta pelas notas', async () => {
+    const { fake, store } = setup([]);
+    expect(await store.listSent()).toEqual([]);
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it('pedido sem a nota de origem na tabela invoices é dado corrompido: erro nomeado, não lista parcial', async () => {
+    const { store } = setup([sentRow(1, { invoice_access_key: '1'.repeat(44) })]);
+    await expect(store.listSent()).rejects.toThrow(/nota de origem/);
+  });
+
+  it('get lê o pedido de qualquer estado, com a leitura atual; o que não existe é null', async () => {
+    const { store } = setup([sentRow(1, { status: 'discarded', discard_reason: 'x', sent_by: null, sent_at: null, channel: null, provider_message_id: null })], { [READINGS]: [readingRow(1, 1, 2)] });
+    expect((await store.get(1))?.status).toBe('discarded');
+    expect((await store.get(1))?.reading?.summary).toBe('Leitura da mensagem 2.');
+    expect(await store.get(9)).toBeNull();
+  });
+});
+
+describe('#35/AC-1 recordReading: um fato novo por requisição; a mais nova vence pela ordem das mensagens', () => {
+  const withMessages = () => setup([sentRow(1)], { [INBOX]: [inboxRow(5, 1), inboxRow(7, 1), inboxRow(8, 1)] });
+
+  it('grava a leitura da mensagem e devolve recorded', async () => {
+    const { fake, store } = withMessages();
+    expect(await store.recordReading(1, reading({ summary: 'Da 5.' }), 5)).toBe('recorded');
+    expect(fake.rows(READINGS)).toHaveLength(1);
+    expect(fake.rows(READINGS)[0]).toMatchObject({ request_id: 1, message_id: 5, summary: 'Da 5.' });
+  });
+
+  it('a leitura da mensagem 5 depois da 7 é gravada no log e devolve superseded; a atual continua a da 7', async () => {
+    const { fake, store } = withMessages();
+    await store.recordReading(1, reading({ summary: 'Da 7.' }), 7);
+    expect(await store.recordReading(1, reading({ summary: 'Da 5.' }), 5)).toBe('superseded');
+    expect(fake.rows(READINGS)).toHaveLength(2);
+    expect((await store.get(1))?.reading?.summary).toBe('Da 7.');
+  });
+
+  it('a leitura de mensagem mais nova que a guardada troca a atual', async () => {
+    const { store } = withMessages();
+    await store.recordReading(1, reading({ summary: 'Da 5.' }), 5);
+    expect(await store.recordReading(1, reading({ summary: 'Da 8.' }), 8)).toBe('recorded');
+    expect((await store.get(1))?.reading?.summary).toBe('Da 8.');
+  });
+
+  it('a mesma mensagem lida duas vezes deixa uma linha, a primeira leitura, e devolve recorded', async () => {
+    const { fake, store } = withMessages();
+    await store.recordReading(1, reading({ summary: 'Primeira.' }), 5);
+    expect(await store.recordReading(1, reading({ summary: 'Segunda.' }), 5)).toBe('recorded');
+    expect(fake.rows(READINGS)).toHaveLength(1);
+    expect((await store.get(1))?.reading?.summary).toBe('Primeira.');
+  });
+
+  it('uma gravação é uma requisição POST com on_conflict=message_id e ignore-duplicates, sem ler antes', async () => {
+    const { fake, store } = withMessages();
+    fake.requests.length = 0;
+    await store.recordReading(1, reading(), 5);
+    const [post, ...rest] = fake.requests;
+    expect(post).toMatchObject({ method: 'POST' });
+    expect(post?.url).toContain('on_conflict=message_id');
+    expect(post?.headers.Prefer).toContain('resolution=ignore-duplicates');
+    expect(rest.every((r) => r.method === 'GET')).toBe(true);
+  });
+
+  it('mensagem de outro pedido ou pedido inexistente: o banco recusa (409 23503) e o adaptador lança, não finge superseded', async () => {
+    const { fake, store } = withMessages();
+    fake.failNext(READINGS, 'POST', 409, { code: '23503', message: 'viola a chave estrangeira' });
+    await expect(store.recordReading(1, reading(), 5)).rejects.toBeInstanceOf(SupplierStoreError);
+  });
+});
+
+describe('#35/AC-3 a varredura do prazo: um único no_reply por pedido, e a resposta tardia vence', () => {
+  it('grava o no_reply do pedido sem leitura e devolve recorded; a segunda varredura é superseded (409 23505 no índice parcial)', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    expect(await store.recordReading(1, noReply(), null)).toBe('recorded');
+    expect(await store.recordReading(1, noReply(), null)).toBe('superseded');
+    expect(fake.rows(READINGS)).toHaveLength(1);
+    expect(fake.rows(READINGS)[0]).toMatchObject({ message_id: null, reply_outcome: 'no_reply', next_step: 'follow_up' });
+  });
+
+  it('a varredura de um pedido que já tem leitura de mensagem é gravada e devolve superseded (não é a atual)', async () => {
+    const { store } = setup([sentRow(1)], { [INBOX]: [inboxRow(5, 1)], [READINGS]: [readingRow(1, 1, 5)] });
+    expect(await store.recordReading(1, noReply(), null)).toBe('superseded');
+    expect((await store.get(1))?.reading?.summary).toBe('Leitura da mensagem 5.');
+  });
+
+  it('a resposta tardia vence o no_reply da varredura (#34)', async () => {
+    const { store } = setup([sentRow(1)], { [INBOX]: [inboxRow(5, 1)] });
+    await store.recordReading(1, noReply(), null);
+    expect((await store.get(1))?.reading?.replyOutcome).toBe('no_reply');
+    expect(await store.recordReading(1, reading({ summary: 'Tardia.' }), 5)).toBe('recorded');
+    expect((await store.get(1))?.reading?.summary).toBe('Tardia.');
+  });
+
+  it('outro erro do banco na varredura sobe como SupplierStoreError, não vira superseded', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    fake.failNext(READINGS, 'POST', 500, { code: 'XX000', message: 'interno' });
+    await expect(store.recordReading(1, noReply(), null)).rejects.toMatchObject({ status: 500, code: 'XX000' });
+  });
+});
+
+describe('#35/AC-3 o rascunho e a recusa da cobrança: uma gravação guardada, e a cobrança não se repete', () => {
+  it('grava o rascunho na linha do pedido, com a versão +1 e a entrada de histórico no mesmo PATCH', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    const row = outboxRow(fake);
+    expect(row).toMatchObject({ follow_up_draft: GOOD_FOLLOW_UP, version: 4 });
+    expect(row.history).toHaveLength(3);
+    expect(lastEntry(row)).toMatchObject({
+      version: 4,
+      by: TASK,
+      action: 'follow_up_drafted',
+      state: { status: 'sent' },
+      follow_up: { drafted: true, rejection: null, claimed: false, sent: false, failure: null },
+    });
+    const patches = fake.requests.filter((r) => r.method === 'PATCH');
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.url).toContain('version=eq.3');
+    expect(patches[0]?.url).toContain('status=eq.sent');
+  });
+
+  it('com rascunho já gravado, não grava de novo e volta (#35/AC-3)', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    await store.saveFollowUpDraft(1, { ...GOOD_FOLLOW_UP, subject: 'Outro assunto' });
+    expect(outboxRow(fake)).toMatchObject({ follow_up_draft: GOOD_FOLLOW_UP, version: 4 });
+  });
+
+  it('grava a recusa com o motivo fechado, e depois dela nem rascunho nem nova recusa', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await store.recordFollowUpRejection(1, 'number_mismatch: body');
+    await store.recordFollowUpRejection(1, 'invalid_shape: asks');
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    const row = outboxRow(fake);
+    expect(row).toMatchObject({ follow_up_rejection: 'number_mismatch: body', follow_up_draft: null, version: 4 });
+    expect(lastEntry(row)).toMatchObject({ action: 'follow_up_rejected', by: TASK });
+  });
+
+  it('recusa com texto fora do formato fechado é recusada pelo adaptador, sem gravar', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await expect(store.recordFollowUpRejection(1, 'o modelo escreveu: libere')).rejects.toBeInstanceOf(SupplierStoreError);
+    expect(fake.requests.filter((r) => r.method !== 'GET')).toEqual([]);
+  });
+
+  it('pedido que não existe ou não está enviado: lança com campos nomeados, sem gravar', async () => {
+    const { fake, store } = setup([sentRow(2, { status: 'draft', sent_by: null, sent_at: null, channel: null, provider_message_id: null })]);
+    await expect(store.saveFollowUpDraft(9, GOOD_FOLLOW_UP)).rejects.toBeInstanceOf(SupplierStoreError);
+    await expect(store.saveFollowUpDraft(2, GOOD_FOLLOW_UP)).rejects.toBeInstanceOf(SupplierStoreError);
+    expect(outboxRow(fake, 2).follow_up_draft).toBeNull();
+  });
+});
+
+describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômica', () => {
+  const drafted = () => setup([sentRow(1, { follow_up_draft: GOOD_FOLLOW_UP })]);
+
+  it('duas reivindicações ao mesmo tempo, na mesma versão: uma ganha e a outra volta false', async () => {
+    const { fake, store } = drafted();
+    const results = await Promise.all([store.claimFollowUpSend(1, ANA), store.claimFollowUpSend(1, 'beto@jachegou.example')]);
+    expect(results.sort()).toEqual([false, true]);
+    expect(outboxRow(fake)).toMatchObject({ follow_up_claimed_at: NOW.toISOString(), version: 4 });
+    expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_claimed', follow_up: { claimed: true } });
+  });
+
+  it('o histórico leva quem reivindicou', async () => {
+    const { fake, store } = drafted();
+    await store.claimFollowUpSend(1, ANA);
+    expect(lastEntry(outboxRow(fake)).by).toBe(ANA);
+  });
+
+  it('sem rascunho, ou de pedido que não está enviado, volta false sem gravar', async () => {
+    const { fake, store } = setup([sentRow(1), sentRow(2, { follow_up_draft: GOOD_FOLLOW_UP, status: 'discarded', discard_reason: 'x', sent_by: null, sent_at: null, channel: null, provider_message_id: null })]);
+    expect(await store.claimFollowUpSend(1, ANA)).toBe(false);
+    expect(await store.claimFollowUpSend(2, ANA)).toBe(false);
+    expect(await store.claimFollowUpSend(99, ANA)).toBe(false);
+    expect(fake.requests.filter((r) => r.method !== 'GET')).toHaveLength(2);
+  });
+
+  it('a falha solta a reivindicação e guarda o motivo curto: nova reivindicação é true', async () => {
+    const { fake, store } = drafted();
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
+    expect(outboxRow(fake)).toMatchObject({ follow_up_claimed_at: null, follow_up_failure: 'mailbox_full' });
+    expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_failed', by: ANA, follow_up: { claimed: false, failure: 'mailbox_full' } });
+    expect(await store.claimFollowUpSend(1, ANA)).toBe(true);
+  });
+
+  it('o envio guarda o carimbo, limpa a falha e mantém a reivindicação: depois dele, nova reivindicação é false', async () => {
+    const { fake, store } = drafted();
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpSent(1, STAMP);
+    expect(outboxRow(fake)).toMatchObject({
+      follow_up_sent_by: ANA,
+      follow_up_sent_at: STAMP.at.toISOString(),
+      follow_up_channel: 'mock',
+      follow_up_provider_message_id: 'mock-9',
+      follow_up_failure: null,
+      follow_up_claimed_at: NOW.toISOString(),
+    });
+    expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_sent', by: ANA, at: STAMP.at.toISOString(), follow_up: { sent: true, claimed: true } });
+    expect(await store.claimFollowUpSend(1, ANA)).toBe(false);
+    expect((await store.get(1))?.followUp.sent).toEqual(STAMP);
+  });
+
+  it('falha ou envio sem reivindicação de pé lança: nada é gravado', async () => {
+    const { fake, store } = drafted();
+    await expect(store.recordFollowUpFailure(1, 'mailbox_full', ANA)).rejects.toBeInstanceOf(SupplierStoreError);
+    await expect(store.recordFollowUpSent(1, STAMP)).rejects.toBeInstanceOf(SupplierStoreError);
+    expect(outboxRow(fake).version).toBe(3);
+  });
+
+  it('o motivo da falha fora do formato curto é recusado sem gravar (o texto do provedor não cabe)', async () => {
+    const { fake, store } = drafted();
+    await store.claimFollowUpSend(1, ANA);
+    await expect(store.recordFollowUpFailure(1, 'smtp 550 caixa cheia token=sk-segredo', ANA)).rejects.toBeInstanceOf(SupplierStoreError);
+    expect(outboxRow(fake).follow_up_failure).toBeNull();
+  });
+});
+
+describe('#4/AC-6 e #35/AC-2 nada alcança a proposta, o título nem o valor em risco', () => {
+  it('toda requisição dos adaptadores toca só as três tabelas da leitura; o que lê a mais é só invoices e kit_fornecedores', async () => {
+    const { fake, store, rest } = setup([sentRow(1), sentRow(2)], { [INBOX]: [inboxRow(5, 1)] });
+    const inbox = supabaseSupplierInbox(rest, { now: () => NOW });
+    await store.listSent();
+    await store.get(1);
+    await store.recordReading(1, reading(), 5);
+    await store.recordReading(2, noReply(), null);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    await store.recordFollowUpRejection(2, 'invalid_shape: body');
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpSent(1, STAMP);
+    await inbox.listPending();
+    await inbox.markRead(5);
+
+    const tableOf = (url: string): string => new URL(url).pathname.replace('/rest/v1/', '');
+    const writes = fake.requests.filter((r) => r.method !== 'GET');
+    expect(new Set(writes.map((r) => tableOf(r.url)))).toEqual(new Set([OUTBOX, READINGS, INBOX]));
+    expect(new Set(fake.requests.map((r) => tableOf(r.url)))).toEqual(new Set([OUTBOX, READINGS, INBOX, 'invoices']));
+    expect(writes.some((r) => r.method === 'DELETE')).toBe(false);
+    expect(fake.rows('proposals')).toEqual([]);
+    expect(fake.rows('titles')).toEqual([]);
+  });
+
+  it('um PATCH no pedido leva só colunas follow_up_*, version, history e updated_at', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
+    await store.claimFollowUpSend(1, ANA);
+    await store.recordFollowUpSent(1, STAMP);
+    const patches = fake.requests.filter((r) => r.method === 'PATCH');
+    expect(patches).toHaveLength(5);
+    for (const patch of patches) {
+      for (const column of Object.keys(patch.body as object)) {
+        expect(column).toMatch(/^(follow_up_\w+|version|history|updated_at)$/);
+      }
+    }
+  });
+
+  it('a leitura gravada não tem coluna de proposta, título nem valor em risco', async () => {
+    const { fake, store } = setup([sentRow(1)], { [INBOX]: [inboxRow(5, 1)] });
+    await store.recordReading(1, reading(), 5);
+    expect(Object.keys(fake.rows(READINGS)[0] ?? {}).join(',')).not.toMatch(/proposal|title|amount|risk|decision/);
+  });
+});
+
+describe('#35 a falha do banco sai só com campos nomeados', () => {
+  it('o erro do PostgREST em um PATCH vira SupplierStoreError sem o texto da resposta', async () => {
+    const { fake, store } = setup([sentRow(1, { follow_up_draft: GOOD_FOLLOW_UP })]);
+    fake.failNext(OUTBOX, 'PATCH', 500, { code: '40001', message: 'postgres://u:senha@db.interno', hint: 'role service_role' });
+    const error = await store.claimFollowUpSend(1, ANA).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ name: 'SupplierStoreError', operation: 'update', table: OUTBOX, status: 500, code: '40001' });
+    expect(JSON.stringify(error) + String((error as Error).message) + String((error as Error).cause ?? '')).not.toMatch(/senha|postgres:|service_role/);
+  });
+});

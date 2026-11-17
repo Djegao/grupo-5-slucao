@@ -115,8 +115,8 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
     calls,
     claimed,
     failStamp,
-    claimFollowUpSend: (id) => {
-      calls.push({ op: 'claimFollowUpSend', args: [id] });
+    claimFollowUpSend: (id, by) => {
+      calls.push({ op: 'claimFollowUpSend', args: [id, by] });
       const taken = claimed.has(id) || map.get(id)?.followUp.sent != null;
       if (!taken) claimed.add(id);
       return Promise.resolve(!taken);
@@ -137,9 +137,9 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
       patch(id, 'saveFollowUpDraft', [id, text], (row) => ({ ...row, followUp: { ...row.followUp, draft: text } })),
     recordFollowUpRejection: (id, reason) =>
       patch(id, 'recordFollowUpRejection', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, rejection: reason } })),
-    recordFollowUpFailure: (id, reason) => {
+    recordFollowUpFailure: (id, reason, by) => {
       claimed.delete(id); // #34/AC-4: a falha solta a reivindicação, para a pessoa poder tentar de novo
-      return patch(id, 'recordFollowUpFailure', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, failure: reason } }));
+      return patch(id, 'recordFollowUpFailure', [id, reason, by], (row) => ({ ...row, followUp: { ...row.followUp, failure: reason } }));
     },
     recordFollowUpSent: (id, stamp: FollowUpStamp) => {
       if (failStamp.on) return Promise.reject(new Error('banco fora do ar'));

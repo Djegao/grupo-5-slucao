@@ -78,6 +78,15 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
     expect(mailer.sent).toHaveLength(1);
   });
 
+  it('a reivindicação e a falha levam quem enviou, para o histórico do pedido (#35)', async () => {
+    const { deps, store } = parts([drafted()], [], fakeMailer({ ok: false, reason: 'mailbox_full' }));
+    await createReplyUseCases(deps).sendFollowUp(7, 'ana');
+    expect(store.calls).toEqual([
+      { op: 'claimFollowUpSend', args: [7, 'ana'] },
+      { op: 'recordFollowUpFailure', args: [7, 'mailbox_full', 'ana'] },
+    ]);
+  });
+
   it('duas chamadas ao mesmo tempo mandam um e-mail só; a outra volta como conflito (#34/AC-4)', async () => {
     const { deps, mailer } = parts([drafted()]);
     const useCases = createReplyUseCases(deps);

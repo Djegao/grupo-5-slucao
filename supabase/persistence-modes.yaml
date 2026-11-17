@@ -127,3 +127,33 @@ tables:
     send_guard: "send_claim uuid + send_claimed_at timestamptz (trava do envio, com prazo)"
     deletion: none               # nada é apagado; o fim é status = discarded com motivo, quem e quando
     erasure: not stated          # sent_by e discarded_by identificam pessoas (ADR-005); sem caminho de apagamento registrado
+    # #35: a cobrança da leitura (#4/AC-2, AC-3) mora nesta linha, nas colunas follow_up_*, e segue a mesma
+    # #35: disciplina: todo PATCH filtra version=eq.<lida>, soma 1 e acrescenta a entrada em history no mesmo PATCH.
+    # #35: depois de `sent` a #12 não grava mais a linha (markSent e discard não partem de `sent`), então as
+    # #35: gravações da cobrança são as únicas num pedido enviado. Desenho: supabase/persistence-supplier-reply.md.
+    extended_by: "#35"
+    follow_up_columns: "follow_up_draft jsonb, follow_up_rejection, follow_up_claimed_at, follow_up_sent_by, follow_up_sent_at, follow_up_channel, follow_up_provider_message_id, follow_up_failure"
+    follow_up_guard: "follow_up_claimed_at timestamptz (reivindicação do envio da cobrança, sem prazo: só a falha a solta)"
+    follow_up_history_actions: "follow_up_drafted | follow_up_rejected | follow_up_claimed | follow_up_failed | follow_up_sent"
+
+  # Leitura da resposta do fornecedor (#35, história #4). Desenho: supabase/persistence-supplier-reply.md.
+  # #35: a unidade de trabalho segue postgrest-request; cada gravação abaixo é uma requisição, numa tabela.
+  inbox_supplier_messages:
+    mode: upsert-with-history
+    history: in-row-transition
+    version_column: read_status  # o PATCH filtra read_status=eq.pending: sai de pending uma vez, para ok ou error
+    # #35: a mensagem (remetente, texto, anexos, chegada) é um fato e nunca muda; read_status sai de pending
+    # #35: uma vez, com quando (read_status_at) e, no erro, o motivo fechado (read_error) na própria linha.
+    refusal: grant               # revoke update, delete, truncate; grant update só em (read_status, read_error, read_status_at)
+    idempotency: source_message_id   # o script de exemplo (e um webhook de entrada futuro) grava com on_conflict
+    deletion: none
+    erasure: not stated          # from_address e body podem trazer dado pessoal do contato do fornecedor; sem caminho registrado
+
+  supplier_reply_readings:
+    mode: append-only
+    history: none
+    # #35: cada leitura é um fato: "a mensagem M foi lida assim" ou "o prazo venceu sem resposta" (message_id nulo).
+    # #35: a leitura atual do pedido é derivada da ordem das mensagens, nunca gravada por cima.
+    projection: "leitura atual por pedido: a primeira por message_id desc nulls last (no_reply só vale sem leitura de mensagem)"
+    rebuild_test: "teste do adaptador que remonta a leitura atual de leituras gravadas em qualquer ordem (persistence-supplier-reply.md, Testes)"
+    refusal: grant               # revoke update, delete, truncate de anon, authenticated e service_role
