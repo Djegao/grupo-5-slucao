@@ -6,11 +6,11 @@ export interface DecisionOption<T extends string> {
   value: T;
   label: ReactNode;
   tone?: Tone;
-  /** Uma linha menor sob o rótulo ("Proposta do sistema"). */
+  /** Uma linha menor sob o rótulo ("Proposta do sistema"). (#53) */
   description?: ReactNode;
-  /** A observação passa a ser obrigatória nesta opção. */
+  /** A observação passa a ser obrigatória nesta opção. (#53) */
   noteRequired?: boolean;
-  /** O texto do botão enquanto esta opção está marcada. */
+  /** O texto do botão enquanto esta opção está marcada. (#53) */
   submitLabel?: string;
 }
 
@@ -28,15 +28,15 @@ export interface DecisionFormTexts {
 export interface DecisionFormProps<T extends string> {
   options: readonly DecisionOption<T>[];
   onSubmit: (decision: { value: T; note: string }) => void | Promise<unknown>;
-  /** Opção já marcada ao abrir. Padrão: nenhuma, para a decisão ser sempre um gesto explícito. */
+  /** Opção já marcada ao abrir. Padrão: nenhuma, para a decisão ser sempre um gesto explícito. (#53) */
   defaultValue?: T;
-  /** Opção marcada, controlada por fora. Sem ela, o formulário guarda a escolha (`defaultValue`). */
+  /** Opção marcada, controlada por fora. Sem ela, o formulário guarda a escolha (`defaultValue`). (#53) */
   value?: T;
-  /** Avisa a opção que a pessoa marcou, controlada ou não. */
+  /** Avisa a opção que a pessoa marcou, controlada ou não. (#53) */
   onValueChange?: (value: T) => void;
-  /** Conteúdo que depende da opção, entre as opções e a observação. */
+  /** Conteúdo que depende da opção: depois da mensagem de erro e antes da observação, como no kit real. (#53) */
   children?: ReactNode;
-  /** Desabilita só o botão de registrar. */
+  /** Desabilita só o botão de registrar. (#53) */
   submitDisabled?: boolean;
   title?: ReactNode;
   description?: ReactNode;
@@ -160,6 +160,11 @@ export function DecisionForm<T extends string>({
           </button>
         ))}
       </div>
+      {shown ? (
+        <Text as="p" variant="body-sm" color="var(--accent-red)" role="alert">
+          {shown}
+        </Text>
+      ) : null}
       {children}
       <Input
         type="textarea"
@@ -169,11 +174,6 @@ export function DecisionForm<T extends string>({
         disabled={locked}
         {...(maxNoteLength ? { maxLength: maxNoteLength } : {})}
       />
-      {shown ? (
-        <Text as="p" variant="body-sm" color="var(--accent-red)" role="alert">
-          {shown}
-        </Text>
-      ) : null}
       {done && t.done ? (
         <Text as="p" variant="body-sm" color="var(--accent-green)" role="status">
           {t.done}

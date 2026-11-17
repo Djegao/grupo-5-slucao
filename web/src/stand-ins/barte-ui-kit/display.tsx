@@ -1,5 +1,5 @@
 /**
- * Os blocos de leitura do kit: painel, bloco, lista de rótulo e valor, selos, números, cabeçalho de página.
+ * Os blocos de leitura do kit (#53): painel, bloco, lista de rótulo e valor, selos, números, cabeçalho de página.
  *
  * Os nomes de classe `StatusBadge-module__*` e `RankingBars-module__track` imitam, de propósito, os do kit real: a
  * tela (app.css, GridBadge.css) e os testes a miram por eles. Sem o sufixo de hash, só o prefixo, que é o que
@@ -13,7 +13,7 @@ const join = (...names: (string | false | undefined)[]): string => names.filter(
 export interface PanelProps {
   title?: ReactNode;
   description?: ReactNode;
-  /** Ao lado do título (um selo, uma ação). */
+  /** Ao lado do título (um selo, uma ação). (#53) */
   aside?: ReactNode;
   size?: "sm" | "md";
   padding?: "sm" | "md" | "lg";
@@ -62,9 +62,9 @@ export interface DataListItem {
   key?: string;
   label: ReactNode;
   value: ReactNode;
-  /** O valor em destaque. */
+  /** O valor em destaque. (#53) */
   emphasis?: boolean;
-  /** O valor em fonte de código. */
+  /** O valor em fonte de código. (#53) */
   mono?: boolean;
 }
 
@@ -143,9 +143,9 @@ export interface StatProps {
   value: ReactNode;
   context?: ReactNode;
   tone?: Tone;
-  /** O texto explicativo, atrás do botão de informação. */
+  /** O texto explicativo, atrás do botão de informação. (#53) */
   info?: string;
-  /** O nome do botão de informação, para leitor de tela. */
+  /** O nome do botão de informação, para leitor de tela. (#53) */
   infoLabel?: string;
 }
 
@@ -179,7 +179,7 @@ export function StatGrid({ columns = 3, children }: { columns?: number; children
 export interface PageTitleBarProps {
   title: ReactNode;
   subtitle?: ReactNode;
-  /** Ao lado do título: um filtro, um seletor. */
+  /** Ao lado do título: um filtro, um seletor. (#53) */
   actions?: ReactNode;
   variant?: "compact" | "default";
 }

@@ -4,7 +4,7 @@ import { Pills } from "barte-design-system";
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
-  /** Aparece depois do rótulo: "Todas · 66". Sem ele, só o rótulo. */
+  /** Aparece depois do rótulo: "Todas · 66". Sem ele, só o rótulo. (#53) */
   count?: number;
 }
 

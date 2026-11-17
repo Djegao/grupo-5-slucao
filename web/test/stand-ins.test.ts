@@ -14,7 +14,7 @@ import { KIT_ENTRIES } from "../vite.config";
 const WEB = resolve(import.meta.dirname, "..");
 const PREFIX = "@barte-ai-services/";
 
-/** O arquivo do substituto para um caminho de kit (`@barte-ai-services/shell-kit/server`), ou `undefined`. */
+/** O arquivo do substituto para um caminho de kit (`@barte-ai-services/shell-kit/server`), ou `undefined`. (#53) */
 function standInFile(specifier: string): string | undefined {
   const [kit, ...rest] = specifier.slice(PREFIX.length).split("/");
   const subpath = rest.length > 0 ? `/${rest.join("/")}` : "";
@@ -24,7 +24,7 @@ function standInFile(specifier: string): string | undefined {
 
 const exportCache = new Map<string, Set<string>>();
 
-/** Os nomes (valores e tipos) que o módulo do substituto exporta, lidos pelo compilador. */
+/** Os nomes (valores e tipos) que o módulo do substituto exporta, lidos pelo compilador. (#53) */
 function exportsOf(file: string): Set<string> {
   const cached = exportCache.get(file);
   if (cached) return cached;
@@ -47,13 +47,13 @@ function exportsOf(file: string): Set<string> {
 
 interface KitImport {
   specifier: string;
-  /** Os nomes importados, como o kit os exporta (`type X` e `X as Y` contam como `X`). */
+  /** Os nomes importados, como o kit os exporta (`type X` e `X as Y` contam como `X`). (#53) */
   names: string[];
-  /** `import X from` ou `import * as X from`. */
+  /** `import X from` ou `import * as X from`. (#53) */
   defaultName: boolean;
 }
 
-/** Os `import`/`export … from "@barte-ai-services/…"` de um arquivo. */
+/** Os `import`/`export … from "@barte-ai-services/…"` de um arquivo. (#53) */
 function kitImportsIn(fileName: string, text: string): KitImport[] {
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2022, true, fileName.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const found: KitImport[] = [];
@@ -77,7 +77,7 @@ function kitImportsIn(fileName: string, text: string): KitImport[] {
   return found;
 }
 
-/** O que o arquivo importa de um kit e o substituto não tem: uma frase por problema. */
+/** O que o arquivo importa de um kit e o substituto não tem: uma frase por problema. (#53) */
 function problemsIn(fileName: string, text: string): string[] {
   const problems: string[] = [];
   for (const { specifier, names, defaultName } of kitImportsIn(fileName, text)) {
@@ -98,7 +98,7 @@ function problemsIn(fileName: string, text: string): string[] {
   return problems;
 }
 
-/** Todo `.ts` e `.tsx` de `dir`, menos a pasta dos substitutos (eles não importam de si como pacote). */
+/** Todo `.ts` e `.tsx` de `dir`, menos a pasta dos substitutos (eles não importam de si como pacote). (#53) */
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);

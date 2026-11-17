@@ -6,25 +6,25 @@ export type ComparisonState = "match" | "divergent" | "missing" | "not-comparabl
 export interface ComparisonField {
   key?: string;
   label: ReactNode;
-  /** O valor do primeiro lado. `null` aparece como "ausente". */
+  /** O valor do primeiro lado. `null` aparece como "ausente". (#53) */
   a: ReactNode | null;
-  /** O valor do segundo lado. `null` aparece como "ausente". */
+  /** O valor do segundo lado. `null` aparece como "ausente". (#53) */
   b: ReactNode | null;
   state?: ComparisonState;
-  /** Explica o estado ao lado dele. */
+  /** Explica o estado ao lado dele. (#53) */
   note?: ReactNode;
 }
 
 export interface ReconciliationDiffProps {
-  /** O nome de cada lado, no cabeçalho. */
+  /** O nome de cada lado, no cabeçalho. (#53) */
   columns: readonly [string, string];
   fields: readonly ComparisonField[];
-  /** O cabeçalho da coluna dos rótulos. */
+  /** O cabeçalho da coluna dos rótulos. (#53) */
   fieldLabel?: string;
-  /** Conta quantos campos divergem e quantos conferem, abaixo da tabela. */
+  /** Conta quantos campos divergem e quantos conferem, abaixo da tabela. (#53) */
   showSummary?: boolean;
   variant?: "grid" | "stacked";
-  /** O nome da tabela, para leitor de tela. */
+  /** O nome da tabela, para leitor de tela. (#53) */
   ariaLabel?: string;
 }
 

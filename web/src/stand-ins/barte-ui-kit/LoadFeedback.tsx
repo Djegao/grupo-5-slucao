@@ -7,7 +7,7 @@ export type LoadState = "loading" | "ready" | "empty" | "error";
 
 export interface LoadFeedbackProps {
   state: LoadState;
-  /** `page` ocupa a área da página; `inline` cabe dentro de um bloco. */
+  /** `page` ocupa a área da página; `inline` cabe dentro de um bloco. (#53) */
   size?: "page" | "inline";
   loadingLabel?: string;
   errorTitle?: string;
@@ -15,7 +15,7 @@ export interface LoadFeedbackProps {
   retryLabel?: string;
   onRetry?: () => void;
   emptyLabel?: ReactNode;
-  /** Só em `ready`. Pode ser uma função, chamada apenas então. */
+  /** Só em `ready`. Pode ser uma função, chamada apenas então. (#53) */
   children?: ReactNode | (() => ReactNode);
 }
 

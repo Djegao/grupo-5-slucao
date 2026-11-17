@@ -15,9 +15,9 @@ export interface NavItem {
   key: string;
   label: string;
   href: string;
-  /** A zone do Shell dona do caminho. */
+  /** A zone do Shell dona do caminho. (#53) */
   zone?: string;
-  /** O nome de um ícone do registro (`ShellIcon`). */
+  /** O nome de um ícone do registro (`ShellIcon`). (#53) */
   icon?: string;
 }
 
@@ -53,7 +53,7 @@ export interface ShellContext {
   sidebar: "expanded" | "collapsed";
 }
 
-/** O registro de ícones: o Shell só desenha o que está aqui, e o nome que falta deixa o item sem ícone. */
+/** O registro de ícones: o Shell só desenha o que está aqui, e o nome que falta deixa o item sem ícone. (#53) */
 const ICONS: Record<string, ComponentType<IconProps>> = {
   "list-checks": ListChecks,
   calendar: Calendar,
@@ -93,7 +93,7 @@ function Menu({ group, current }: { group: NavGroup; current: string }): ReactEl
 
 export interface ShellFrameProps {
   context: ShellContext;
-  /** A zone desta tela no Shell. */
+  /** A zone desta tela no Shell. (#53) */
   zone: string;
   children?: ReactNode;
 }

@@ -1,5 +1,5 @@
 /**
- * Barras, linha e linha do tempo, sem biblioteca de gráfico: o kit real usa `recharts`, que o substituto não
+ * Barras, linha e linha do tempo, sem biblioteca de gráfico (#53): o kit real usa `recharts`, que o substituto não
  * traz. Cada um mantém o que a tela e os testes leem: o rótulo de acessibilidade, os textos e os números.
  */
 import type { CSSProperties, ReactElement, ReactNode } from "react";
@@ -13,11 +13,11 @@ export interface ProgressSegment {
 
 export interface ProgressBarProps {
   segments: readonly ProgressSegment[];
-  /** O fundo da barra: o valor que ela completa. */
+  /** O fundo da barra: o valor que ela completa. (#53) */
   max: number;
   size?: "sm" | "md";
   showLegend?: boolean;
-  /** O texto do valor ("R$ 42 mil de R$ 543 mil"): aparece e é o `aria-valuetext`. */
+  /** O texto do valor ("R$ 42 mil de R$ 543 mil"): aparece e é o `aria-valuetext`. (#53) */
   valueText?: string;
 }
 
@@ -66,7 +66,7 @@ export interface LineChartProps {
   xKey: string;
   series: readonly LineSeries[];
   height?: number;
-  /** O kit real a usa na dica ao passar o mouse; o substituto não desenha dica. */
+  /** O kit real a usa na dica ao passar o mouse; o substituto não desenha dica. (#53) */
   formatValue?: (value: number) => string;
   formatAxis?: (value: number) => string;
   ariaLabel: string;
@@ -125,7 +125,7 @@ export interface RankingItem {
   key: string;
   label: string;
   value: number;
-  /** Texto menor ao lado do rótulo (a contagem de notas). */
+  /** Texto menor ao lado do rótulo (a contagem de notas). (#53) */
   meta?: string;
 }
 
@@ -160,9 +160,9 @@ export interface TimelineItem {
   id: string;
   title: ReactNode;
   time?: ReactNode;
-  /** O selo de quem fez o passo. */
+  /** O selo de quem fez o passo. (#53) */
   badge?: ReactNode;
-  /** O passo foi de um agente (uma regra, o Claude), não de uma pessoa. */
+  /** O passo foi de um agente (uma regra, o Claude), não de uma pessoa. (#53) */
   byAgent?: boolean;
 }
 

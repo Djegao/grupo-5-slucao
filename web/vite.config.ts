@@ -44,9 +44,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./test/setup.ts"],
-    // O shell-kit real chega como TS fonte em node_modules, e os kits importam CSS: o Vitest precisa
-    // transformá-los (e aplicar o alias de `next/navigation`) em vez de entregá-los crus ao Node. Os
-    // substitutos de src/stand-ins/ já passam pelo Vite, por estarem fora de node_modules.
+    /* #53: o shell-kit real chega como TS fonte em node_modules, e os kits importam CSS: o Vitest precisa
+       transformá-los (e aplicar o alias de `next/navigation`) em vez de entregá-los crus ao Node. Os
+       substitutos de src/stand-ins/ já passam pelo Vite, por estarem fora de node_modules. */
     server: { deps: { inline: [/@barte-ai-services\//, /barte-design-system/] } },
   },
 });
