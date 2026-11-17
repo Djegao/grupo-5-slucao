@@ -9,7 +9,7 @@ vi.mock("../router", () => ({ navigate }));
 // #19 A lista "Pedidos ao fornecedor" por props, um teste por estado do wireframe aprovado (#18). Sem Storybook nem axe em web/ (#25):
 // #19 a consulta por papel e nome acessível faz o papel da checagem de acessibilidade. Dados fictícios.
 
-const late: Extract<SupplierRequestRow, { status: "late" }> = {
+const late: SupplierRequestRow = {
   id: "sr-1",
   invoiceNumber: "59738",
   supplier: "F07 Limpeza",

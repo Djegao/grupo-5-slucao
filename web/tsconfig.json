@@ -15,6 +15,28 @@
       // O shell-kit é TS fonte e importa `next/navigation`. A tela não usa o Next: o tsc e o Vite
       // apontam para o stand-in em src/router, em cima da History API.
       "next/navigation": ["./src/router/navigation.ts"],
+      // Os kits da Barte (#53): o pacote real, se estiver instalado; senão o substituto de src/stand-ins/. O tsc tenta
+      // os destinos na ordem e usa o primeiro que existe. O real vem por onde um pacote costuma entregar os tipos (a
+      // pasta, que lê `types`/`main`; `dist/index.d.ts`; `src/index.ts`, no caso do TS fonte). O `vite.config.ts` faz a
+      // escolha para o Vite e o Vitest pela presença do pacote, sem adivinhar o layout.
+      "@barte-ai-services/barte-ui-kit": [
+        "./node_modules/@barte-ai-services/barte-ui-kit",
+        "./node_modules/@barte-ai-services/barte-ui-kit/dist/index.d.ts",
+        "./node_modules/@barte-ai-services/barte-ui-kit/src/index.ts",
+        "./src/stand-ins/barte-ui-kit/index.ts"
+      ],
+      "@barte-ai-services/shell-kit": [
+        "./node_modules/@barte-ai-services/shell-kit",
+        "./node_modules/@barte-ai-services/shell-kit/dist/index.d.ts",
+        "./node_modules/@barte-ai-services/shell-kit/src/index.ts",
+        "./src/stand-ins/shell-kit/index.tsx"
+      ],
+      "@barte-ai-services/shell-kit/server": [
+        "./node_modules/@barte-ai-services/shell-kit/server",
+        "./node_modules/@barte-ai-services/shell-kit/dist/server.d.ts",
+        "./node_modules/@barte-ai-services/shell-kit/src/server.ts",
+        "./src/stand-ins/shell-kit/server.ts"
+      ],
       // O contrato do domínio (F4) vem da API, só como tipo: o fio é dado simples.
       "@domain": ["../api/src/domain/index.ts"]
     }

@@ -57,7 +57,7 @@ proposta aprovada com devolução
 | Bloco "Pedido ao fornecedor" na gaveta | `web/src/approval/SupplierRequestBlock.tsx`, `SupplierRequestSection.tsx`, `useSupplierRequest.ts`, `supplier-request-state.ts`, `web/src/api/supplier-request.ts` | (lê a API) | `GET`, `PATCH`, `POST .../send`, `.../resend`, `.../discard`, `.../redo` | #3: #26 #30 #37 #46 |
 | Leitura da resposta, prazo e cobrança | `api/src/domain/supplier-reply.ts`, `api/src/supplier/reply-*.ts`, `follow-up-task.ts`, `supabase-reply-*.ts`, `api/src/cron/supplier-sweep.ts` | `inbox_supplier_messages`, `supplier_reply_readings`, colunas `follow_up_*` de `outbox_supplier_emails` | Tarefas `supplier-reply-reading` e `supplier-follow-up-draft` (1 por rodada cada); varredura do prazo (1 por rodada); `GET /api/supplier-requests?status=awaiting\|answered\|needs_you\|overdue` | #4: #39 #42 #45 #47 (e #51, da #50) |
 | Lista "Pedidos ao fornecedor" | `web/src/routes/supplier-requests.tsx` (rota `/pedidos-fornecedor`), `web/src/components/SupplierRequests*.tsx`, `supplier-request-map.ts`, `supplier-request-state.ts`, `web/src/approval/SupplierConversation.tsx`, `FollowUpDraft.tsx` | (lê a API) | a lista com os quatro filtros e `POST .../send` para a cobrança | #5: #27 #31 #41 #49 |
-| Apoio | `Makefile` (alvo `check-web`) | | | #28 (web fora do gate, da #25) |
+| Apoio | `Makefile` (alvo `check-web`), `web/src/stand-ins/` | | | #28 (web fora do gate, da #25), #53 (web de volta ao gate, com substitutos dos kits) |
 
 A ordem da rodada está em `api/src/cron/tick.ts` (`runRound`): captura, propostas, publicações, notas de
 devolução, duplicadas, **varredura do prazo** e, por último, a rodada do Claude (`runClaudeRound`,
@@ -78,7 +78,7 @@ migrações `supabase/migrations/20261116190000_supplier_request.sql` e
 | Node | 22, a da esteira (`.github/workflows/ci.yml`, `deploy-api.yml`). Nenhum `package.json` declara `engines`. Aqui rodou com Node 24. |
 | Python 3 | para `make check` e os scripts de `scripts/` |
 | wrangler | `4.156.0`, fixado em `api/package.json` (vem com `npm --prefix api ci`) |
-| `gh` | autenticado; o `Makefile` usa `gh auth token` como `NODE_AUTH_TOKEN` |
+| `gh` | autenticado, para abrir PRs; o `web/` já não precisa dele (#53) |
 | Supabase CLI | para aplicar as migrações à mão (não estava instalada aqui) |
 
 ### Credenciais (`api/.dev.vars`, que o git ignora)
@@ -119,8 +119,8 @@ npm --prefix api run dev
 
 Aqui `npm --prefix api run dev` **não sobe** como está, por dois motivos conferidos:
 
-1. `wrangler.jsonc` aponta `assets.directory` para `../web/dist`, que só existe depois do build da tela (que
-   precisa dos pacotes privados). Contorno: `mkdir -p web/dist`, que o git ignora.
+1. `wrangler.jsonc` aponta `assets.directory` para `../web/dist`, que só existe depois do build da tela (`npm --prefix web run build`, que não precisa
+   dos pacotes privados desde a #53). Contorno: `mkdir -p web/dist`, que o git ignora.
 2. O workerd do wrangler 4.156.0 só aceita a data de compatibilidade até `2026-10-30`, e o `wrangler.jsonc`
    pede `2026-10-31`. Contorno: passar a data na linha de comando.
 
@@ -203,19 +203,36 @@ As escritas sem `Content-Type: application/json` recebem `415`.
 
 ### A demo na tela: os quatro "Pronto quando" do épico
 
-**A tela não roda aqui.** O `web/` depende de `@barte-ai-services/shell-kit` e `@barte-ai-services/barte-ui-kit`,
-do GitHub Packages. `make check-web` (ou `npm --prefix web ci` com `NODE_AUTH_TOKEN`) dá `403 Forbidden ...
-permission_denied: read_package` com a conta deste fork (conferido aqui). O workflow `deploy-api.yml` falha
-no mesmo passo em todos os merges da `main` deste fork (20 execuções, nenhuma com sucesso): o Worker não é
-publicado. Quem tiver acesso aos pacotes:
+**A tela sobe sem acesso aos pacotes privados (#53).** O `web/` importa `@barte-ai-services/shell-kit` e
+`@barte-ai-services/barte-ui-kit`, do GitHub Packages, que a conta deste fork não lê (`403 Forbidden ...
+permission_denied: read_package`) e que não será liberada. Os dois são `optionalDependencies`: o `npm ci` os
+pula e a tela usa os **substitutos locais** de `web/src/stand-ins/`, que dão as mesmas exportações que as telas
+importam, montados sobre o `barte-design-system` (público). Nenhum token é preciso:
 
 ```bash
-NODE_AUTH_TOKEN=$(gh auth token) npm --prefix web ci && npm --prefix web run dev
+npm --prefix web ci
+npm --prefix web run dev     # http://localhost:5173
 ```
 
-Em dev, o Vite repassa `/me` e `/api` para `http://localhost:8787` (`web/vite.config.ts`).
+Em dev, o Vite repassa `/me` e `/api` para `http://localhost:8787` (`web/vite.config.ts`), o `wrangler dev` da
+seção "API local". As rotas `/api/...` pedem o token do Cloudflare Access, que o dev local não tem (fora da
+#53): sem a API de pé, a moldura abre com o contexto fixo e a lista e a gaveta mostram o estado de erro com
+"Tentar de novo". Com uma API que responda ao contrato (o teste `web/test/supplier-request-list.test.tsx` traz
+uma API falsa), a lista "Pedidos ao fornecedor" (`/pedidos-fornecedor`) mostra os chips com contagem e as linhas,
+e clicar numa linha abre a gaveta com o bloco "Pedido ao fornecedor".
 
-O roteiro abaixo segue o código e os textos de `web/src/texts.ts`. Ninguém o executou na tela.
+Quem tiver acesso aos pacotes reais instala por cima e a tela passa a usá-los, sem mudar nenhum arquivo de tela:
+
+```bash
+NODE_AUTH_TOKEN=$(gh auth token) npm --prefix web ci   # o token precisa de read:packages
+```
+
+O `vite.config.ts` e o `tsconfig.json` escolhem o pacote real quando ele está em `web/node_modules`, e o
+substituto quando não está. O teste `web/test/stand-ins.test.ts` (#53/AC-3) falha se uma tela importar dos kits
+um nome que o substituto não exporta.
+
+O roteiro abaixo segue o código e os textos de `web/src/texts.ts`. Ele depende da API de pé (seção 3) e do
+token do Access; ninguém o executou de ponta a ponta na tela.
 
 1. **O bloco na gaveta (#3).** Aprove uma proposta com devolução (E1, E2, E3) na Fila de aprovação
    (`/pagar/fila`), ou abra uma em Devoluções (`/devolucoes`). Antes do Cron, a gaveta mostra "O Claude está
@@ -252,7 +269,7 @@ falha esperada é a conta de subrequests da #48. Os testes que nomeiam cada crit
 | #2/AC-1 a AC-10 (pedido) | `api/test/http/supplier-requests.test.ts`, `supplier-requests-contract.test.ts`, `api/test/domain/supplier-request.test.ts` |
 | #4/AC-1 a AC-7 (leitura e cobrança) | `api/test/http/supplier-replies.test.ts`, `supplier-replies-contract.test.ts`, `api/test/domain/supplier-reply.test.ts`, `api/test/supplier/reply-*.test.ts`, `follow-up-task.test.ts`, `api/test/cron/tick-supplier-sweep.test.ts` |
 | Orçamento do Cron (#36, #48) | `api/test/claude/budget.test.ts` |
-| #3 e #5 (tela) | `web/src/approval/*.test.tsx`, `web/src/components/*.test.ts(x)`, `web/test/supplier-request*.test.tsx`. **Fora do gate e nunca rodados aqui.** |
+| #3 e #5 (tela) | `web/src/approval/*.test.tsx`, `web/src/components/*.test.ts(x)`, `web/test/supplier-request*.test.tsx`. Rodam no `make check` desde a #53, com os substitutos dos kits. |
 
 Os testes online (`api/test/supplier/online-reply.test.ts` e os de `scripts/kit_online_test.py`) pulam sem as
 credenciais do Supabase.
@@ -280,8 +297,17 @@ com Node 24, porque passa a pasta e não o arquivo.
 
 **Não verificado:**
 
-- A suíte, o typecheck e o build de `web/` nunca rodaram (403 nos pacotes). O Worker deste fork nunca foi
-  publicado.
+- A suíte, o typecheck e o build de `web/` rodam desde a #53, com os substitutos dos kits. O build passa. Na
+  primeira vez que rodaram, o typecheck deu 14 erros e a suíte, 12 falhas em 536 testes, todos em código ou teste do
+  épico (nenhum nos substitutos): `Dossier.tsx` (falta `return_note` em `SOURCE_LABEL`),
+  `SupplierRequestBlock.test.tsx` (`cleanup` sem import), `SupplierRequestList.test.tsx` (`Extract<..., { status:
+  "late" }>` dá `never`), `SupplierRequests.test.tsx` (`.mock` num tipo de função; o chip "Atrasados" que segue em 2
+  depois do reenvio; "por você" na cobrança de outra pessoa), o mapa e o estado dos chips de
+  `components/supplier-request-*.test.ts`, `approval/supplier-request-state.test.ts` (status 0),
+  `SupplierRequestSection.test.tsx` (`{{numero}}` sem substituir), `api/client.test.ts` (o abort vira `ApiError`) e
+  três testes de tela que procuram a gaveta por `role="heading"` (o `Drawer` do DS a escreve num `<p>`) ou
+  esperam o chip sem o " ·". Os kits reais também não foram exercitados aqui (sem acesso). O Worker deste fork
+  nunca foi publicado.
 - As lentes de confiabilidade e de observabilidade não rodaram na revisão.
 - Não há trilha contra um banco real. Os cenários de aceite rodam sobre o `FakePostgrest`
   (`api/test/support/fake-postgrest.ts`), e os testes online pulam sem credencial.
@@ -307,8 +333,9 @@ com Node 24, porque passa a pasta e não o arquivo.
 - `texts.test.ts` para os textos de `web/src/texts.ts`
 - relato de erro na tela (`web/`)
 - validação das respostas em `web/src/api/client.ts`
-- `web/README.md` e `.github/workflows/ci.yml` desatualizados depois da #28 (o README ainda diz que `make check`
-  roda o `web/`, e o `ci.yml` ainda pede `packages: read` e instala com cache do `web/`)
+- `ci.yml` e `deploy-api.yml` ainda exportam `NODE_AUTH_TOKEN` e pedem `packages: read` para o `web/`; inofensivo
+  desde a #53, mas já não é preciso (o push que mexe em `.github/workflows/` pede o escopo `workflow`). O
+  `deploy-api.yml` passa a publicar a tela com os substitutos dos kits
 - paginação da varredura do prazo
 - a corrida que gera duas linhas da mesma devolução na fila
 

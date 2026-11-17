@@ -29,8 +29,8 @@ describe("#20 chips, contagens e linhas", () => {
     expect(INITIAL_STATE).toEqual({ filter: "waiting", drawer: null, charged: {}, sending: [] });
   });
 
-  it("#5/AC-2: a contagem de cada chip segue o mapa de situação para chip (Q2): precisam de você junta confirmar, parcial, informação e recusa", () => {
-    expect(countByChip(rows)).toEqual({ waiting: 1, late: 1, fulfilled: 1, needsYou: 4 });
+  it("#5/AC-2: a contagem de cada chip segue o mapa de situação para chip (Q2): precisam de você junta confirmar, responder, cobrar, parcial, informação e recusa (#50)", () => {
+    expect(countByChip(rows)).toEqual({ waiting: 1, late: 1, fulfilled: 1, needsYou: 6 });
   });
 
   it("#5/AC-2: cada solicitação cai em um só chip: a soma das contagens é o total", () => {
@@ -42,8 +42,15 @@ describe("#20 chips, contagens e linhas", () => {
     expect(countByChip([])).toEqual({ waiting: 0, late: 0, fulfilled: 0, needsYou: 0 });
   });
 
-  it("#5/AC-1: o chip filtra pelas situações dele e 'all' devolve todas, sempre por prazo crescente (Q8)", () => {
-    expect(visibleRows(rows, "needsYou").map((r) => r.id)).toEqual(["r-refused", "r-needsInformation", "r-partiallyFulfilled", "r-fulfilledToConfirm"]);
+  it("#5/AC-1: o chip filtra pelas situações dele, com atendeu a responder e a cobrar em Precisam de você (#50), e 'all' devolve todas, sempre por prazo crescente (Q8)", () => {
+    expect(visibleRows(rows, "needsYou").map((r) => r.id)).toEqual([
+      "r-refused",
+      "r-needsInformation",
+      "r-partiallyFulfilled",
+      "r-fulfilledToFollowUp",
+      "r-fulfilledToAnswer",
+      "r-fulfilledToConfirm",
+    ]);
     expect(visibleRows(rows, "all").map((r) => r.dueOn)).toEqual([...rows.map((r) => r.dueOn)].sort());
   });
 

@@ -51,7 +51,8 @@ function deferred<T>() {
 type Send = SupplierRequestsProps["send"];
 
 function renderScreen(props: Partial<SupplierRequestsProps> = {}) {
-  const send = props.send ?? vi.fn<Send>(async () => SENT);
+  // #20 O `send` sempre sai como mock, para os testes lerem `send.mock.calls` mesmo quando a tela recebeu o seu.
+  const send = vi.fn<Send>(props.send ?? (async () => SENT));
   const onRetry = vi.fn();
   render(<SupplierRequests state="ready" rows={ROWS} onRetry={onRetry} conversationOf={conversationOf} draftOf={draftOf} {...props} send={send} />);
   return { send, onRetry };
@@ -262,7 +263,8 @@ describe("#20 SupplierRequests: cobrar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tentar enviar de novo" }));
     expect(await screen.findByText(/Cobrança enviada por você em 15\/11/)).toBeTruthy();
     expect(send).toHaveBeenCalledTimes(2);
-    expect(chip(/^Atrasados/).textContent).toMatch(/1/);
+    // #5/AC-2 A linha cobrada segue em Atrasados (#49): a contagem não muda com a cobrança.
+    expect(chip(/^Atrasados/).textContent).toMatch(/2/);
   });
 
   it("#5/AC-4: um envio que rejeita mostra a mensagem genérica, nunca o texto do erro, e a linha segue Atrasado", async () => {
@@ -412,7 +414,9 @@ describe("#21 SupplierRequests: cobrança já feita pelo servidor, quem enviou e
     clickCobrar("59738");
     fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
     expect(await screen.findByText(/Cobrança enviada por beto@example.test em 15\/11/)).toBeTruthy();
-    expect(screen.queryByText(/por você/)).toBeNull();
+    // #5/AC-4 A cobrança não diz "por você". O único "por você" que sobra é o da nota de devolução do pedido (texts.supplierRequests.conversation.sent, #19), emitida por quem olha a tela.
+    expect(screen.queryByText(/Cobrança enviada por você/)).toBeNull();
+    expect(screen.getAllByText(/por você/).map((node) => node.textContent)).toEqual([expect.stringMatching(/^Nota de devolução ND 6 .* emitida e enviada por você em 07\/11/)]);
   });
 
   it("#5/AC-4: o 409 que não saiu e deixou a gaveta sem rascunho mostra a falha fechada, nunca o texto do servidor", async () => {

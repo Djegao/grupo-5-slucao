@@ -98,7 +98,8 @@ describe("#3 estado do pedido ao fornecedor: mensagem por status", () => {
     [409, errors.conflict],
     [422, errors.unprocessable],
     [500, errors.other],
-    [0, errors.other],
+    // #17 O status 0 é o prazo estourado da chamada: a mensagem é a do prazo (errors.timeout), não a genérica.
+    [0, errors.timeout],
   ])("#3/AC-4: o status %i vira a mensagem do texto", (status, message) => {
     expect(supplierRequestError(new ApiError(status, "detalhe_interno", "corpo cru da API"))).toBe(message);
   });

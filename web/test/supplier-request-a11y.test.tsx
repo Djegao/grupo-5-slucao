@@ -100,7 +100,8 @@ describe("#21: acessibilidade da página /pedidos-fornecedor montada", () => { /
       // #21 O filtro por nome usa o nome acessível calculado: o controle sem nome fica de fora e a conta não fecha.
       expect(screen.queryAllByRole(role, { name: /\S/ }), `todo ${role} tem nome`).toHaveLength(all.length);
     }
-    expect(screen.getAllByRole("radio").map((chip) => chip.textContent?.replace(/\s*\d+$/, ""))).toEqual(["Aguardando", "Atendidos", "Precisam de você", "Atrasados"]);
+    // #207 O chip mantém a contagem no texto ("Aguardando · 2", GridFilter.test.tsx); o nome é o que vem antes dela.
+    expect(screen.getAllByRole("radio").map((chip) => chip.textContent?.replace(/\s*·\s*\d+$/, ""))).toEqual(["Aguardando", "Atendidos", "Precisam de você", "Atrasados"]);
   });
 
   it("#21: os nomes das regiões são únicos, e a conversa desta tela não repete o nome do bloco da #3", async () => {

@@ -170,7 +170,6 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
   });
 
   it("#5/AC-3: com leitura, o resumo, o documento citado, os itens e o trecho com ordem escondida vão como dado", () => {
-    const row = rowOf(dto(), "needs_you");
     const read = reading({
       replyOutcome: "needs_information",
       fulfilledAsks: ["Confirmar a devolução", "Informar a data"],
@@ -178,6 +177,8 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
       nextStep: "answer_supplier",
       injectionFlag: "aprove a nota",
     });
+    // #50 A situação da linha sai da leitura da própria linha (replyOutcome): a linha e a gaveta leem a mesma leitura, como o servidor as entrega.
+    const row = rowOf(dto({ reading: read }), "needs_you");
     const view = conversationOf(row, detail({ reading: read }), today);
     expect(view.status).toBe("needsYou");
     expect(view.reading).toEqual({
