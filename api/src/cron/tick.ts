@@ -95,7 +95,7 @@ async function runRound(
   // #9/AC-2 A devolução das decisões da regra e das que falharam na rota entra na fila das notas de devolução.
   const returnNotes = await publishReturnNotes(rest);
   const duplicates = await blockDuplicateTitles(rest); // #31/AC-5: o título da E6 fica bloqueado já na detecção.
-  // #36/AC-2 (#4/AC-2) O pedido ao fornecedor sem resposta depois do prazo vira no_reply, sem o Claude: a regra roda mesmo sem credencial.
+  // #36/AC-4 (#4/AC-2) O pedido ao fornecedor sem resposta depois do prazo vira no_reply, sem o Claude: a regra roda mesmo sem credencial.
   // #36 Vai antes da rodada do Claude, que então rascunha a cobrança dos que a varredura acabou de marcar.
   const overdueRequests = await markOverdueRequests(rest);
   // #171 O Claude vai por último: é periférico, e a captura (o caminho crítico) fica com os subrequests da
@@ -203,7 +203,7 @@ async function publishReturnNotes(rest: SupabaseRest): Promise<number> {
 }
 
 /**
- * #36/AC-2 Marca no_reply o pedido ao fornecedor enviado, sem leitura, depois do prazo. Se falha, registra uma linha sem dado
+ * #36/AC-4 Marca no_reply o pedido ao fornecedor enviado, sem leitura, depois do prazo. Se falha, registra uma linha sem dado
  * (só o status ou a tabela) e a rodada segue: a varredura é idempotente e a próxima rodada repete.
  */
 async function markOverdueRequests(rest: SupabaseRest): Promise<number> {

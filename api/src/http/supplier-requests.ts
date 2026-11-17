@@ -208,7 +208,7 @@ async function list(ctx: Ctx, status: RequestStatus): Promise<Response> {
   return Response.json({ requests: views });
 }
 
-/** #36/AC-3 (#4/AC-3): a lista de leitura da tela dos pedidos ao fornecedor: o filtro, os pedidos dele e as contagens de todos, com o dia de hoje em São Paulo. */
+/** #36/AC-2 (#4/AC-3): a lista de leitura da tela dos pedidos ao fornecedor: o filtro, os pedidos dele e as contagens de todos, com o dia de hoje em São Paulo. */
 async function listReadings(ctx: Ctx, filter: RequestFilter): Promise<Response> {
   return Response.json(listOf(await ctx.replyCases.listRequests(filter, todayIso(ctx.reply.clock.now()))));
 }
