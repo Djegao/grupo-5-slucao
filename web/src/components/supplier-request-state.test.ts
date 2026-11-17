@@ -17,7 +17,7 @@ function row(id: string, status: SupplierRowStatus, dueOn: string): SupplierRequ
   return status === "fulfilledToConfirm" ? { ...base, status, document: "ND 881" } : { ...base, status };
 }
 
-const ALL_STATUSES: SupplierRowStatus[] = ["waiting", "late", "fulfilledToConfirm", "fulfilled", "partiallyFulfilled", "needsInformation", "refused"];
+const ALL_STATUSES: SupplierRowStatus[] = ["waiting", "late", "fulfilledToConfirm", "fulfilledToAnswer", "fulfilledToFollowUp", "fulfilled", "partiallyFulfilled", "needsInformation", "refused"];
 const rows = ALL_STATUSES.map((status, index) => row(`r-${status}`, status, `2026-11-${String(20 - index).padStart(2, "0")}`));
 
 function run(actions: ScreenAction[], from: ScreenState = INITIAL_STATE): ScreenState {
@@ -173,15 +173,40 @@ describe("#20 a linha depois da cobrança", () => {
     expect(run([{ type: "openFollowUp", id: "r-late" }], closed)).toEqual(closed);
   });
 
-  it("#5/AC-2: a atrasada cobrada passa a Aguardando com o novo prazo e sai de Atrasados: 2 viram 1, Aguardando 1 vira 2 (Q7)", () => {
+  it("#5/AC-2: a atrasada cobrada nesta sessão segue atrasada, com o prazo que veio, marcada como cobrada, e as contagens não mudam (#5/AC-4)", () => {
     const input = [row("a", "late", "2026-11-12"), row("b", "late", "2026-11-14"), row("c", "waiting", "2026-11-20")];
     const after = applyCharges(input, { a: { dueOn: "2026-11-20", sentOn: "2026-11-15" } });
-    expect(after[0]).toEqual({ id: "a", invoiceNumber: "a", supplier: "F07 Limpeza", request: "Nota de devolução", amountCents: 1000, dueOn: "2026-11-20", status: "waiting" });
-    expect(countByChip(after)).toEqual({ waiting: 2, late: 1, fulfilled: 0, needsYou: 0 });
+    expect(after[0]).toEqual({ ...input[0], alreadyCharged: true });
+    expect(after[0]?.dueOn).toBe("2026-11-12");
+    expect(countByChip(after)).toEqual(countByChip(input));
     expect(after[1]).toBe(input[1]);
+    expect(after[2]).toBe(input[2]);
   });
 
   it("#5/AC-2: sem cobrança feita a lista volta como veio", () => {
     expect(applyCharges(rows, {})).toBe(rows);
+  });
+});
+
+describe("#21 cobranças que o servidor já fez", () => {
+  const lateCharged: SupplierRequestRow = { ...row("r-late", "late", "2026-11-14"), alreadyCharged: true };
+
+  it("#5/AC-4: a linha que o servidor já cobrou fica no chip dele: sem cobrança da sessão, nem a linha nem as contagens mudam", () => {
+    expect(applyCharges([lateCharged], {})).toEqual([lateCharged]);
+    expect(applyCharges([lateCharged], {})[0]?.status).toBe("late");
+    expect(visibleRows([lateCharged], "late")).toEqual([lateCharged]);
+  });
+
+  it("#5/AC-4: a cobrança desta sessão de outra linha não mexe na que o servidor cobrou", () => {
+    const other = row("r-other", "late", "2026-11-12");
+    const session = { "r-other": { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
+    expect(applyCharges([lateCharged, other], session)[0]).toEqual(lateCharged);
+    expect(applyCharges([lateCharged, other], session)[1]).toEqual({ ...other, alreadyCharged: true });
+  });
+
+  it("#5/AC-4: o envio feito leva quem enviou à fase enviado", () => {
+    const opened = run([{ type: "openRow", id: "r-late" }, { type: "openFollowUp", id: "r-late" }, { type: "sendStarted", id: "r-late" }]);
+    const done = screenReducer(opened, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-19", sentOn: "2026-11-16", sentBy: "beto@example.test" });
+    expect(done.drawer?.followUp?.phase).toEqual({ phase: "sent", sentOn: "2026-11-16", sentBy: "beto@example.test" });
   });
 });

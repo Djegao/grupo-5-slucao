@@ -11,6 +11,8 @@ export type SupplierRowStatus =
   | "waiting"
   | "late"
   | "fulfilledToConfirm"
+  | "fulfilledToAnswer"
+  | "fulfilledToFollowUp"
   | "fulfilled"
   | "partiallyFulfilled"
   | "needsInformation"
@@ -26,6 +28,8 @@ interface SupplierRequestRowBase {
   amountCents: number;
   /** #19 Data ISO (AAAA-MM-DD) do prazo. */
   dueOn: string;
+  /** #5/AC-4 O servidor já enviou a cobrança desta linha (followUp.sent, #36): ela segue no chip que o servidor deu, sem "Cobrar"; a atrasada lê "Atrasado (cobrado)". */
+  alreadyCharged?: boolean;
 }
 
 /** #19 Só `fulfilledToConfirm` mostra o documento ("Atendeu: ND 881"), e por isso o exige: nenhuma outra situação o aceita. */
@@ -47,7 +51,10 @@ export type SupplierBlockStatus =
   | "waiting"
   | "waitingCharged"
   | "late"
+  | "lateCharged"
   | "fulfilledToConfirm"
+  | "fulfilledToAnswer"
+  | "fulfilledToFollowUp"
   | "fulfilled"
   | "partiallyFulfilled"
   | "needsYou"

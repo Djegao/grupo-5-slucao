@@ -99,6 +99,12 @@ describe("#19 SupplierRequestList", () => {
     expect(screen.getAllByRole("button", { name: "Cobrar" })).toHaveLength(1);
   });
 
+  it("#5/AC-4: a linha atrasada que o servidor já cobrou lê 'Atrasado (cobrado)' e não tem 'Cobrar'", () => {
+    renderList({ filter: "late", rows: [{ ...late, alreadyCharged: true }] });
+    expect(screen.getByText("Atrasado (cobrado)")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cobrar" })).toBeNull();
+  });
+
   it("#5/AC-1: a coluna Status desenha a variante de cada situação, e o documento citado a confirmar", () => {
     renderList({
       filter: "all",
@@ -115,6 +121,20 @@ describe("#19 SupplierRequestList", () => {
       expect(screen.getAllByText(text).length).toBeGreaterThan(0);
     }
     expect(screen.getByText("(citada, falta confirmar)")).toBeTruthy();
+  });
+
+  it("#5/AC-2: atendeu com próximo passo responder ou cobrar diz 'Atendeu, falta responder' e 'Atendeu, falta cobrar', sem a nota de documento", () => {
+    renderList({
+      filter: "all",
+      rows: [
+        { ...late, id: "e", invoiceNumber: "5", status: "fulfilledToAnswer" },
+        { ...late, id: "f", invoiceNumber: "6", status: "fulfilledToFollowUp" },
+      ],
+    });
+    expect(screen.getByText("Atendeu, falta responder")).toBeTruthy();
+    expect(screen.getByText("Atendeu, falta cobrar")).toBeTruthy();
+    expect(screen.queryByText("(citada, falta confirmar)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cobrar" })).toBeNull();
   });
 
   it("#18: carregando mostra o aviso de carga e os chips sem contagem inventada", () => {

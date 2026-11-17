@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FollowUpDraftView } from "../components/supplier-request-view";
+import { ViewerProvider } from "../shell/viewer";
 import { FollowUpDraft, type FollowUpPhaseState } from "./FollowUpDraft";
 
 // #19 O rascunho da cobrança do bloco "Pedido ao fornecedor" (história #5), um teste por estado 8, 9 e 10 do wireframe (#18).
@@ -64,6 +65,30 @@ describe("#19 FollowUpDraft", () => {
     expect((screen.getByRole("button", { name: "Descartar rascunho" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("#5/AC-4: enviada por outra pessoa, a frase diz o nome dela e não 'por você'; sem remetente ou sendo quem olha a tela, 'por você'", () => {
+    const sent = { phase: "sent", sentOn: "2026-11-15", sentTime: "10:12" } as const;
+    const handlers = { onEdit: vi.fn(), onBodyChange: vi.fn(), onSend: vi.fn(), onDiscard: vi.fn(), onRetry: vi.fn() };
+    const { rerender } = render(
+      <ViewerProvider email="ana@example.test">
+        <FollowUpDraft draft={draft} editing={false} {...handlers} {...sent} sentBy="beto@example.test" />
+      </ViewerProvider>,
+    );
+    expect(screen.getByText("Cobrança enviada por beto@example.test em 15/11 às 10:12 · aguardando resposta até 20/11.")).toBeTruthy();
+    expect(screen.queryByText(/por você/)).toBeNull();
+    rerender(
+      <ViewerProvider email="ana@example.test">
+        <FollowUpDraft draft={draft} editing={false} {...handlers} {...sent} sentBy="ana@example.test" />
+      </ViewerProvider>,
+    );
+    expect(screen.getByText(/Cobrança enviada por você em 15\/11/)).toBeTruthy();
+    rerender(
+      <ViewerProvider email="ana@example.test">
+        <FollowUpDraft draft={draft} editing={false} {...handlers} {...sent} sentBy={null} />
+      </ViewerProvider>,
+    );
+    expect(screen.getByText(/Cobrança enviada por você em 15\/11/)).toBeTruthy();
+  });
+
   it("#5/AC-4: enviada, mostra quem enviou e até quando se espera a resposta, sem o rascunho", () => {
     renderDraft({ phase: "sent", sentOn: "2026-11-15", sentTime: "10:12" });
     expect(screen.getByText("Cobrança enviada por você em 15/11 às 10:12 · aguardando resposta até 20/11.")).toBeTruthy();
@@ -88,5 +113,13 @@ describe("#19 FollowUpDraft", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("A cobrança não saiu. Tente de novo em um minuto.");
     expect(alert.textContent).not.toMatch(/smtp|550|stack|undefined|\[object/i);
+  });
+
+  it("#21: sem `onEdit` o texto não se edita: o botão 'Editar' não existe, e enviar e descartar seguem", () => {
+    const handlers = { onBodyChange: vi.fn(), onSend: vi.fn(), onDiscard: vi.fn(), onRetry: vi.fn() };
+    render(<FollowUpDraft draft={draft} editing={false} {...handlers} phase="review" />);
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Enviar cobrança" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descartar rascunho" })).toBeTruthy();
   });
 });

@@ -8,6 +8,8 @@ const CHIP_OF_STATUS: Record<SupplierRowStatus, SupplierFilter> = {
   waiting: "waiting",
   late: "late",
   fulfilledToConfirm: "needsYou",
+  fulfilledToAnswer: "needsYou",
+  fulfilledToFollowUp: "needsYou",
   fulfilled: "fulfilled",
   partiallyFulfilled: "needsYou",
   needsInformation: "needsYou",
@@ -28,7 +30,7 @@ export function visibleRows(rows: SupplierRequestRow[], filter: SupplierFilterVa
 }
 
 /** #5/AC-4 O que o envio devolve: quando saiu, ou o motivo fechado da falha; o texto de um erro de fora nunca entra (layer-exposure). */
-export type SendResult = { ok: true; sentOn: string; sentTime?: string } | { ok: false; failure: FollowUpFailure };
+export type SendResult = { ok: true; sentOn: string; sentTime?: string; sentBy?: string | null } | { ok: false; failure: FollowUpFailure };
 
 /** #5/AC-4 Uma cobrança que saiu: o novo prazo da linha e quando foi enviada. */
 export interface ChargedRequest {
@@ -37,15 +39,10 @@ export interface ChargedRequest {
   sentTime?: string;
 }
 
-/** #5/AC-2 A linha cobrada passa a Aguardando com o novo prazo e sai de Atrasados (Q7, estado 9 do wireframe). */
+/** #5/AC-2 A linha cobrada nesta sessão vale como a que o servidor já cobrou: segue na situação e no prazo que veio, marcada `alreadyCharged` (sem "Cobrar", "Atrasado (cobrado)"); as demais ficam como vieram. */
 export function applyCharges(rows: SupplierRequestRow[], charged: Record<string, ChargedRequest>): SupplierRequestRow[] {
   if (Object.keys(charged).length === 0) return rows;
-  return rows.map((row): SupplierRequestRow => {
-    const charge = charged[row.id];
-    if (!charge) return row;
-    const { id, invoiceNumber, supplier, request, amountCents } = row;
-    return { id, invoiceNumber, supplier, request, amountCents, dueOn: charge.dueOn, status: "waiting" };
-  });
+  return rows.map((row): SupplierRequestRow => (charged[row.id] ? { ...row, alreadyCharged: true } : row));
 }
 
 /** #5/AC-4 O rascunho aberto: a fase, se o texto está liberado e o texto editado (`null` enquanto vale o do rascunho). */
@@ -82,7 +79,7 @@ export type ScreenAction =
   | { type: "changeBody"; body: string }
   | { type: "discard" }
   | { type: "sendStarted"; id: string }
-  | { type: "sendSucceeded"; id: string; dueOn: string; sentOn: string; sentTime?: string }
+  | { type: "sendSucceeded"; id: string; dueOn: string; sentOn: string; sentTime?: string; sentBy?: string | null }
   | { type: "sendFailed"; id: string; failure: FollowUpFailure };
 
 /** #5/AC-4 O texto e o descarte só mudam em revisão ou depois de uma falha: enviando e enviado ficam como estão. */
@@ -103,13 +100,14 @@ function openFollowUp(state: ScreenState, id: string): ScreenState {
 }
 
 function sendSucceeded(state: ScreenState, action: Extract<ScreenAction, { type: "sendSucceeded" }>): ScreenState {
-  const { id, dueOn, sentOn, sentTime } = action;
+  const { id, dueOn, sentOn, sentTime, sentBy } = action;
   const time = sentTime === undefined ? {} : { sentTime };
+  const by = sentBy === undefined ? {} : { sentBy };
   const charged = { ...state.charged, [id]: { dueOn, sentOn, ...time } };
   const sending = state.sending.filter((sendingId) => sendingId !== id);
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
   if (!state.drawer || !flow) return { ...state, charged, sending };
-  return { ...state, charged, sending, drawer: { ...state.drawer, followUp: { ...flow, phase: { phase: "sent", sentOn, ...time } } } };
+  return { ...state, charged, sending, drawer: { ...state.drawer, followUp: { ...flow, phase: { phase: "sent", sentOn, ...time, ...by } } } };
 }
 
 /** #5/AC-4 A falha libera o id em envio mesmo com a gaveta fechada; o motivo só entra no rascunho que ainda está aberto (#20). */

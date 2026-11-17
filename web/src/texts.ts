@@ -331,11 +331,31 @@ export const texts = {
     rowLabel: (invoice: string, supplier: string) => `Nota ${invoice}, ${supplier}`,
     tableEmpty: "Nenhum pedido.",
     follow: "Cobrar",
+    /** #21 O tipo do pedido (requestType do contrato), na coluna Solicitação. */
+    requestTypes: { return_note: "Nota de devolução" },
+    /** #21 A gaveta enquanto lê o pedido; o motivo do erro é um dos fechados de api/supplier-reply.ts, nunca o texto da API. */
+    drawer: {
+      loading: "Carregando o pedido ao fornecedor…",
+      errors: {
+        unauthorized: "Sua sessão não permite ver este pedido. Entre de novo.",
+        not_found: "Este pedido não foi encontrado.",
+        conflict: "Este pedido mudou. Feche a gaveta e abra de novo.",
+        unavailable: "Não consegui falar com o servidor agora.",
+        unknown: "Não consegui carregar o pedido ao fornecedor.",
+      },
+      retry: "Tentar de novo",
+    },
     /** #19 O texto da coluna Status, uma variante por situação (mapa Q2). */
     status: {
       waiting: "Aguardando",
       late: "Atrasado",
+      /** #21 Cobrado pelo servidor e ainda atrasado nele: segue em Atrasados, sem "Cobrar" (#5/AC-4). */
+      lateCharged: "Atrasado (cobrado)",
       fulfilledToConfirm: (document: string) => `Atendeu: ${document}`,
+      /** #21 Atendeu e o próximo passo da leitura é responder ao fornecedor (#5/AC-2). */
+      fulfilledToAnswer: "Atendeu, falta responder",
+      /** #21 Atendeu e o próximo passo da leitura é cobrar (#5/AC-2). */
+      fulfilledToFollowUp: "Atendeu, falta cobrar",
       fulfilled: "Atendeu",
       partiallyFulfilled: "Atendeu parcialmente",
       needsInformation: "Pediu informação",
@@ -359,11 +379,21 @@ export const texts = {
     /** #19 O bloco da conversa na gaveta. */
     conversation: {
       title: "Pedido ao fornecedor",
+      /** #21 O nome da região da conversa: distinto do bloco da #3, que também se chama "Pedido ao fornecedor". */
+      regionLabel: "Conversa e leitura do pedido",
+      /** #21 A resposta já foi lida, mas o contrato (#36) não traz o texto dela: a tela não afirma que ninguém respondeu. */
+      replyNotShown: "O fornecedor respondeu. O texto da resposta não é mostrado aqui; a leitura do agente está abaixo.",
       blockStatus: {
         waiting: "Aguardando",
         waitingCharged: "Aguardando (cobrado)",
         late: "Atrasado",
+        /** #21 O servidor já enviou a cobrança e ainda conta o pedido atrasado: o chip é o dele, e a tela só avisa que foi cobrado. */
+        lateCharged: "Atrasado (cobrado)",
         fulfilledToConfirm: "Atendeu, falta confirmar",
+        /** #21 Atendeu e o próximo passo da leitura é responder ao fornecedor (#5/AC-2). */
+        fulfilledToAnswer: "Atendeu, falta responder",
+        /** #21 Atendeu e o próximo passo da leitura é cobrar (#5/AC-2). */
+        fulfilledToFollowUp: "Atendeu, falta cobrar",
         fulfilled: "Atendeu",
         partiallyFulfilled: "Atendeu parcialmente",
         needsYou: "Precisa de você",
@@ -405,12 +435,17 @@ export const texts = {
       subject: "Assunto",
       body: "Texto",
       attachment: "Anexo",
+      /** #21 A cobrança sai sem anexo (o servidor manda `attachments: []`, #36). */
+      noAttachment: "Nenhum",
+      /** #21 O contrato traz o rascunho nulo quando ele já não confere com o catálogo (#36). */
+      unavailable: "O rascunho da cobrança não está disponível agora.",
       edit: "Editar",
       send: "Enviar cobrança",
       discard: "Descartar rascunho",
       sending: "Enviando a cobrança…",
-      sent: (on: string, time: string | undefined, due: string) =>
-        `Cobrança enviada por você em ${on}${time ? ` às ${time}` : ""} · aguardando resposta até ${due}.`,
+      /** #5/AC-4 `by` é "por você" ou "por fulano" (quem enviou, quando não é quem olha a tela). */
+      sent: (by: string, on: string, time: string | undefined, due: string) =>
+        `Cobrança enviada ${by} em ${on}${time ? ` às ${time}` : ""} · aguardando resposta até ${due}.`,
       retry: "Tentar enviar de novo",
       /** #19 O motivo do envio falho é um dos desenhados; o texto do servidor de e-mail nunca chega à tela (layer-exposure). */
       failed: {
