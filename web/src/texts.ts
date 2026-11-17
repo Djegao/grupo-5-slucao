@@ -445,6 +445,29 @@ export const texts = {
     needsLevelDescription: "Você só vê a proposta. Quem tem o nível decide na fila.",
   },
 
+  /** #231 O bloco "Agente auditor" da gaveta, como no wireframe aprovado (docs/wireframes/auditor-gaveta.md). */
+  auditor: {
+    title: "Agente auditor",
+    pending: "Auditoria pendente. Decida pelas evidências da conferência.",
+    notAudited: "Não auditada",
+    decideByEvidence: "Decida pelas evidências da conferência.",
+    injectionNotice: "Aviso: um trecho da nota tentou dar ordem ao agente. Ele não obedeceu.",
+    agrees: "Concorda com a regra",
+    disagrees: (phrases: string) => `Discorda: ${phrases}`,
+    differs: {
+      classification: (auditor: string, proposed: string) => `classifica como ${auditor}, não ${proposed}`,
+      dockAction: (auditor: string, proposed: string) => `ação na doca: ${auditor}, não ${proposed}`,
+      routing: (level: string) => `encaminha para ${level}`,
+    },
+    raisedTo: (level: string) => `A proposta subiu para ${level}.`,
+    auditedBy: (model: string, time: string) => `Auditado por ${model} às ${time}.`,
+    notAuditedReason: {
+      claude_falhou: "O Claude não conseguiu auditar esta nota.", // ADR-002
+      erro_de_tool: "Uma ferramenta falhou durante a auditoria.", // ADR-002
+      sem_auditoria: "Esta nota não teve auditoria.", // ADR-002
+    },
+  },
+
   dossier: {
     unavailableTitle: "Não há dossiê do Claude para esta proposta.",
     notGenerated: "Dossiê ainda não gerado. Decida pelas evidências da conferência.",
