@@ -261,6 +261,7 @@ describe('#33/AC-5: todo pedido enviado cai em um filtro só', () => {
     }
   });
   it('#50/AC-3: o pedido sem leitura cai em um filtro nos três dias, e o que não foi enviado em nenhum', () => {
+    for (const today of ['2026-11-13', DUE, '2026-11-18']) expect(filterOf(sent, null, today)).not.toBeNull();
     for (const status of ['draft', 'send_failed', 'discarded'] as const) {
       for (const x of [null, read({}), read({ replyOutcome: 'no_reply', nextStep: 'follow_up' })]) {
         for (const today of ['2026-11-13', DUE, '2026-11-18']) expect(filterOf({ status, dueOn: DUE }, x, today)).toBeNull();
