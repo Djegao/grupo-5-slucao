@@ -100,7 +100,7 @@ describe('#36/AC-4 a conta das subrequests da rodada do Cron, medida na rodada d
     expect(m.total).toBe(MEASURED_TOTAL);
   });
 
-  // #36/AC-4 Lacuna conhecida: a conta medida passa dos 50 do plano gratuito; este teste passa a falhar (e deve virar `it`) quando a conta voltar a caber.
+  // #48 Lacuna conhecida: a conta medida passa dos 50 do plano gratuito; este teste passa a falhar (e deve virar `it`) quando a conta voltar a caber; trazer a conta a 50 é da #48 (Cron dentro de 50 subrequests).
   it.fails('a varredura e a rodada do Claude cabem nos 50 subrequests do plano gratuito', async () => {
     const m = await measureRound();
     expect(m.total).toBeLessThanOrEqual(SUBREQUEST_LIMIT);

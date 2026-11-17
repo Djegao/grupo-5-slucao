@@ -18,12 +18,13 @@ export const SUPPLIER_REPLY_LIMIT = 1;
 
 export function tasksFor(rest: SupabaseRest): readonly ClaudeTask<unknown, unknown>[] {
   // #36/AC-3: estas tarefas nunca enviam: o envio da cobrança é só da rota, por uma pessoa; o `mailer` padrão aqui nem é chamado.
+  // #36 A ordem é a da fome: com o Worker no plano gratuito (50 subrequests), passado o limite todo fetch lança e as últimas tarefas não rodam; as duas da #4 (a leitura e a cobrança) vêm antes da ordem provável para não serem as primeiras a passar fome. O que sobra de fora é a lacuna da #48.
   const reply = replyDeps(rest);
   return [
     { ...descriptionMatch, limit: DESCRIPTION_MATCH_LIMIT }, // #66 casamento de descrição do item sem cadastro; #36 de 5 para 1 por rodada (mais lento, para caber nas subrequests)
-    { ...probableOrderTask(rest), limit: PROBABLE_ORDER_LIMIT }, // #65 ordem provável da nota sem ordem (E5); #36 de 5 para 1 por rodada (mais lento, para caber nas subrequests)
-    supplierRequestDraftTask(supplierDeps(rest)), // #12 rascunho do pedido ao fornecedor (#2/AC-1); não emite nem envia
     { ...supplierReplyReadingTask(reply), limit: SUPPLIER_REPLY_LIMIT }, // #36 leitura da resposta do fornecedor (#4/AC-1); grava só a leitura e o status da mensagem
     { ...supplierFollowUpDraftTask(reply), limit: SUPPLIER_REPLY_LIMIT }, // #36 rascunho da cobrança do pedido atrasado (#4/AC-2); nunca envia
+    { ...probableOrderTask(rest), limit: PROBABLE_ORDER_LIMIT }, // #65 ordem provável da nota sem ordem (E5); #36 de 5 para 1 por rodada (mais lento, para caber nas subrequests)
+    supplierRequestDraftTask(supplierDeps(rest)), // #12 rascunho do pedido ao fornecedor (#2/AC-1); não emite nem envia
   ] as readonly ClaudeTask<unknown, unknown>[];
 }
