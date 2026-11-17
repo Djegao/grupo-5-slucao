@@ -28,7 +28,8 @@ describe('#12/AC-5 do rascunho ao envio pela caixa de saída mock', () => { // A
     });
     expect(String(fake.rows('outbox_supplier_emails')[0]?.provider_message_id)).toMatch(/^mock-/);
     expect(fake.rows('outbox_supplier_emails')[0]?.attachments).toEqual([
-      { filename: 'ND-1.json', content_type: 'application/json', issued_return_note_id: 1 },
+      { filename: 'nota-devolucao-ND-1.json', content_type: 'application/json', issued_return_note_id: 1 },
+      { filename: 'nota-devolucao-ND-1.pdf', content_type: 'application/pdf', issued_return_note_id: 1 }, // #57/AC-1
     ]);
   });
 

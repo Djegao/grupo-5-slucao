@@ -49,9 +49,23 @@ describe('#11/AC-4 emitir e enviar', () => { // ADR-002
       sent: {
         channel: 'resend',
         providerMessageId: 'msg-9',
-        attachments: [{ filename: 'ND-101.json', contentType: 'application/json', issuedReturnNoteId: 101 }],
+        attachments: [
+          { filename: 'nota-devolucao-ND-101.json', contentType: 'application/json', issuedReturnNoteId: 101 },
+          { filename: 'nota-devolucao-ND-101.pdf', contentType: 'application/pdf', issuedReturnNoteId: 101 },
+        ],
       },
     });
+  });
+
+  it('#57/AC-1: o e-mail leva dois anexos, o JSON e o PDF da nota', async () => { // ADR-002
+    const w = await drafted();
+    await createSupplierUseCases(w.deps).send(41, BY);
+    const attachments = w.mailer.sent[0]?.attachments ?? [];
+    expect(attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['nota-devolucao-ND-101.json', 'application/json'],
+      ['nota-devolucao-ND-101.pdf', 'application/pdf'],
+    ]);
+    expect(attachments[1]?.content.startsWith('%PDF-1.4')).toBe(true);
   });
 
   it('pedido que não existe é not_found, sem emitir nada', async () => { // ADR-002
@@ -118,7 +132,18 @@ describe('#11/AC-5 reenviar nunca emite outra nota', () => { // ADR-002
     expect(statusOf(w, 41)).toBe('sent');
     expect(w.queue.views[0]?.emitted?.number).toBe('101');
     expect(w.mailer.sent).toHaveLength(2);
-    expect(w.mailer.sent[1]?.attachments[0]?.filename).toBe('ND-101.json');
+    expect(w.mailer.sent[1]?.attachments[0]?.filename).toBe('nota-devolucao-ND-101.json');
+  });
+
+  it('#57/AC-6: o reenvio anexa o mesmo PDF da primeira tentativa, sem emitir outra nota', async () => { // ADR-002
+    const w = await drafted(fakeMailer({ ok: false, reason: 'caixa_de_saida_indisponivel' }));
+    const useCases = createSupplierUseCases(w.deps);
+    await useCases.send(41, BY);
+    expect((await useCases.send(41, BY)).kind).toBe('ok');
+    const [first, second] = w.mailer.sent.map((m) => m.attachments.find((a) => a.contentType === 'application/pdf'));
+    expect(first?.filename).toBe('nota-devolucao-ND-101.pdf');
+    expect(second).toEqual(first);
+    expect(w.notes.issuedCount).toBe(1);
   });
 
   it('o reenvio que falha de novo troca o motivo e continua send_failed', async () => { // ADR-002

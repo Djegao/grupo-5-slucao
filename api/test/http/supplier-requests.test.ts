@@ -76,7 +76,7 @@ describe('#2/AC-4 emitir gera chave e número pelo mock e a fila passa a emitida
     const sent = await w.call('POST', w.path('/send'), { body: {} });
 
     expect(sent.status).toBe(200);
-    expect(requestOf(sent)).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'ND-1.json' } }); // ADR-002
+    expect(requestOf(sent)).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'nota-devolucao-ND-1.pdf' } }); // ADR-002
     const note = await w.call('GET', w.path('/return-note.json'));
     expect(note.body.chave).toMatch(/^\d{44}$/);
     expect(note.body.numero).toBe(1);
@@ -112,7 +112,7 @@ describe('#2/AC-5 emitir de novo a mesma devolução não gera outra nota', () =
     expect(requestOf(resent)).toMatchObject({ status: 'sent', returnNote: { number: 'ND-1' } }); // ADR-002
     expect(w.rows('issued_return_notes')).toHaveLength(1);
     expect(mailer.sent).toHaveLength(2);
-    expect(mailer.sent[1]?.attachments[0]?.filename).toBe('ND-1.json');
+    expect(mailer.sent[1]?.attachments.map((a) => a.filename)).toEqual(['nota-devolucao-ND-1.json', 'nota-devolucao-ND-1.pdf']); // #57/AC-6
   });
 });
 
@@ -127,7 +127,7 @@ describe('#2/AC-6 o e-mail sai pela caixa de saída mock quando não há chave d
     const row = w.rows('outbox_supplier_emails')[0];
     expect(row).toMatchObject({ status: 'sent', channel: 'mock' }); // ADR-002
     expect(String(row?.provider_message_id)).toMatch(/^mock-/);
-    expect(row?.attachments).toHaveLength(1);
+    expect(row?.attachments).toHaveLength(2); // #57/AC-1
   });
 });
 
@@ -239,5 +239,54 @@ describe('#2 canto: sem credencial do Claude, ou com 401 ou 429, nenhum rascunho
     expect(w.rows('outbox_supplier_emails')).toHaveLength(0);
     expect(log.join('\n')).not.toContain('chave-de-teste');
     expect(requestOf(await w.call('GET', w.path()))).toEqual({ status: 'writing' });
+  });
+});
+
+describe('#57 o e-mail do envio leva o JSON e o PDF da nota (cenário da história)', () => { // ADR-002
+  it('#57/AC-1 #57/AC-2: Dado um rascunho com nota, quando a pessoa envia, então a caixa de saída mock leva dois anexos e o GET do PDF o devolve', async () => { // ADR-002
+    const w = await supplierWorld();
+    await w.runCron();
+    expect((await w.call('POST', w.path('/send'), { body: {} })).status).toBe(200);
+
+    const [email] = w.rows('outbox_supplier_emails');
+    expect(email?.channel).toBe('mock');
+    const attachments = email?.attachments as Json[];
+    expect(attachments.map((a) => a.filename)).toEqual(['nota-devolucao-ND-1.json', 'nota-devolucao-ND-1.pdf']);
+    const pdf = await w.download(w.path('/return-note.pdf'));
+    expect([pdf.status, pdf.headers.get('content-type')]).toEqual([200, 'application/pdf']);
+  });
+
+  it('#57/AC-3: o PDF devolvido traz o que o JSON da nota traz', async () => { // ADR-002
+    const w = await supplierWorld();
+    await w.runCron();
+    await w.call('POST', w.path('/send'), { body: {} });
+    const note = (await w.call('GET', w.path('/return-note.json'))).body as Json;
+    const pdf = (await w.download(w.path('/return-note.pdf'))).text;
+    expect(pdf).toContain(note.chave);
+    expect(pdf).toContain(note.nota_referenciada);
+    expect(pdf).toContain(note.nota_id);
+    expect(pdf).toContain('R$ 59,43');
+  });
+
+  it('#57/AC-5: depois da emissão, o anexo da visão aponta para o PDF; antes, não há anexo', async () => { // ADR-002
+    const w = await supplierWorld();
+    await w.runCron();
+    expect(requestOf(await w.call('GET', w.path())).attachment).toBeUndefined();
+    await w.call('POST', w.path('/send'), { body: {} });
+    expect(requestOf(await w.call('GET', w.path())).attachment).toEqual({ name: 'nota-devolucao-ND-1.pdf', url: w.path('/return-note.pdf') });
+  });
+
+  it('#57/AC-6: o reenvio depois da falha anexa o mesmo PDF e continua uma só nota emitida', async () => { // ADR-002
+    const mailer = fakeMailer({ ok: false, reason: 'resend_unavailable' });
+    const w = await supplierWorld({ mailer });
+    await w.runCron();
+    await w.call('POST', w.path('/send'), { body: {} });
+    expect((await w.call('POST', w.path('/resend'), { body: {} })).status).toBe(200);
+
+    const pdfs = mailer.sent.map((m) => m.attachments.find((a) => a.contentType === 'application/pdf')?.content);
+    expect(pdfs).toHaveLength(2);
+    expect(pdfs[1]).toBe(pdfs[0]);
+    expect(pdfs[0]).toBe((await w.download(w.path('/return-note.pdf'))).text);
+    expect(w.rows('issued_return_notes')).toHaveLength(1);
   });
 });

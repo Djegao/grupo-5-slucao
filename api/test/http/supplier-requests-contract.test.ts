@@ -59,7 +59,8 @@ describe('#13/AC-3 GET /api/supplier-requests/{accessKey}', () => { // ADR-002
       sentBy: 'ana@jachegou.test',
       sentAt: '2026-11-12T15:00:00.000Z',
       returnNote: { number: 'ND-1' },
-      attachment: { name: 'ND-1.json', url: `/api/supplier-requests/${SOURCE_KEY}/return-note.json` },
+      // #57/AC-5: o anexo da visão é o PDF da nota (a gaveta mostra o link dele); o JSON segue em return-note.json
+      attachment: { name: 'nota-devolucao-ND-1.pdf', url: `/api/supplier-requests/${SOURCE_KEY}/return-note.pdf` },
     });
   });
 
@@ -228,6 +229,24 @@ describe('#13/AC-3 GET /api/supplier-requests/{accessKey}/return-note.json', () 
   });
 });
 
+describe('#57/AC-2 GET /api/supplier-requests/{accessKey}/return-note.pdf', () => { // ADR-002
+  it('#57/AC-2: antes da emissão é 404 not_found; depois, 200 application/pdf com o PDF da nota', async () => { // ADR-002
+    const w = await drafted();
+    expect(await w.call('GET', w.path('/return-note.pdf'))).toMatchObject({ status: 404, body: { error: 'not_found' } });
+    await w.call('POST', w.path('/send'), { body: {} });
+    const pdf = await w.download(w.path('/return-note.pdf'));
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get('content-type')).toBe('application/pdf');
+    expect(pdf.text.startsWith('%PDF-1.4')).toBe(true);
+    expect(pdf.text).toContain('ND-1');
+  });
+
+  it('#57/AC-2: a chave que não tem 44 dígitos é 400 invalid_access_key', async () => { // ADR-002
+    const w = await supplierWorld();
+    expect(await w.call('GET', '/api/supplier-requests/123/return-note.pdf')).toMatchObject({ status: 400, body: { error: 'invalid_access_key' } });
+  });
+});
+
 describe('#13/AC-3 GET /api/supplier-requests?status=', () => { // ADR-002
   it('#13/AC-3: lista os pedidos do estado, padrão draft', async () => { // ADR-002
     const w = await drafted();
@@ -282,6 +301,7 @@ describe('#13/AC-2 as rotas exigem o Access e, nas escritas, JSON; o erro é gen
       ['DELETE', w.path(), 'GET, PATCH'],
       ['GET', w.path('/send'), 'POST'],
       ['POST', w.path('/return-note.json'), 'GET'],
+      ['POST', w.path('/return-note.pdf'), 'GET'],
       ['POST', '/api/supplier-requests', 'GET'],
     ];
     for (const [method, path, allow] of cases) {
