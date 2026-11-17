@@ -111,7 +111,7 @@ tables:
     extended_by: "#35"
     follow_up_columns: "follow_up_draft jsonb, follow_up_rejection, follow_up_claimed_at, follow_up_claim, follow_up_sent_by, follow_up_sent_at, follow_up_channel, follow_up_provider_message_id, follow_up_failure"
     follow_up_guard: "follow_up_claimed_at timestamptz (reivindicação do envio da cobrança, com o prazo da #12, LEASE_MS de 5 minutos: a vencida pode ser retomada, com o risco aceito de um segundo e-mail) e follow_up_claim uuid (a ficha da reivindicação, como o send_claim da #12: a falha e o carimbo filtram por ela, e quem perdeu a reivindicação recebe 0 linhas)"
-    follow_up_history_actions: "follow_up_drafted | follow_up_rejected | follow_up_claimed | follow_up_failed | follow_up_sent"
+    follow_up_history_actions: "follow_up_drafted | follow_up_rejected | follow_up_claimed | follow_up_failed | follow_up_sent | follow_up_edited"
 
   # Leitura da resposta do fornecedor (#35, história #4). Desenho: supabase/persistence-supplier-reply.md.
   # #35: a unidade de trabalho segue postgrest-request; cada gravação abaixo é uma requisição, numa tabela.

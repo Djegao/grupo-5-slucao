@@ -128,7 +128,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
   async function writeFollowUp(id: number, change: FollowUpChange): Promise<Written> {
     const row = await readForWrite(id);
     if (row === null) return 'missing';
-    if (change.expects !== undefined && row.follow_up_draft !== null && !sameText(row.follow_up_draft, change.expects)) return 'stale'; // sem rascunho a guarda recusa
+    if (change.expects !== undefined && row.follow_up_draft !== null && !sameText(row.follow_up_draft, change.expects)) return 'stale'; // #58/AC-5: sem rascunho a guarda recusa
     const after: FollowUpColumns = { ...row, ...change.columns };
     const version = row.version + 1;
     const at = change.at.toISOString();

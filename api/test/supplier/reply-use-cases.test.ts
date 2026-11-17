@@ -77,7 +77,7 @@ describe('#58/AC-1 (#58/AC-7): a varredura monta a cobrança pela regra, sem o C
     expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [], drafted: [7] });
     expect(store.rows.get(7)?.followUp.draft?.asks).toEqual([ASKS[1]]);
     expect(store.rows.get(7)?.followUp.dueOn).toBe('2026-11-25');
-    expect(store.calls.map((c) => c.op)).toEqual(['saveFollowUpDraft']); // a leitura do fornecedor fica: a varredura não grava outra
+    expect(store.calls.map((c) => c.op)).toEqual(['saveFollowUpDraft']); // #58/AC-2: a leitura do fornecedor fica: a varredura não grava outra
     expect(store.rows.get(7)?.reading).toEqual(partial);
   });
 
@@ -276,8 +276,8 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
     const { deps, store, mailer } = parts([drafted()]);
     const read = store.get;
     store.get = async (id) => {
-      const seen = await read(id); // o envio leu o texto antigo...
-      await store.editFollowUpDraft(id, { ...GOOD_FOLLOW_UP, body: 'Texto novo, até {{cobranca.prazo}}.' }, 'bia'); // ...e a edição entrou antes da reivindicação
+      const seen = await read(id); // #58/AC-5: o envio leu o texto antigo...
+      await store.editFollowUpDraft(id, { ...GOOD_FOLLOW_UP, body: 'Texto novo, até {{cobranca.prazo}}.' }, 'bia'); // #58/AC-5: ...e a edição entrou antes da reivindicação
       return seen;
     };
     expect(await createReplyUseCases(deps).sendFollowUp(7, 'ana')).toEqual({ kind: 'conflict', reason: 'stale' });

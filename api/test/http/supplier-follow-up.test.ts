@@ -272,7 +272,7 @@ describe('#58/AC-2 a resposta parcial com follow_up, passado o prazo, também ga
 
   it('#58/AC-2: antes do prazo a resposta parcial não ganha cobrança', async () => {
     const w = await answeredHalf();
-    await sweepAt(w, new Date('2026-11-17T15:00:00Z')); // o dia do prazo ainda está no prazo
+    await sweepAt(w, new Date('2026-11-17T15:00:00Z')); // #58/AC-2: o dia do prazo ainda está no prazo
     expect(((await viewOf(w)).followUp as Json).draft).toBeNull();
   });
 

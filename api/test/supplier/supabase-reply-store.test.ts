@@ -273,7 +273,7 @@ describe('#58/AC-4 e #58/AC-5 editFollowUpDraft: troca só o texto do rascunho a
     const { fake, store } = setup([sentRow(1, claimed)], {}, later);
     expect(await store.editFollowUpDraft(1, NEW_TEXT, ANA)).toBe('recorded');
     expect(outboxRow(fake)).toMatchObject({ follow_up_draft: { ...NEW_TEXT, dueOn: FOLLOW_DUE }, follow_up_claimed_at: null, follow_up_claim: null, version: 4 });
-    expect(await store.recordFollowUpSent(1, FIRST, STAMP)).toBe('lost'); // o envio que parou não carimba o texto antigo como enviado
+    expect(await store.recordFollowUpSent(1, FIRST, STAMP)).toBe('lost'); // #58/AC-5: o envio que parou não carimba o texto antigo como enviado
     expect(await store.claimFollowUpSend(1, ANA, NEW_TEXT)).toEqual({ kind: 'won', claim: CLAIM });
   });
 
@@ -316,7 +316,7 @@ describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômi
       secretKey: 'sb_secret_teste',
       fetch: (input, init) => {
         if (!edited && init?.method === 'PATCH') {
-          edited = true; // a edição de outra pessoa entra aqui: depois da leitura do envio e antes do seu PATCH
+          edited = true; // #58/AC-5: a edição de outra pessoa entra aqui: depois da leitura do envio e antes do seu PATCH
           Object.assign(outboxRow(h.fake), { follow_up_draft: { ...GOOD_FOLLOW_UP, body: 'Texto editado no meio.' }, version: 4 });
         }
         return h.fake.fetch(input, init);

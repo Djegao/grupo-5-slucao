@@ -105,7 +105,7 @@ Todas anuláveis e sem default, num único `alter table ... add column ..., add 
 
 Cada gravação da cobrança faz um `GET` da linha, para ler `version` e `history`, e depois um único `PATCH` guardado: `id=eq.<id>&version=eq.<v>&<guarda da transição>`. O corpo leva as colunas da cobrança, `version: v+1`, `updated_at` e `history` com uma entrada a mais. A entrada é `{version, at, by, action, state, follow_up}`, com estes campos:
 
-- `action`: um de `follow_up_drafted`, `follow_up_rejected`, `follow_up_claimed`, `follow_up_failed`, `follow_up_sent`.
+- `action`: um de `follow_up_drafted`, `follow_up_rejected`, `follow_up_claimed`, `follow_up_failed`, `follow_up_sent`, `follow_up_edited`.
 - `state`: o `state` da última entrada, copiado sem mudar. A cobrança não muda o estado da #12.
 - `follow_up`: o estado da cobrança depois da gravação.
 - `by`: o nome da varredura do prazo (`supplier-overdue-sweep`, #58) quando quem grava é a regra; o usuário quando é uma pessoa (ver as mudanças de porta). Até a #58 era o nome da tarefa do Claude (`supplier-follow-up-draft`), que saiu do Cron; as linhas antigas guardam esse nome.
