@@ -333,8 +333,9 @@ com Node 24, porque passa a pasta e não o arquivo.
 - `texts.test.ts` para os textos de `web/src/texts.ts`
 - relato de erro na tela (`web/`)
 - validação das respostas em `web/src/api/client.ts`
-- `deploy-api.yml` ainda exporta `NODE_AUTH_TOKEN` e pede `packages: read` para o `web/`; inofensivo desde a
-  #53, mas já não é preciso. Passa a publicar a tela com os substitutos dos kits
+- `ci.yml` e `deploy-api.yml` ainda exportam `NODE_AUTH_TOKEN` e pedem `packages: read` para o `web/`; inofensivo
+  desde a #53, mas já não é preciso (o push que mexe em `.github/workflows/` pede o escopo `workflow`). O
+  `deploy-api.yml` passa a publicar a tela com os substitutos dos kits
 - paginação da varredura do prazo
 - a corrida que gera duas linhas da mesma devolução na fila
 
