@@ -28,15 +28,31 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Confere só o que a tela lê do contexto; o resto passa como veio (#53). */
+/** Confere cada campo que a tela lê do contexto (início, tema, pessoa, marca e navegação); o resto passa como veio (#53). */
 function isShellContext(body: Record<string, unknown>): body is Record<string, unknown> & ShellContext {
-  const { user, brand, navigation, account_menu, administration } = body;
+  const { user, brand, navigation, account_menu, administration, home, theme } = body;
   return (
+    typeof home === "string" &&
+    (theme === "light" || theme === "dark") &&
     isObject(user) &&
     typeof user.name === "string" &&
+    (typeof user.email === "string" || user.email === null) &&
     isObject(brand) &&
+    typeof brand.name === "string" &&
+    typeof brand.product === "string" &&
     Array.isArray(navigation) &&
+    navigation.every(isNavigationGroup) &&
     Array.isArray(account_menu) &&
     Array.isArray(administration)
+  );
+}
+
+function isNavigationGroup(group: unknown): boolean {
+  return (
+    isObject(group) &&
+    typeof group.key === "string" &&
+    typeof group.label === "string" &&
+    Array.isArray(group.items) &&
+    group.items.every((item) => isObject(item) && typeof item.key === "string" && typeof item.label === "string" && typeof item.href === "string")
   );
 }
