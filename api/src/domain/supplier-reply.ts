@@ -9,8 +9,9 @@ import type { RequestStatus } from './supplier-request.js';
 export type ReplyOutcome = 'fulfilled' | 'partially_fulfilled' | 'refused' | 'needs_information' | 'no_reply'; // #4/AC-1
 export type NextStep = 'close' | 'confirm_document' | 'answer_supplier' | 'follow_up'; // #4/AC-1
 
-const OUTCOMES: readonly ReplyOutcome[] = ['fulfilled', 'partially_fulfilled', 'refused', 'needs_information', 'no_reply'];
-const NEXT_STEPS: readonly NextStep[] = ['close', 'confirm_document', 'answer_supplier', 'follow_up'];
+/** #50: as listas de valores, que o teste percorre para provar que toda leitura cai em um filtro. */
+export const REPLY_OUTCOMES: readonly ReplyOutcome[] = ['fulfilled', 'partially_fulfilled', 'refused', 'needs_information', 'no_reply'];
+export const NEXT_STEPS: readonly NextStep[] = ['close', 'confirm_document', 'answer_supplier', 'follow_up'];
 
 /**
  * #4/AC-6: a leitura carrega só dados da leitura. Não há campo de decisão, de título nem de valor em
@@ -46,7 +47,7 @@ export type ReadingContext = {
 };
 
 const isText = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
-const isOutcome = (v: unknown): v is ReplyOutcome => OUTCOMES.some((o) => o === v);
+const isOutcome = (v: unknown): v is ReplyOutcome => REPLY_OUTCOMES.some((o) => o === v);
 const isNextStep = (v: unknown): v is NextStep => NEXT_STEPS.some((n) => n === v);
 const isTexts = (v: unknown): v is string[] => Array.isArray(v) && v.every(isText);
 

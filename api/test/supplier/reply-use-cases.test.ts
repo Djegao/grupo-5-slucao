@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { NEXT_STEPS, REPLY_OUTCOMES, type RequestFilter } from '../../src/domain/index.js';
 import { createReplyUseCases } from '../../src/supplier/reply-use-cases.js';
 import {
   GOOD_FOLLOW_UP,
@@ -288,5 +289,30 @@ describe('#34/AC-5: a lista devolve os pedidos de um filtro com a leitura e as c
     const { deps, store } = parts(rows());
     await createReplyUseCases(deps).listRequests('overdue', TODAY);
     expect(store.calls).toEqual([]);
+  });
+});
+
+describe('#50/AC-3: a lista põe cada pedido enviado em um filtro só', () => {
+  const FILTERS: readonly RequestFilter[] = ['awaiting', 'answered', 'needs_you', 'overdue'];
+
+  it('as contagens somam os pedidos enviados e cada pedido aparece nas linhas de um filtro só', async () => {
+    let id = 0;
+    const sent = [replyRequest((id += 1)), replyRequest((id += 1), { dueOn: '2026-11-10' })];
+    for (const replyOutcome of REPLY_OUTCOMES) {
+      for (const nextStep of NEXT_STEPS) {
+        for (const supplierDocument of [null, '881']) sent.push(replyRequest((id += 1), { reading: reading({ replyOutcome, nextStep, supplierDocument }) }));
+      }
+    }
+    const notSent = [replyRequest((id += 1), { status: 'draft' }), replyRequest((id += 1), { status: 'send_failed' })];
+    const { deps } = parts([...sent, ...notSent]);
+    const useCases = createReplyUseCases(deps);
+    const lists = await Promise.all(FILTERS.map((f) => useCases.listRequests(f, WITHIN)));
+    const counts = lists[0]?.counts;
+    expect(counts).toBeDefined();
+    expect(Object.keys(counts ?? {}).sort()).toEqual([...FILTERS].sort());
+    expect(Object.values(counts ?? {}).reduce((a, b) => a + b, 0)).toBe(sent.length);
+    const seen = lists.flatMap((l) => l.rows.map((r) => r.id)).sort((a, b) => a - b);
+    expect(seen).toEqual(sent.map((r) => r.id));
+    for (const l of lists) expect(l.rows).toHaveLength(l.counts[l.filter]);
   });
 });
