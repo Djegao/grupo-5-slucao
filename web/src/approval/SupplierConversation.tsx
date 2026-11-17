@@ -12,6 +12,7 @@ const BLOCK_TONE: Record<SupplierBlockStatus, "waiting" | "positive" | "negative
   waiting: "waiting",
   waitingCharged: "waiting",
   late: "negative",
+  lateCharged: "negative",
   fulfilledToConfirm: "info",
   fulfilled: "positive",
   partiallyFulfilled: "waiting",

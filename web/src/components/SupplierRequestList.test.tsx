@@ -99,6 +99,12 @@ describe("#19 SupplierRequestList", () => {
     expect(screen.getAllByRole("button", { name: "Cobrar" })).toHaveLength(1);
   });
 
+  it("#5/AC-4: a linha atrasada que o servidor já cobrou lê 'Atrasado (cobrado)' e não tem 'Cobrar'", () => {
+    renderList({ filter: "late", rows: [{ ...late, alreadyCharged: true }] });
+    expect(screen.getByText("Atrasado (cobrado)")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cobrar" })).toBeNull();
+  });
+
   it("#5/AC-1: a coluna Status desenha a variante de cada situação, e o documento citado a confirmar", () => {
     renderList({
       filter: "all",

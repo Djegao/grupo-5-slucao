@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCharges,
-  chargesOf,
   countByChip,
   countsAfterCharges,
   INITIAL_STATE,
@@ -212,15 +211,24 @@ describe("#21 contagens do servidor e cobranças da sessão", () => {
 describe("#21 cobranças que o servidor já fez", () => {
   const lateCharged: SupplierRequestRow = { ...row("r-late", "late", "2026-11-14"), alreadyCharged: true };
 
-  it("#5/AC-4: a linha com alreadyCharged semeia o estado cobrado, e a da sessão vale sobre a semeada", () => {
-    expect(chargesOf([lateCharged, row("r-other", "late", "2026-11-12")], {})).toEqual({ "r-late": { dueOn: "2026-11-14", sentOn: "—" } });
-    const session = { "r-late": { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
-    expect(chargesOf([lateCharged], session)).toEqual(session);
+  it("#5/AC-4: a linha que o servidor já cobrou fica no chip dele: sem cobrança da sessão, nem a linha nem as contagens mudam", () => {
+    expect(applyCharges([lateCharged], {})).toEqual([lateCharged]);
+    expect(applyCharges([lateCharged], {})[0]?.status).toBe("late");
+    const server = { waiting: 0, fulfilled: 0, needsYou: 0, late: 1 };
+    expect(countsAfterCharges(server, [lateCharged], {})).toEqual(server);
+    expect(visibleRows([lateCharged], "late")).toEqual([lateCharged]);
   });
 
-  it("#5/AC-4: a linha semeada passa a Aguardando, sem Cobrar, e as contagens do servidor a movem de Atrasados", () => {
-    const charged = chargesOf([lateCharged], {});
-    expect(applyCharges([lateCharged], charged)[0]?.status).toBe("waiting");
-    expect(countsAfterCharges({ waiting: 0, fulfilled: 0, needsYou: 0, late: 1 }, [lateCharged], charged)).toEqual({ waiting: 1, fulfilled: 0, needsYou: 0, late: 0 });
+  it("#5/AC-4: a cobrança desta sessão de outra linha não mexe na que o servidor cobrou", () => {
+    const other = row("r-other", "late", "2026-11-12");
+    const session = { "r-other": { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
+    expect(applyCharges([lateCharged, other], session)[0]).toEqual(lateCharged);
+    expect(countsAfterCharges({ waiting: 0, fulfilled: 0, needsYou: 0, late: 2 }, [lateCharged, other], session)).toEqual({ waiting: 1, fulfilled: 0, needsYou: 0, late: 1 });
+  });
+
+  it("#5/AC-4: o envio feito leva quem enviou à fase enviado", () => {
+    const opened = run([{ type: "openRow", id: "r-late" }, { type: "openFollowUp", id: "r-late" }, { type: "sendStarted", id: "r-late" }]);
+    const done = screenReducer(opened, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-19", sentOn: "2026-11-16", sentBy: "beto@example.test" });
+    expect(done.drawer?.followUp?.phase).toEqual({ phase: "sent", sentOn: "2026-11-16", sentBy: "beto@example.test" });
   });
 });

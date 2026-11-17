@@ -23,7 +23,8 @@ export function countByChip(rows: SupplierRequestRow[]): Record<SupplierFilter, 
 
 /**
  * #21 As contagens do servidor (#36), acertadas só pelo que esta sessão cobrou: a linha cobrada saiu do chip em que o servidor a contou e foi
- * para Aguardando (Q7). Não recontam as linhas: o resto segue como o servidor contou. `rows` são as linhas como vieram, antes de `applyCharges`.
+ * para Aguardando (Q7). A linha que o servidor já cobrou (`alreadyCharged`) não entra aqui: fica no chip e na contagem em que ele a pôs.
+ * `rows` são as linhas como vieram, antes de `applyCharges`.
  */
 export function countsAfterCharges(
   counts: Record<SupplierFilter, number>,
@@ -47,7 +48,7 @@ export function visibleRows(rows: SupplierRequestRow[], filter: SupplierFilterVa
 }
 
 /** #5/AC-4 O que o envio devolve: quando saiu, ou o motivo fechado da falha; o texto de um erro de fora nunca entra (layer-exposure). */
-export type SendResult = { ok: true; sentOn: string; sentTime?: string } | { ok: false; failure: FollowUpFailure };
+export type SendResult = { ok: true; sentOn: string; sentTime?: string; sentBy?: string | null } | { ok: false; failure: FollowUpFailure };
 
 /** #5/AC-4 Uma cobrança que saiu: o novo prazo da linha e quando foi enviada. */
 export interface ChargedRequest {
@@ -56,16 +57,7 @@ export interface ChargedRequest {
   sentTime?: string;
 }
 
-/**
- * #5/AC-4 As cobranças da tela: as que o servidor já enviou (linhas com `alreadyCharged`, #36) e as desta sessão, que valem sobre as semeadas.
- * #21 A lista não traz quando a cobrança saiu: a linha semeada fica com o prazo que o servidor deu e sem carimbo.
- */
-export function chargesOf(rows: SupplierRequestRow[], session: Record<string, ChargedRequest>): Record<string, ChargedRequest> {
-  const seeded = rows.filter((row) => row.alreadyCharged).map((row): [string, ChargedRequest] => [row.id, { dueOn: row.dueOn, sentOn: "—" }]);
-  return { ...Object.fromEntries(seeded), ...session };
-}
-
-/** #5/AC-2 A linha cobrada passa a Aguardando com o novo prazo e sai de Atrasados (Q7, estado 9 do wireframe). */
+/** #5/AC-2 A linha cobrada nesta sessão passa a Aguardando com o novo prazo e sai de Atrasados (Q7, estado 9 do wireframe); as demais ficam como vieram. */
 export function applyCharges(rows: SupplierRequestRow[], charged: Record<string, ChargedRequest>): SupplierRequestRow[] {
   if (Object.keys(charged).length === 0) return rows;
   return rows.map((row): SupplierRequestRow => {
@@ -110,7 +102,7 @@ export type ScreenAction =
   | { type: "changeBody"; body: string }
   | { type: "discard" }
   | { type: "sendStarted"; id: string }
-  | { type: "sendSucceeded"; id: string; dueOn: string; sentOn: string; sentTime?: string }
+  | { type: "sendSucceeded"; id: string; dueOn: string; sentOn: string; sentTime?: string; sentBy?: string | null }
   | { type: "sendFailed"; id: string; failure: FollowUpFailure };
 
 /** #5/AC-4 O texto e o descarte só mudam em revisão ou depois de uma falha: enviando e enviado ficam como estão. */
@@ -131,13 +123,14 @@ function openFollowUp(state: ScreenState, id: string): ScreenState {
 }
 
 function sendSucceeded(state: ScreenState, action: Extract<ScreenAction, { type: "sendSucceeded" }>): ScreenState {
-  const { id, dueOn, sentOn, sentTime } = action;
+  const { id, dueOn, sentOn, sentTime, sentBy } = action;
   const time = sentTime === undefined ? {} : { sentTime };
+  const by = sentBy === undefined ? {} : { sentBy };
   const charged = { ...state.charged, [id]: { dueOn, sentOn, ...time } };
   const sending = state.sending.filter((sendingId) => sendingId !== id);
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
   if (!state.drawer || !flow) return { ...state, charged, sending };
-  return { ...state, charged, sending, drawer: { ...state.drawer, followUp: { ...flow, phase: { phase: "sent", sentOn, ...time } } } };
+  return { ...state, charged, sending, drawer: { ...state.drawer, followUp: { ...flow, phase: { phase: "sent", sentOn, ...time, ...by } } } };
 }
 
 /** #5/AC-4 A falha libera o id em envio mesmo com a gaveta fechada; o motivo só entra no rascunho que ainda está aberto (#20). */

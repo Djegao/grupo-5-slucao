@@ -7,7 +7,6 @@ import { texts } from "../texts";
 import { SupplierRequestList } from "./SupplierRequestList";
 import {
   applyCharges,
-  chargesOf,
   countByChip,
   countsAfterCharges,
   INITIAL_STATE,
@@ -100,6 +99,14 @@ function DrawerBody(props: {
           </Text>
         </div>
       ) : null}
+      {flow && !draft && flow.phase.phase === "failed" ? (
+        // #5/AC-4 O servidor releu o pedido e já não há rascunho (409 sem rascunho): a falha fechada aparece mesmo assim, nunca o texto do servidor.
+        <div role="alert">
+          <Text as="p" variant="body-base">
+            {texts.supplierRequests.draft.failed[flow.phase.failure]}
+          </Text>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -130,8 +137,8 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
   const { state, rows, counts, onFilterChange, onRetry, conversationOf, draftOf, send, onNextStep } = props;
   const { drawerState = "ready", drawerError, onDrawerRetry, onDrawerChange, editableDraft = true, renderDrawer = defaultShell } = props;
   const [screen, dispatch] = useReducer(screenReducer, INITIAL_STATE);
-  // #5/AC-4 Cobrada nesta sessão ou já cobrada pelo servidor: nos dois casos a linha é Aguardando (cobrado) e não oferece "Cobrar".
-  const charged = chargesOf(rows, screen.charged);
+  // #5/AC-4 Só a cobrança desta sessão muda a linha (Aguardando, cobrado). A que o servidor já enviou fica no chip dele e sem "Cobrar" (`alreadyCharged`, #21).
+  const charged = screen.charged;
   const current = applyCharges(rows, charged);
   const openRow = screen.drawer ? current.find((row) => row.id === screen.drawer?.requestId) : undefined;
   const flow = screen.drawer?.followUp ?? null;
@@ -158,7 +165,7 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
     }
     dispatch(
       result.ok
-        ? { type: "sendSucceeded", id: row.id, dueOn: draft.dueOn, sentOn: result.sentOn, sentTime: result.sentTime }
+        ? { type: "sendSucceeded", id: row.id, dueOn: draft.dueOn, sentOn: result.sentOn, sentTime: result.sentTime, sentBy: result.sentBy }
         : { type: "sendFailed", id: row.id, failure: result.failure },
     );
   }

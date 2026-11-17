@@ -1,5 +1,5 @@
 // #21 Liga o contrato da lista dos pedidos ao fornecedor (api/src/http/supplier-requests.ts, #36) às visões da #19 e ao estado da #20.
-// #21 Puro: sem API nem React. O servidor decide o filtro e as contagens; aqui só se traduz o formato, sem recontar nem refiltrar.
+// #21 Puro: sem API nem React. O servidor decide o filtro, o chip e as contagens (a linha já cobrada por ele fica no chip dele); aqui só se traduz o formato.
 import type { NextStepDto, ReadingListDto, ReadingRowDto, ReplyFilterDto, SentRequestDetailDto } from "../api/contract";
 import { texts } from "../texts";
 import type { SendResult } from "./supplier-request-state";
@@ -88,7 +88,7 @@ export function rowOf(row: ReadingRowDto, filter: ReplyFilterDto): SupplierReque
     request: texts.supplierRequests.requestTypes[row.requestType],
     amountCents: row.totalCents,
     dueOn: row.dueOn,
-    // #5/AC-4 A cobrança que o servidor já enviou vem marcada, para a tela não oferecer cobrar de novo.
+    // #5/AC-4 A cobrança que o servidor já enviou vem marcada, para a tela não oferecer cobrar de novo; o status e o chip seguem como o servidor os deu.
     ...(row.followUp.sent ? { alreadyCharged: true } : {}),
   };
   return { ...base, ...rowStatus(row, filter) };
@@ -115,6 +115,13 @@ const BLOCK_STATUS: Record<SupplierRequestRow["status"], SupplierBlockStatus> = 
   refused: "refused",
 };
 
+/** #5/AC-4 O servidor já cobrou: o bloco diz "cobrado" sem trocar a situação em que ele pôs a linha (atrasada segue atrasada, aguardando segue aguardando). */
+function blockStatusOf(row: SupplierRequestRow, charged: boolean): SupplierBlockStatus {
+  if (charged && row.status === "late") return "lateCharged";
+  if (charged && row.status === "waiting") return "waitingCharged";
+  return BLOCK_STATUS[row.status];
+}
+
 function readingOf(detail: SentRequestDetailDto, row: SupplierRequestRow, charged: boolean): SupplierReadingView {
   const reading = detail.reading;
   // #21 Cobrado (followUp.sent): sem próximo passo, como o estado 9 do wireframe.
@@ -136,7 +143,7 @@ function readingOf(detail: SentRequestDetailDto, row: SupplierRequestRow, charge
 export function conversationOf(row: SupplierRequestRow, detail: SentRequestDetailDto, today: string): SupplierConversationView {
   const charged = detail.followUp.sent;
   return {
-    status: charged ? "waitingCharged" : BLOCK_STATUS[row.status],
+    status: blockStatusOf(row, charged),
     sent: {
       document: detail.returnNote.number ?? "—",
       amountCents: row.amountCents,
@@ -168,7 +175,13 @@ export function draftOf(detail: SentRequestDetailDto, today: string): FollowUpDr
  * mas a tela só conhece "o e-mail recusou" ou "não sei": o texto de um erro de fora nunca entra (layer-exposure).
  */
 export function sendResultOf(detail: SentRequestDetailDto): SendResult {
-  const { sent, sentAt, failure } = detail.followUp;
-  if (sent) return { ok: true, ...momentOf(sentAt) };
+  const { sent, sentAt, sentBy, failure } = detail.followUp;
+  if (sent) return { ok: true, ...momentOf(sentAt), sentBy };
   return { ok: false, failure: failure === null ? "unknown" : "mailRefused" };
 }
+
+/**
+ * #5/AC-4 O pedido que o envio releu: guardado só quando a cobrança não saiu (409 com envio em curso ou sem rascunho, #36), para a gaveta mostrar a
+ * leitura nova. Quando saiu, a gaveta segue com o que a sessão cobrou, e o pedido relido não a troca.
+ */
+export const rereadOf = (detail: SentRequestDetailDto): SentRequestDetailDto | null => (detail.followUp.sent ? null : detail);

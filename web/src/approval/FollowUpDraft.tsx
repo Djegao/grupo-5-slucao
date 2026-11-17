@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { Button, Text } from "barte-design-system";
 import { shortDate, type FollowUpDraftView } from "../components/supplier-request-view";
+import { useViewer } from "../shell/viewer";
 import { texts } from "../texts";
 
 const t = texts.supplierRequests.draft;
@@ -15,7 +16,8 @@ export type FollowUpFailure = "mailRefused" | "unknown";
 export type FollowUpPhaseState =
   | { phase: "review" }
   | { phase: "sending" }
-  | { phase: "sent"; sentOn: string; sentTime?: string }
+  /** #5/AC-4 `sentBy` é quem o servidor diz ter enviado; ausente, nulo ou igual a quem olha a tela, a frase diz "por você". */
+  | { phase: "sent"; sentOn: string; sentTime?: string; sentBy?: string | null }
   | { phase: "failed"; failure: FollowUpFailure };
 
 export type FollowUpDraftProps = FollowUpDraftBaseProps & FollowUpPhaseState;
@@ -49,11 +51,14 @@ function Field({ label, children }: { label: string; children: string }): ReactE
 export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
   const { draft, editing, onEdit, onBodyChange, onSend, onDiscard, onRetry } = props;
   const phase = props.phase;
+  const viewer = useViewer();
   if (props.phase === "sent") {
+    // #5/AC-4 O "por você" é de quem olha a tela, como no pedido da #3 (#17): outro remetente aparece pelo nome.
+    const by = props.sentBy === undefined || props.sentBy === null || props.sentBy === viewer ? texts.supplierRequest.byYou : texts.supplierRequest.by(props.sentBy);
     return (
       <div role="status">
         <Text as="p" variant="body-base">
-          {t.sent(shortDate(props.sentOn), props.sentTime, shortDate(draft.dueOn))}
+          {t.sent(by, shortDate(props.sentOn), props.sentTime, shortDate(draft.dueOn))}
         </Text>
       </div>
     );

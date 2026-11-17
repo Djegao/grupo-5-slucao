@@ -26,7 +26,7 @@ interface SupplierRequestRowBase {
   amountCents: number;
   /** #19 Data ISO (AAAA-MM-DD) do prazo. */
   dueOn: string;
-  /** #5/AC-4 O servidor já enviou a cobrança desta linha (followUp.sent, #36): ela é Aguardando (cobrado) e não oferece "Cobrar". */
+  /** #5/AC-4 O servidor já enviou a cobrança desta linha (followUp.sent, #36): ela segue no chip que o servidor deu, sem "Cobrar"; a atrasada lê "Atrasado (cobrado)". */
   alreadyCharged?: boolean;
 }
 
@@ -49,6 +49,7 @@ export type SupplierBlockStatus =
   | "waiting"
   | "waitingCharged"
   | "late"
+  | "lateCharged"
   | "fulfilledToConfirm"
   | "fulfilled"
   | "partiallyFulfilled"

@@ -8,6 +8,7 @@ import {
   followUpDueOn,
   isEmptyList,
   momentOf,
+  rereadOf,
   rowOf,
   rowsOf,
   sendResultOf,
@@ -172,11 +173,16 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
     });
   });
 
-  it("#5/AC-4: o pedido já cobrado (followUp.sent) fica 'Aguardando (cobrado)' e sem próximo passo, mesmo que o servidor ainda o conte atrasado", () => {
+  it("#5/AC-4: o pedido já cobrado pelo servidor segue na situação dele (atrasado, 'Atrasado (cobrado)'; aguardando, 'Aguardando (cobrado)') e sem próximo passo", () => {
     const charged = detail({ followUp: { drafted: true, sent: true, draft: null, sentBy: "a@b.c", sentAt: "2026-11-15T13:00:00.000Z", failure: null } });
-    const view = conversationOf(lateRow, charged, today);
-    expect(view.status).toBe("waitingCharged");
-    expect(view.reading.nextStep).toBeNull();
+    const late = conversationOf(lateRow, charged, today);
+    expect(late.status).toBe("lateCharged");
+    expect(late.reading.nextStep).toBeNull();
+    expect(conversationOf(rowOf(dto(), "awaiting"), charged, today).status).toBe("waitingCharged");
+  });
+
+  it("#5/AC-4: a linha que o servidor cobrou e ainda conta atrasada segue 'late', com a marca de cobrada", () => {
+    expect(rowOf(dto({ followUp: { drafted: true, sent: true } }), "overdue")).toMatchObject({ status: "late", alreadyCharged: true });
   });
 
   it("#5/AC-4: o rascunho é o do servidor, para o e-mail do pedido, com o novo prazo e sem anexo; sem rascunho, nulo", () => {
@@ -191,9 +197,22 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
 
   it("#5/AC-4: o resultado do envio é 'enviado' com o carimbo, ou um motivo fechado: o código do servidor não chega à tela", () => {
     const base = detail().followUp;
-    expect(sendResultOf(detail({ followUp: { ...base, sent: true, sentAt: "2026-11-16T13:12:00.000Z" } }))).toEqual({ ok: true, sentOn: "2026-11-16", sentTime: "10:12" });
+    expect(sendResultOf(detail({ followUp: { ...base, sent: true, sentAt: "2026-11-16T13:12:00.000Z" } }))).toEqual({ ok: true, sentOn: "2026-11-16", sentTime: "10:12", sentBy: null });
     expect(sendResultOf(detail({ followUp: { ...base, failure: "resend_unavailable" } }))).toEqual({ ok: false, failure: "mailRefused" });
     expect(sendResultOf(detail())).toEqual({ ok: false, failure: "unknown" });
     expect(JSON.stringify(sendResultOf(detail({ followUp: { ...base, failure: "resend_unavailable" } })))).not.toContain("resend_unavailable");
+  });
+
+  it("#5/AC-4: o envio que saiu leva quem enviou, como o servidor o releu", () => {
+    const base = detail().followUp;
+    const sent = detail({ followUp: { ...base, sent: true, sentBy: "beto@example.test", sentAt: "2026-11-16T13:12:00.000Z" } });
+    expect(sendResultOf(sent)).toMatchObject({ ok: true, sentBy: "beto@example.test" });
+  });
+
+  it("#5/AC-4: o pedido relido de um 409 que não saiu (envio em curso, sem rascunho) é guardado para a gaveta; o que saiu, não", () => {
+    const base = detail().followUp;
+    const notSent = detail({ reading: reading({ summary: "Leitura nova." }) });
+    expect(rereadOf(notSent)).toBe(notSent);
+    expect(rereadOf(detail({ followUp: { ...base, sent: true } }))).toBeNull();
   });
 });

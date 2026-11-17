@@ -45,6 +45,8 @@ export interface SupplierRequestListProps {
 }
 
 function statusText(row: SupplierRequestRow): string {
+  // #5/AC-4 O servidor já cobrou e ainda a conta atrasada: o chip é o dele, e o texto diz que foi cobrada.
+  if (row.status === "late" && row.alreadyCharged) return t.status.lateCharged;
   if (row.status === "fulfilledToConfirm") return t.status.fulfilledToConfirm(row.document);
   return t.status[row.status];
 }
@@ -59,7 +61,7 @@ function StatusCell({ row, onFollowUp }: { row: SupplierRequestRow; onFollowUp: 
           {t.toConfirm}
         </Text>
       ) : null}
-      {row.status === "late" ? (
+      {row.status === "late" && !row.alreadyCharged ? (
         <Button variant="outline" size="base" onClick={() => onFollowUp(row)}>
           {t.follow}
         </Button>

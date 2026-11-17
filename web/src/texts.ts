@@ -349,6 +349,8 @@ export const texts = {
     status: {
       waiting: "Aguardando",
       late: "Atrasado",
+      /** #21 Cobrado pelo servidor e ainda atrasado nele: segue em Atrasados, sem "Cobrar" (#5/AC-4). */
+      lateCharged: "Atrasado (cobrado)",
       fulfilledToConfirm: (document: string) => `Atendeu: ${document}`,
       fulfilled: "Atendeu",
       partiallyFulfilled: "Atendeu parcialmente",
@@ -381,6 +383,8 @@ export const texts = {
         waiting: "Aguardando",
         waitingCharged: "Aguardando (cobrado)",
         late: "Atrasado",
+        /** #21 O servidor já enviou a cobrança e ainda conta o pedido atrasado: o chip é o dele, e a tela só avisa que foi cobrado. */
+        lateCharged: "Atrasado (cobrado)",
         fulfilledToConfirm: "Atendeu, falta confirmar",
         fulfilled: "Atendeu",
         partiallyFulfilled: "Atendeu parcialmente",
@@ -431,8 +435,9 @@ export const texts = {
       send: "Enviar cobrança",
       discard: "Descartar rascunho",
       sending: "Enviando a cobrança…",
-      sent: (on: string, time: string | undefined, due: string) =>
-        `Cobrança enviada por você em ${on}${time ? ` às ${time}` : ""} · aguardando resposta até ${due}.`,
+      /** #5/AC-4 `by` é "por você" ou "por fulano" (quem enviou, quando não é quem olha a tela). */
+      sent: (by: string, on: string, time: string | undefined, due: string) =>
+        `Cobrança enviada ${by} em ${on}${time ? ` às ${time}` : ""} · aguardando resposta até ${due}.`,
       retry: "Tentar enviar de novo",
       /** #19 O motivo do envio falho é um dos desenhados; o texto do servidor de e-mail nunca chega à tela (layer-exposure). */
       failed: {

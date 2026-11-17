@@ -388,3 +388,44 @@ describe("#21 SupplierRequests: contagens e filtro do servidor, gaveta lida da A
     expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
   });
 });
+
+// #21 O que o servidor já cobrou fica no chip e na contagem dele; quem enviou e o 409 sem rascunho chegam à gaveta.
+describe("#21 SupplierRequests: cobrança já feita pelo servidor, quem enviou e o 409", () => {
+  const SERVER_COUNTS = { waiting: 7, fulfilled: 3, needsYou: 5, late: 9 };
+  const lateCharged: SupplierRequestRow = { ...late, alreadyCharged: true };
+
+  it("#5/AC-4: a linha atrasada que o servidor já cobrou segue em Atrasados como 'Atrasado (cobrado)', sem 'Cobrar', e as contagens são as do servidor", () => {
+    renderScreen({ rows: [lateCharged, lateOlder, waiting], counts: SERVER_COUNTS });
+    expect(chip(/^Atrasados/).textContent).toMatch(/9/);
+    expect(chip(/^Aguardando/).textContent).toMatch(/7/);
+    chooseLate();
+    expect(within(rowOf("59738")).getByText("Atrasado (cobrado)")).toBeTruthy();
+    expect(within(rowOf("59738")).queryByRole("button", { name: "Cobrar" })).toBeNull();
+    expect(within(rowOf("40519")).getByRole("button", { name: "Cobrar" })).toBeTruthy();
+    expect(chip(/^Atrasados/).textContent).toMatch(/9/);
+  });
+
+  it("#5/AC-4: a cobrança enviada por outra pessoa diz o nome dela na gaveta, e não 'por você'", async () => {
+    renderScreen({ send: vi.fn<Send>(async () => ({ ...SENT, sentBy: "beto@example.test" })) });
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
+    expect(await screen.findByText(/Cobrança enviada por beto@example.test em 15\/11/)).toBeTruthy();
+    expect(screen.queryByText(/por você/)).toBeNull();
+  });
+
+  it("#5/AC-4: o 409 que não saiu e deixou a gaveta sem rascunho mostra a falha fechada, nunca o texto do servidor", async () => {
+    let drafted = true;
+    const send = vi.fn<Send>(async () => {
+      drafted = false;
+      return { ok: false, failure: "unknown" };
+    });
+    renderScreen({ send, draftOf: (row) => (drafted ? draftOf(row) : null) });
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
+    const message = await screen.findByText("A cobrança não saiu. Tente de novo em um minuto.");
+    expect(message.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getByText("O rascunho da cobrança não está disponível agora.")).toBeTruthy();
+  });
+});
