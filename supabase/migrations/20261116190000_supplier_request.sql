@@ -10,6 +10,8 @@ alter table public.kit_fornecedores
 -- #12/AC-2 A nota emitida pelo mock: um fato imutável (append-only), uma por devolução da fila (#140).
 -- #12/AC-2 O id é a sequência da emissão: ND-<id>, número <id>, série 9. A chave de acesso e o emitente não são
 -- #12/AC-2 colunas: issueReturnNote (api/src/domain/return-note-document.ts) os refaz iguais a cada leitura.
+-- #12/PER-5 queue_id referencia outbox_return_notes só por identidade, sem FK: o reconferir (#56) apaga a fila e as linhas
+-- #12/PER-5 desta tabela e de outbox_supplier_emails sobrevivem como referência órfã, por desenho.
 create table public.issued_return_notes (
   id bigint generated always as identity (maxvalue 999999999),
   queue_id bigint not null,
@@ -20,7 +22,6 @@ create table public.issued_return_notes (
   created_at timestamptz not null default now(),
   constraint issued_return_notes_pkey primary key (id),
   constraint issued_return_notes_queue_id_key unique (queue_id),
-  constraint issued_return_notes_queue_fkey foreign key (queue_id) references public.outbox_return_notes (id),
   constraint issued_return_notes_supplier_fkey foreign key (supplier_id) references public.kit_fornecedores (fornecedor_id),
   constraint issued_return_notes_note_check check (jsonb_typeof(note) = 'object')
 );
@@ -64,7 +65,6 @@ create table public.outbox_supplier_emails (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint outbox_supplier_emails_pkey primary key (id),
-  constraint outbox_supplier_emails_queue_fkey foreign key (queue_id) references public.outbox_return_notes (id),
   constraint outbox_supplier_emails_supplier_fkey foreign key (supplier_id) references public.kit_fornecedores (fornecedor_id),
   constraint outbox_supplier_emails_issued_fkey foreign key (issued_return_note_id) references public.issued_return_notes (id),
   constraint outbox_supplier_emails_request_type_check check (request_type in ('return_note')), -- ADR-002

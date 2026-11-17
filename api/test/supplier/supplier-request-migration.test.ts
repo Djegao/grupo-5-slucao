@@ -23,9 +23,14 @@ describe('#12/AC-2 issued_return_notes: a nota emitida, única por devolução d
   it('o id é a sequência da emissão, com o teto do domínio', () => { // ADR-002
     expect(t).toContain('id bigint generated always as identity (maxvalue 999999999)');
   });
-  it('uma nota por devolução: a restrição única de queue_id, com a chave estrangeira da fila', () => { // ADR-002
+  it('uma nota por devolução: a restrição única de queue_id, sem chave estrangeira para a fila', () => { // ADR-002
     expect(t).toContain('unique (queue_id)');
-    expect(t).toMatch(/foreign key \(queue_id\) references public\.outbox_return_notes \(id\)/);
+  });
+  it('queue_id referencia outbox_return_notes só por identidade: nenhuma FK para ela, porque o reconferir a apaga', () => { // ADR-002
+    expect(flat).not.toMatch(/references public\.outbox_return_notes/);
+    expect(flat).not.toContain('_queue_fkey');
+    expect(section('issued_return_notes')).toContain('queue_id bigint not null');
+    expect(section('outbox_supplier_emails')).toContain('queue_id bigint not null');
   });
   it('a chave de acesso e o emitente não são colunas: saem da regra determinística', () => { // ADR-002
     expect(t).not.toMatch(/[ (,]access_key /);

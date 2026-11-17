@@ -26,7 +26,7 @@ O PostgreSQL guarda `jsonb` indexável ([jsonb Indexing](https://www.postgresql.
 ### `issued_return_notes`: colunas
 
 - `id bigint generated always as identity (maxvalue 999999999)`, chave primária. **É a sequência da emissão**: `noteId = ND-<id>`, `number = <id>`, série 9. O teto é o mesmo do domínio (`MAX_SEQUENCE`).
-- `queue_id bigint not null`, FK para `outbox_return_notes(id)`, `unique (queue_id)`: uma nota por devolução da fila (AC-2).
+- `queue_id bigint not null`, referência por identidade a `outbox_return_notes(id)` sem FK (ver Índices), `unique (queue_id)`: uma nota por devolução da fila (AC-2).
 - `invoice_access_key text not null` (a nota de origem, `referencedAccessKey`), `supplier_id text not null` FK `kit_fornecedores(fornecedor_id)`.
 - `issued_on date not null`, `note jsonb not null` (o `ReturnNoteDraft` como a regra montou; `check (jsonb_typeof(note) = 'object')`), `created_at timestamptz not null default now()` (ADR-005).
 - A chave de acesso de 44 algarismos e o emitente **não** são colunas: `issueReturnNote(note, { sequence: id, issuedOn: issued_on })` é determinística e a reconstrói igual a cada leitura. Gravá-la pediria saber o `id` antes do `insert`, o que exigiria RPC ou um segundo `UPDATE` (proibido no append-only). Se o algoritmo da chave mudar, as notas antigas mudam de chave: a mudança da função é uma mudança de contrato desta tabela.
@@ -35,7 +35,7 @@ O PostgreSQL guarda `jsonb` indexável ([jsonb Indexing](https://www.postgresql.
 ### `outbox_supplier_emails`: colunas
 
 - `id bigint generated always as identity` primary key: o `id` que `SupplierRequest.draft/rejected` recebe de quem grava.
-- `invoice_access_key text not null`; `queue_id bigint not null` FK `outbox_return_notes(id)`; `supplier_id text not null` FK `kit_fornecedores(fornecedor_id)`; `request_type text not null check (request_type in ('return_note'))` `-- ADR-002`.
+- `invoice_access_key text not null`; `queue_id bigint not null`, referência por identidade a `outbox_return_notes(id)` sem FK (ver Índices); `supplier_id text not null` FK `kit_fornecedores(fornecedor_id)`; `request_type text not null check (request_type in ('return_note'))` `-- ADR-002`.
 - `recipient text not null` (o `to` do e-mail; `to` é palavra reservada do SQL e pediria aspas em todo filtro); `subject text not null`, `body text not null` (a forma com `{{chave}}`, como a raiz guarda), `asks jsonb not null check (jsonb_typeof(asks) = 'array')`. O pedido recusado nasce com `''`, `''` e `[]`, como `SupplierRequest.rejected`.
 - `note jsonb not null` (o `ReturnNoteDraft` congelado do pedido), `attachments jsonb not null default '[]'` com `check (jsonb_typeof(attachments) = 'array')`: no envio, `{filename, content_type, issued_return_note_id}` de cada anexo; o conteúdo não é copiado, sai da nota emitida (append-only).
 - `drafted_on date not null`, `due_on date not null`, `model text not null`.
@@ -61,7 +61,9 @@ O PostgreSQL guarda `jsonb` indexável ([jsonb Indexing](https://www.postgresql.
 | `kit_fornecedores_pkey` (existente) | `kit_fornecedores` | `(fornecedor_id)` | Q4: o e-mail do fornecedor da nota | já existe |
 | `invoices_pkey` (existente) | `invoices` | `(access_key)` | Q4: a nota de origem | já existe |
 
-Sem índice nas FKs `queue_id`, `supplier_id` e `issued_return_note_id` de `outbox_supplier_emails`: nenhuma consulta desta camada filtra ou junta por elas, e nada é apagado em cascata ([Foreign Keys](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK)). O índice entra com a consulta que o pedir (a lista do painel, nas rotas, ou a leitura da resposta, na #4).
+`queue_id` referencia `outbox_return_notes` só por identidade, sem FK (PER-5): o `reconferir` (`api/src/ops/reconferir.ts`) apaga `outbox_return_notes`, e uma FK recusaria o apagar ou, em cascata, levaria junto a nota emitida e o pedido. Depois de um `reconferir`, as linhas de `issued_return_notes` e `outbox_supplier_emails` sobrevivem como referências órfãs, por desenho. As FKs de `supplier_id` (`kit_fornecedores`) e de `issued_return_note_id` seguem.
+
+Sem índice nas FKs `supplier_id` e `issued_return_note_id` de `outbox_supplier_emails`: nenhuma consulta desta camada filtra ou junta por elas, e nada é apagado em cascata ([Foreign Keys](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK)). O índice entra com a consulta que o pedir (a lista do painel, nas rotas, ou a leitura da resposta, na #4).
 
 `alter table kit_fornecedores add column email text` toma trava exclusiva por um instante numa tabela de dezenas de linhas, sem reescrita (coluna sem default). A coluna fica anulável: a migração roda antes da carga, e as linhas já carregadas não têm e-mail. `check (email is null or email ~ '^[^@[:space:]]+@[^@[:space:]]+$')`. O contrato do kit (`data/kit/contrato.json`) declara a coluna `email`, `text`, `nullable: true`, e a carga a preenche; `SourceInvoices.find` falha fechada quando o e-mail está nulo (nunca envia sem destinatário). Uma migração posterior, depois da primeira carga, pode pôr `not null`.
 
