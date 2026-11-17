@@ -86,6 +86,8 @@ tables:
     mode: append-only
     history: none
     # #12: a nota que o mock emitiu é um fato; nunca muda nem sai.
+    # #12/PER-5: queue_id referencia outbox_return_notes por identidade, sem FK: o reconferir (ops/reconferir.ts)
+    # apaga outbox_return_notes e esta linha sobrevive como referência órfã, por desenho.
     projection: none             # lida direto pela chave (queue_id ou id); não há estado derivado
     refusal: grant               # revoke update, delete, truncate de anon, authenticated e service_role
     ids: "id bigint generated always as identity (maxvalue 999999999) = a sequência: ND-<id>, número <id>"
@@ -97,6 +99,8 @@ tables:
     version_column: version
     # #12: o pedido ao fornecedor (raiz SupplierRequest): a pessoa edita o corpo do rascunho e o estado
     # anda; histórico na própria linha porque o PostgREST não dá transação entre duas tabelas.
+    # #12/PER-5: queue_id referencia outbox_return_notes por identidade, sem FK: o reconferir (ops/reconferir.ts)
+    # apaga outbox_return_notes e esta linha sobrevive como referência órfã, por desenho.
     send_guard: "send_claim uuid + send_claimed_at timestamptz (trava do envio, com prazo)"
     deletion: none               # nada é apagado; o fim é status = discarded com motivo, quem e quando
     erasure: not stated          # sent_by e discarded_by identificam pessoas (ADR-005); sem caminho de apagamento registrado
