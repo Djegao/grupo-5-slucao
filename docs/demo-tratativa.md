@@ -16,7 +16,7 @@ projeto ataca.
 | História | O que acontece |
 |---|---|
 | #156: preparar a nota de devolução e o e-mail | A devolução aprovada entra na fila. O Cron pede ao Claude o rascunho do e-mail. A regra monta a nota (itens e totais). Na gaveta da proposta, a pessoa revisa, edita o texto, **emite e envia**, ou descarta. |
-| #157: ler a resposta e cobrar quem não respondeu | A resposta do fornecedor cai na caixa de entrada. O Cron lê a resposta com o Claude (desfecho, itens atendidos, documento citado, próximo passo) e sinaliza as ordens escondidas. A lista "Pedidos ao fornecedor" separa os pedidos por situação. O pedido sem resposta depois do prazo vira atrasado, o Cron rascunha a cobrança e a pessoa a envia. |
+| #157: ler a resposta e cobrar quem não respondeu | A resposta do fornecedor cai na caixa de entrada. O Cron lê a resposta com o Claude (desfecho, itens atendidos, documento citado, próximo passo) e sinaliza as ordens escondidas. A lista "Pedidos ao fornecedor" separa os pedidos por situação. O pedido sem resposta depois do prazo vira atrasado, a varredura do Cron monta a cobrança pela regra (#58, sem o Claude), a pessoa a edita e a envia. |
 
 **Regras que não se quebram** (cada uma tem teste em `api/test/`):
 
@@ -46,7 +46,8 @@ proposta aprovada com devolução
   → Cron: tarefa supplier-reply-reading (Claude)            #4  → supplier_reply_readings
   → lista "Pedidos ao fornecedor" com filtros               #5
   → prazo vencido: varredura do Cron (sem Claude)           #4  → leitura no_reply
-  → Cron: tarefa supplier-follow-up-draft (Claude)          #4  → colunas follow_up_* do pedido
+  → a mesma varredura monta a cobrança pela regra           #58 → colunas follow_up_* do pedido
+  → a pessoa edita o texto (PATCH .../follow-up)            #58
   → "Cobrar" na lista → a pessoa envia                      #5  → POST .../send
 ```
 
@@ -55,14 +56,14 @@ proposta aprovada com devolução
 | Devolução aprovada entra na fila | `api/src/domain/return-note.ts`, `api/src/returns/*`, `api/src/http/approval.ts` | `outbox_return_notes` (`pendente`, `emitida`, `cancelada`, da #140) | `POST /api/propostas/{id}/aprovar` ou `/alterar`; no Cron, `publishReturnNotes` (até 20 por rodada) | #1: #22 #23 #29 #32 |
 | Rascunho da nota e do e-mail | `api/src/domain/supplier-request.ts`, `api/src/supplier/draft-task.ts`, `draft.ts`, `prompt.ts`, `use-cases.ts` | `outbox_supplier_emails`, `issued_return_notes`, `kit_fornecedores.email`, `claude_suggestions` | Tarefa `supplier-request-draft` (2 por rodada); rotas `/api/supplier-requests/{accessKey}[...]` | #2: #24 #38 #43 #44 |
 | Bloco "Pedido ao fornecedor" na gaveta | `web/src/approval/SupplierRequestBlock.tsx`, `SupplierRequestSection.tsx`, `useSupplierRequest.ts`, `supplier-request-state.ts`, `web/src/api/supplier-request.ts` | (lê a API) | `GET`, `PATCH`, `POST .../send`, `.../resend`, `.../discard`, `.../redo` | #3: #26 #30 #37 #46 |
-| Leitura da resposta, prazo e cobrança | `api/src/domain/supplier-reply.ts`, `api/src/supplier/reply-*.ts`, `follow-up-task.ts`, `supabase-reply-*.ts`, `api/src/cron/supplier-sweep.ts` | `inbox_supplier_messages`, `supplier_reply_readings`, colunas `follow_up_*` de `outbox_supplier_emails` | Tarefas `supplier-reply-reading` e `supplier-follow-up-draft` (1 por rodada cada); varredura do prazo (1 por rodada); `GET /api/supplier-requests?status=awaiting\|answered\|needs_you\|overdue` | #4: #39 #42 #45 #47 (e #51, da #50) |
+| Leitura da resposta, prazo e cobrança | `api/src/domain/supplier-reply.ts`, `api/src/supplier/reply-*.ts`, `supabase-reply-*.ts`, `api/src/cron/supplier-sweep.ts` | `inbox_supplier_messages`, `supplier_reply_readings`, colunas `follow_up_*` de `outbox_supplier_emails` | Tarefa `supplier-reply-reading` (1 por rodada); varredura do prazo, que também monta a cobrança pela regra (1 por rodada); `PATCH /api/supplier-requests/{accessKey}/follow-up` (#58); `GET /api/supplier-requests?status=awaiting\|answered\|needs_you\|overdue` | #4: #39 #42 #45 #47 (e #51, da #50) |
 | Lista "Pedidos ao fornecedor" | `web/src/routes/supplier-requests.tsx` (rota `/pedidos-fornecedor`), `web/src/components/SupplierRequests*.tsx`, `supplier-request-map.ts`, `supplier-request-state.ts`, `web/src/approval/SupplierConversation.tsx`, `FollowUpDraft.tsx` | (lê a API) | a lista com os quatro filtros e `POST .../send` para a cobrança | #5: #27 #31 #41 #49 |
 | Apoio | `Makefile` (alvo `check-web`), `web/src/stand-ins/` | | | #28 (web fora do gate, da #25), #53 (web de volta ao gate, com substitutos dos kits) |
 
 A ordem da rodada está em `api/src/cron/tick.ts` (`runRound`): captura, propostas, publicações, notas de
 devolução, duplicadas, **varredura do prazo** e, por último, a rodada do Claude (`runClaudeRound`,
 `api/src/claude/cron.ts`). As tarefas estão em `api/src/claude/tasks/index.ts` e rodam nesta ordem:
-casamento de descrição, leitura da resposta, rascunho da cobrança, ordem provável e rascunho do pedido.
+casamento de descrição, leitura da resposta, ordem provável e rascunho do pedido. A cobrança não é tarefa do Claude (#58): a varredura do prazo a monta pela regra.
 
 O contrato das rotas está escrito no cabeçalho de `api/src/http/supplier-requests.ts`. A persistência está
 descrita em `supabase/persistence-supplier-request.md` e `supabase/persistence-supplier-reply.md`, com as
@@ -141,7 +142,7 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
 
 Rodado aqui sem `.dev.vars`, o endpoint respondeu `Ran scheduled event` e o log mostrou
 `cron: execução agendada (*/15 * * * *); sem credenciais do Supabase, captura pulada`. Com as credenciais,
-cada rodada rascunha até 2 pedidos, lê 1 resposta, rascunha 1 cobrança e marca 1 atrasado. Para a demo,
+cada rodada rascunha até 2 pedidos, lê 1 resposta e marca 1 atrasado, já com a cobrança montada. Para a demo,
 chame o endpoint várias vezes.
 
 ### As quatro respostas de exemplo
@@ -247,7 +248,7 @@ token do Access; ninguém o executou de ponta a ponta na tela.
    "Atenção: o fornecedor tentou dar uma ordem ao agente.", o trecho citado e "Nada foi alterado: decisão,
    título e valor em risco seguem como estavam." O texto da resposta não aparece, só a leitura do agente.
 4. **Atrasado e Cobrar.** Depois do prazo (3 dias úteis do rascunho, `DEFAULT_DUE_BUSINESS_DAYS`), a
-   varredura do Cron marca o pedido `no_reply` e a rodada seguinte rascunha a cobrança. Em "Atrasados",
+   varredura do Cron marca o pedido `no_reply` e já monta a cobrança, pela regra, na mesma rodada. Em "Atrasados",
    clique em "Cobrar", revise o rascunho e clique em "Enviar cobrança". A linha passa a "Atrasado (cobrado)".
    Não há atalho no código para vencer o prazo. Recuar `due_on` à mão num banco de demonstração passaria por
    cima da versão e do histórico da linha, e não foi testado.
@@ -267,7 +268,8 @@ falha esperada é a conta de subrequests da #48. Os testes que nomeiam cada crit
 |---|---|
 | #1 (fila da devolução) | `api/test/returns/sweep-return-notes.test.ts`, `publish-return-note.test.ts`, `return-notes-api.test.ts`, `api/test/http/approval-return-note.test.ts`, `api/test/cron/tick-return-notes.test.ts` |
 | #2/AC-1 a AC-10 (pedido) | `api/test/http/supplier-requests.test.ts`, `supplier-requests-contract.test.ts`, `api/test/domain/supplier-request.test.ts` |
-| #4/AC-1 a AC-7 (leitura e cobrança) | `api/test/http/supplier-replies.test.ts`, `supplier-replies-contract.test.ts`, `api/test/domain/supplier-reply.test.ts`, `api/test/supplier/reply-*.test.ts`, `follow-up-task.test.ts`, `api/test/cron/tick-supplier-sweep.test.ts` |
+| #4/AC-1 a AC-7 (leitura e cobrança) | `api/test/http/supplier-replies.test.ts`, `supplier-replies-contract.test.ts`, `api/test/domain/supplier-reply.test.ts`, `api/test/supplier/reply-*.test.ts`, `api/test/cron/tick-supplier-sweep.test.ts` |
+| #58/AC-1 a AC-7 (cobrança pela regra e editável) | `api/test/http/supplier-follow-up.test.ts`, `api/test/domain/supplier-follow-up.test.ts`, `api/test/supplier/reply-use-cases.test.ts`, `api/test/supplier/supabase-reply-store.test.ts`, `api/test/claude/budget.test.ts` |
 | Orçamento do Cron (#36, #48) | `api/test/claude/budget.test.ts` |
 | #3 e #5 (tela) | `web/src/approval/*.test.tsx`, `web/src/components/*.test.ts(x)`, `web/test/supplier-request*.test.tsx`. Rodam no `make check` desde a #53, com os substitutos dos kits. |
 
@@ -324,9 +326,9 @@ com Node 24, porque passa a pasta e não o arquivo.
 - Não há anexo em PDF. A nota emitida sai só em JSON (`.../return-note.json`).
 - O bloco da gaveta mostra o código do fornecedor (`returnNote.supplier`), não o nome. A lista mostra
   código e razão social.
-- A cobrança sai sem edição e sem anexo. O rascunho é o do Claude e `attachments` vai vazio.
-- O novo prazo da cobrança é calculado na tela (`followUpDueOn(today)` em
-  `web/src/components/supplier-request-map.ts`), não no servidor.
+- A cobrança sai sem anexo (`attachments` vai vazio). Desde a #58 o rascunho é montado pela regra no servidor e o texto se edita pelo `PATCH .../follow-up`; a tela de edição é da #59.
+- O novo prazo da cobrança (3 dias úteis a partir da varredura) é calculado no servidor e vai no rascunho (`followUp.dueOn`, fato `cobranca.prazo`). A tela ainda o calcula por conta própria (`followUpDueOn(today)` em
+  `web/src/components/supplier-request-map.ts`); alinhar à API é da #59.
 
 **A abrir como follow-up:**
 

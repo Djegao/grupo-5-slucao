@@ -25,8 +25,11 @@ export const REQUEST_SELECT = [
   `${READINGS_TABLE}!supplier_reply_readings_request_fkey(id,message_id,reply_outcome,fulfilled_asks,supplier_document,summary,next_step,injection_flag)`,
 ].join(',');
 
+/** #58/AC-2: o rascunho como a coluna o guarda: o texto e o novo prazo; o rascunho do Claude, de antes da #58, não tem `dueOn`. */
+export type FollowUpDraftJson = SupplierRequestText & { readonly dueOn?: string };
+
 export type FollowUpColumns = {
-  follow_up_draft: SupplierRequestText | null;
+  follow_up_draft: FollowUpDraftJson | null;
   follow_up_rejection: string | null;
   follow_up_claimed_at: string | null;
   follow_up_sent_by: string | null;
@@ -36,7 +39,8 @@ export type FollowUpColumns = {
   follow_up_failure: string | null;
 };
 
-const isText = shaped<SupplierRequestText>({ subject: isString, body: isString, asks: arrayOf(isString) } satisfies Shape<SupplierRequestText>);
+const isOptionalDate: Guard<string | undefined> = (v): v is string | undefined => v === undefined || isIsoDate(v);
+const isText = shaped<FollowUpDraftJson>({ subject: isString, body: isString, asks: arrayOf(isString), dueOn: isOptionalDate } satisfies Shape<FollowUpDraftJson>);
 
 export const followUpShape: Shape<FollowUpColumns> = {
   follow_up_draft: nullable(isText),
@@ -94,8 +98,10 @@ const instant = (value: string): Date => {
 export function followUpOf(row: FollowUpColumns): FollowUpState {
   const { follow_up_sent_at: at, follow_up_sent_by: by, follow_up_channel: channel, follow_up_provider_message_id: providerMessageId } = row;
   const complete = at !== null && by !== null && channel !== null && providerMessageId !== null;
+  const stored = row.follow_up_draft;
   return {
-    draft: row.follow_up_draft,
+    draft: stored === null ? null : { subject: stored.subject, body: stored.body, asks: stored.asks },
+    dueOn: stored?.dueOn ?? null,
     rejection: row.follow_up_rejection,
     sent: complete ? { by, at: instant(at), channel, providerMessageId } : null,
     failure: row.follow_up_failure,

@@ -8,7 +8,6 @@ import { sweepSupplierOverdue } from '../../src/cron/supplier-sweep.js';
 import { tick } from '../../src/cron/tick.js';
 import { queueRow, invoiceRow } from '../supplier/supabase-support.js';
 import { GOOD_TEXT } from '../supplier/doubles.js';
-import { GOOD_FOLLOW_UP } from '../supplier/reply-doubles.js';
 import { SOURCE_KEY } from '../domain/supplier-request-fixtures.js';
 import { kitTables } from '../support/kit.js';
 import { AFTER_DUE, READING } from '../support/reply-scenarios.js';
@@ -25,7 +24,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** #36/AC-4: a Messages API falsa: responde a ferramenta que a tarefa pediu, conforme o esquema dela, e conta as chamadas. */
+/** #36/AC-4: a Messages API falsa: responde a ferramenta que a tarefa pediu, conforme o esquema dela, e conta as chamadas (#58: a cobrança já não pergunta ao Claude). */
 function messagesApi(): { fetch: FetchFn; calls: () => number } {
   let calls = 0;
   const fetch: FetchFn = async (_url, init) => {
@@ -38,7 +37,7 @@ function messagesApi(): { fetch: FetchFn; calls: () => number } {
         ? { match: null }
         : keys.includes('orderId')
           ? { orderId: null, reason: 'sem ordem provável' }
-          : /Cobrança/.test(String(init?.body)) ? GOOD_FOLLOW_UP : GOOD_TEXT;
+          : GOOD_TEXT;
     return new Response(JSON.stringify({ content: [{ type: 'tool_use', id: 'tu', name: 'responder', input }] }), { status: 200 });
   };
   return { fetch, calls: () => calls };
@@ -91,8 +90,11 @@ async function measureRound(): Promise<Measure> {
   return { sweep, reads, messages: api.calls(), total: sweep + reads + api.calls() };
 }
 
-/** #36/AC-4: o gasto medido hoje (varredura 4, PostgREST 47, Messages API 6); quem acrescenta uma leitura ou uma tarefa muda este número e vê o teste cair. */
-const MEASURED_TOTAL = 57;
+/** #58/AC-6: o gasto de antes da #58, com a tarefa da cobrança no Cron (varredura 4, PostgREST 47, Messages API 6). */
+const BEFORE_58 = 57;
+
+/** #36/AC-4: o gasto medido hoje; quem acrescenta uma leitura ou uma tarefa muda este número e vê o teste cair. */
+const MEASURED_TOTAL = 50;
 
 describe('#36/AC-4 a conta das subrequests da rodada do Cron, medida na rodada de verdade', () => {
   it('a varredura e a rodada do Claude, com a fila cheia de cada tarefa de tasksFor, gastam o que está medido, e uma leitura a mais ou uma tarefa nova faz o teste cair', async () => {
@@ -100,8 +102,14 @@ describe('#36/AC-4 a conta das subrequests da rodada do Cron, medida na rodada d
     expect(m.total).toBe(MEASURED_TOTAL);
   });
 
-  // #48 Lacuna conhecida: a conta medida passa dos 50 do plano gratuito; este teste passa a falhar (e deve virar `it`) quando a conta voltar a caber; trazer a conta a 50 é da #48 (Cron dentro de 50 subrequests).
-  it.fails('a varredura e a rodada do Claude cabem nos 50 subrequests do plano gratuito', async () => {
+  it('#58/AC-6: sem a tarefa da cobrança no Cron a conta cai: abaixo dos 57 de antes, e o Claude não é mais perguntado pela cobrança', async () => {
+    const m = await measureRound();
+    expect(m.total).toBeLessThan(BEFORE_58);
+    expect(m.messages).toBe(5);
+  });
+
+  // #58/AC-6 (#48): a conta, que passava dos 50 do plano gratuito (57, a lacuna da #48), cabe agora: este teste era `it.fails` e virou `it`. A conta mede só a varredura e a rodada do Claude, não a invocação inteira do Cron (api/src/claude/cron.ts); a #48 segue com o resto.
+  it('a varredura e a rodada do Claude cabem nos 50 subrequests do plano gratuito', async () => {
     const m = await measureRound();
     expect(m.total).toBeLessThanOrEqual(SUBREQUEST_LIMIT);
   });

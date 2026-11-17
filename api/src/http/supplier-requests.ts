@@ -11,11 +11,23 @@
 // #13:           422 { error: 'invalid', reason: 'number_mismatch' | 'invalid_shape', field: 'subject' | 'body' | 'asks' }
 // #13:   POST  /api/supplier-requests/{accessKey}/send     {}       200 { request }   só de rascunho: emite (mock), fila emitida, e-mail;
 // #13:           o resultado é `sent` ou `send_failed` (falha do envio é um estado, continua 200)
-// #36:           e do pedido `sent` com a leitura no_reply e a cobrança rascunhada (#4/AC-3): envia a cobrança, com `by` do Access; 200 { request }
+// #36:           e do pedido `sent` com a cobrança rascunhada (#4/AC-3): envia a cobrança, com `by` do Access; 200 { request }
 // #36:           com followUp.sent (ou followUp.failure, o motivo curto, se o envio falhou: continua 200);
-// #36:           409 conflict { reason } no_draft | already_sent | send_in_progress; not_draft, da #13, quando a leitura não é no_reply;
-// #36:           not_no_reply só numa corrida entre as duas leituras do pedido (a rota vê no_reply e o caso de uso, já não);
+// #58:           a cobrança é devida a quem tem a leitura no_reply, ou partially_fulfilled / needs_information com nextStep follow_up (o pedido
+// #58:           respondido pela metade, depois do prazo: a varredura monta a cobrança só dos itens que faltam, como a da PR #40);
+// #36:           409 conflict { reason } no_draft | already_sent | send_in_progress; not_draft, da #13, quando a leitura não pede cobrança (recusa,
+// #58:           atendido, resposta nossa a dar: answer_supplier / confirm_document / close); stale (#58/AC-5): o texto mudou entre a leitura e a
+// #58:           reivindicação do envio (uma edição entrou no meio): nada saiu, releia o pedido e envie de novo, o texto novo;
+// #36:           not_follow_up só numa corrida entre as duas leituras do pedido (a rota vê a leitura que pede cobrança e o caso de uso, já não);
 // #36:           422 invalid { reason: 'text_invalid' }. Só esta rota envia a cobrança: nem o Cron nem as tarefas do Claude a enviam.
+// #58:   PATCH /api/supplier-requests/{accessKey}/follow-up  { template }   200 { request }   troca só o corpo da cobrança (forma com {{chave}}) do pedido
+// #58:           `sent` cuja leitura pede cobrança (no_reply, ou partially_fulfilled / needs_information com follow_up) e a cobrança rascunhada ainda não enviada; `by` é o e-mail do Access; o assunto, os itens e o novo prazo ficam.
+// #58:           O texto é revalidado contra o catálogo da cobrança (o do pedido mais `cobranca.prazo`, o novo prazo): a resposta traz followUp.draft como no GET.
+// #58:           422 invalid { reason: 'number_mismatch' | 'invalid_shape', field: 'body' } (número solto, marcador fora do catálogo, template que não é um texto
+// #58:           não vazio de até 20.000 caracteres): o texto anterior fica. 409 conflict { reason }: already_sent (depois do envio a cobrança não se edita) |
+// #58:           send_in_progress (o envio está reivindicado há menos que o prazo da reivindicação, LEASE_MS; vencida, a edição volta a valer e solta a reivindicação) |
+// #58:           no_draft (o pedido não é `sent` com a leitura que pede cobrança, ou não tem rascunho) | stale (a linha mudou no meio; repita).
+// #58:           404 not_found; 400, 401, 403, 415 e 502 como nas outras escritas. Editar nunca envia: só a rota send (POST) envia a cobrança.
 // #13:   POST  /api/supplier-requests/{accessKey}/resend   {}       200 { request }   só de send_failed; nunca emite outra nota
 // #13:   POST  /api/supplier-requests/{accessKey}/discard  { reason?: string }   200 { request }   só de rascunho; reason aparado, até 500
 // #13:           caracteres, padrão 'discarded_by_user'
@@ -47,7 +59,12 @@
 // #36: a visão `sent` da SupplierRequestView (GET /{accessKey}, e o corpo do 200 das escritas) ganha, sem mudar nenhum campo da #13:
 // #36:   reading: Reading | null, followUp: { drafted, sent, draft: { subject, body (renderizados), template (com {{chave}}), asks } | null,
 // #36:                                          sentBy: string | null, sentAt: string | null, failure: string | null (código curto, nunca texto do provedor) }
+// #58: followUp ganha dueOn: string | null, o novo prazo da cobrança ('AAAA-MM-DD'), o que a regra gravou com o rascunho (#59: a tela o mostra sem calcular
+// #58: data); nulo sem rascunho, e no rascunho do Claude de antes da #58.
 // #36: "Cobrar" na tela abre followUp.draft para a pessoa revisar e enviar pelo POST .../send; o rascunho que já não confere com o catálogo vem null.
+// #58: a cobrança é montada pela regra, sem o Claude, na varredura do prazo do Cron (api/src/cron/supplier-sweep.ts): pede só o que o fornecedor ainda não
+// #58: atendeu, cita a nota de origem ({{nota.numero}}) e traz o novo prazo (3 dias úteis, {{cobranca.prazo}}); todo número é um marcador do catálogo.
+// #58: followUp.draft.template guarda esse texto com {{chave}}; a pessoa o edita pelo PATCH .../follow-up antes de enviar.
 // #36: a leitura e a cobrança só existem no pedido `sent`; nenhum outro estado as traz.
 //
 // #13: SupplierRequestView (alinhada a web/src/approval/SupplierRequestBlock.tsx):
@@ -76,7 +93,7 @@
 // #13: quem age (`by`) é o e-mail da identidade do Access, nunca o corpo.
 import { ClaudeClient, ClaudeError, credentialsFromEnv, type Ask } from '../claude/client.js';
 import { SupabaseRestError, type SupabaseRest } from '../connectors/supabase-rest.js';
-import type { RequestFilter, RequestStatus } from '../domain/index.js';
+import { owesFollowUp, type RequestFilter, type RequestStatus } from '../domain/index.js';
 import type { Env } from '../env.js';
 import { mailerFromEnv } from '../supplier/mock-mailer.js';
 import { noteFilename, toKitNote } from '../supplier/kit-note.js';
@@ -104,7 +121,7 @@ export interface SupplierRequestsDeps {
   ask?: (env: Env) => Ask | null;
 }
 
-const PATH = /^\/api\/supplier-requests(?:\/([^/]+)(?:\/(send|resend|discard|redo|return-note\.json|return-note\.pdf))?)?$/;
+const PATH = /^\/api\/supplier-requests(?:\/([^/]+)(?:\/(send|resend|discard|redo|follow-up|return-note\.json|return-note\.pdf))?)?$/;
 const ACCESS_KEY = /^\d{44}$/;
 const REQUEST_TYPE = 'return_note';
 const MAX_REASON = 500;
@@ -116,7 +133,7 @@ const STATUSES: readonly RequestStatus[] = ['draft', 'sent', 'send_failed', 'dis
 /** #36: os filtros da lista de leitura (#4); não colidem com os estados do pedido da #13. */
 const FILTERS: readonly RequestFilter[] = ['awaiting', 'answered', 'needs_you', 'overdue']; // ADR-002
 
-const ACTIONS = ['send', 'resend', 'discard', 'redo', 'return-note.json', 'return-note.pdf'] as const;
+const ACTIONS = ['send', 'resend', 'discard', 'redo', 'follow-up', 'return-note.json', 'return-note.pdf'] as const;
 type Action = (typeof ACTIONS)[number];
 const isAction = (value: string | undefined): value is Action => (ACTIONS as readonly (string | undefined)[]).includes(value);
 const isStatus = (value: string): value is RequestStatus => (STATUSES as readonly string[]).includes(value);
@@ -129,7 +146,8 @@ const fail = (status: number, error: string, extra: Record<string, unknown> = {}
 const allowed = (key: string | undefined, action: Action | undefined): readonly string[] => {
   if (key === undefined) return ['GET'];
   if (action === undefined) return ['GET', 'PATCH'];
-  return action === 'return-note.json' || action === 'return-note.pdf' ? ['GET'] : ['POST'];
+  if (action === 'return-note.json' || action === 'return-note.pdf') return ['GET'];
+  return action === 'follow-up' ? ['PATCH'] : ['POST']; // #58
 };
 
 /** #13: o corpo de uma escrita; vazio vale {}, e o que não é um objeto JSON é nulo. */
@@ -229,6 +247,21 @@ async function edit(ctx: Ctx): Promise<Response> {
 }
 
 /**
+ * #58/AC-4, AC-5: troca o texto (o corpo, na forma com {{chave}}) da cobrança ainda não enviada. O texto é revalidado contra o catálogo da
+ * cobrança (o do pedido e o novo prazo) e o anterior fica quando recusado; depois do envio não se edita (409). Só edita: o envio é da rota `send` (#58/AC-7).
+ */
+async function editFollowUp(ctx: Ctx): Promise<Response> {
+  const template = ctx.body.template;
+  if (typeof template !== 'string' || template.trim() === '' || template.length > MAX_TEMPLATE) {
+    return fail(422, 'invalid', { reason: 'invalid_shape', field: 'body' });
+  }
+  const record = await currentOf(ctx);
+  if (record === null) return fail(404, 'not_found');
+  const result = await ctx.replyCases.editFollowUp(record.request.id, template, ctx.by);
+  return result.kind === 'ok' ? shownAfter(ctx, record.request.id) : refusal(result);
+}
+
+/**
  * #36/AC-3 (#4/AC-3): o pedido enviado com a leitura no_reply tem a cobrança a enviar: a rota de envio a manda pelo caso de uso
  * da cobrança, com a identidade do Access. Os resultados tipados viram HTTP como os da #13; a falha do envio é um estado (200).
  */
@@ -243,7 +276,7 @@ async function send(ctx: Ctx, from: RequestStatus, reason: string): Promise<Resp
   if (record === null) return fail(404, 'not_found');
   if (from === 'draft' && record.request.status === 'sent') { // ADR-002
     const reply = await ctx.reply.requests.get(record.request.id);
-    if (reply?.reading?.replyOutcome === 'no_reply') return sendFollowUp(ctx, record.request.id); // ADR-002
+    if (reply !== null && owesFollowUp(reply.reading)) return sendFollowUp(ctx, record.request.id); // #58/AC-2: no_reply, ou a resposta parcial / pedido de informação com follow_up
   }
   if (record.request.status !== from) return conflict(reason);
   const result = await ctx.cases.send(record.request.id, ctx.by);
@@ -303,6 +336,8 @@ async function runAction(ctx: Ctx, action: Action | undefined, method: string): 
       return discard(ctx);
     case 'redo':
       return redo(ctx);
+    case 'follow-up':
+      return editFollowUp(ctx);
     case 'return-note.json':
       return returnNoteJson(ctx);
     case 'return-note.pdf':

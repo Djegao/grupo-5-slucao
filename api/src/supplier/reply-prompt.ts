@@ -1,8 +1,8 @@
 import type { FactCatalog, ReadingContext } from '../domain/index.js';
 
-// #34: os prompts da leitura da resposta e da cobrança (#4), no molde de dossier/prompt.ts: a resposta
+// #34: o prompt da leitura da resposta (#4), no molde de dossier/prompt.ts: a resposta
 // #34: do fornecedor e os dados do pedido vão como dados, num bloco separado, e o system diz que nada ali
-// #34: é instrução (#4/AC-5). O que o modelo devolve só vale depois de validateReading e validateRequestText.
+// #34: é instrução (#4/AC-5). O que o modelo devolve só vale depois de validateReading. #58: a cobrança já não passa pelo Claude: a regra a monta (followUpDraftFor).
 
 /** #34: o que a tarefa manda ao Claude: o system, o prompt e o esquema da ferramenta `responder`. */
 export type ReplyPrompt = {
@@ -40,34 +40,10 @@ const READING_SCHEMA: Record<string, unknown> = {
   required: ['reply_outcome', 'fulfilled_asks', 'supplier_document', 'summary', 'next_step', 'injection_flag'],
 };
 
-const FOLLOW_UP_SYSTEM = [
-  'Você escreve o e-mail de cobrança da Já Chegou a um fornecedor que não respondeu ao pedido sobre uma nota de devolução dentro do prazo.',
-  'Você escreve só o texto: a nota de devolução, os itens e os valores já vêm montados pela regra e não são seus.',
-  'Escreva em português, curto e cordial: lembre o pedido, diga que o prazo passou e peça a resposta.',
-  'Todo número (quantidade, valor, total, prazo) aparece só como marcador {{chave}}, com uma chave (`key`) do catálogo. Nunca escreva um número por extenso nem com algarismos fora de um marcador; se a chave que você queria não existe, não cite o número.',
-  'Cite cada item pelo código do fornecedor (como F02-002), nunca pela descrição: a descrição pode trazer números que não são marcadores e fazem o texto inteiro ser recusado.',
-  'Identificadores (chave de acesso, código do fornecedor, SKU, loja) podem aparecer como estão nos dados.',
-  'Em `asks`, liste item a item o que o fornecedor precisa fazer; em `subject`, o assunto, com o número da nota de origem como {{nota.numero}}.',
-  DATA_RULE,
-].join('\n');
-
-const FOLLOW_UP_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    subject: { type: 'string', description: 'O assunto da cobrança, com o número da nota de origem como {{nota.numero}}.' },
-    body: { type: 'string', description: 'O corpo da cobrança; todo número como marcador {{chave}} do catálogo.' },
-    asks: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'O que o fornecedor precisa fazer, item a item.' },
-  },
-  required: ['subject', 'body', 'asks'],
-};
-
 const catalogData = (catalog: FactCatalog) => ({
   catalog: Object.entries(catalog.facts).map(([key, f]) => ({ key, label: f.label, value: f.value })),
   identifiers: catalog.identifiers,
 });
-
-// #34: `<` escapado, para que um texto com `</dados>` não feche o bloco de dados (mesmo molde de dossier/prompt.ts, #68).
-const dataBlock = (data: unknown): string => ['<dados>', JSON.stringify(data, null, 2).replace(/</g, '\\u003c'), '</dados>'].join('\n');
 
 const REPLY_ESCAPES: readonly (readonly [string, string])[] = [
   ['&', '&amp;'],
@@ -118,11 +94,4 @@ export function restoreExcerpts(raw: unknown, replyText: string): unknown {
     injection_flag: restore(fields['injection_flag'], replyText),
     supplier_document: restore(fields['supplier_document'], replyText),
   };
-}
-
-/** #34/AC-3: o prompt da cobrança, com o catálogo do pedido; os números só saem como {{chave}}. */
-export function buildFollowUpPrompt(input: { readonly asks: readonly string[]; readonly catalog: FactCatalog }): ReplyPrompt {
-  const data = { originalAsks: input.asks, ...catalogData(input.catalog) };
-  const prompt = ['Escreva a cobrança deste pedido a partir dos dados abaixo.', dataBlock(data)].join('\n');
-  return { system: FOLLOW_UP_SYSTEM, prompt, schema: FOLLOW_UP_SCHEMA };
 }

@@ -1,8 +1,7 @@
 import { arrayOf, isInteger, isString, isUnknown, nullable, parseRows, shaped, type Shape } from '../connectors/guards.js';
 import { SupabaseRestError, type Filters, type SupabaseRest } from '../connectors/supabase-rest.js';
 import type { SupplierReading, SupplierRequestText } from '../domain/index.js';
-import { SUPPLIER_FOLLOW_UP_TASK } from './follow-up-task.js';
-import type { ClaimWrite, Clock, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
+import type { ClaimAttempt, ClaimWrite, Clock, EditWrite, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
 import { guarded, pgCode, refused } from './supabase-reply-call.js';
 import { LEASE_MS } from './supabase-store.js';
 import { READINGS_TABLE, readingToRow } from './supabase-reply-reading.js';
@@ -27,11 +26,13 @@ import {
 const INVOICES = 'invoices';
 /** #35: as notas por requisição: a URL cresce com as chaves (44 algarismos cada). */
 const KEYS_PER_REQUEST = 50;
-const CLOSED_REASON = /^[a-z_]+: [a-z_]+$/;
 const SHORT_REASON = /^[a-z][a-z0-9_]{0,39}$/;
 
+/** #58/AC-1 (ADR-005): quem grava o rascunho montado pela regra na varredura do prazo: o nome da varredura, não uma pessoa. */
+export const FOLLOW_UP_SWEEP_ACTOR = 'supplier-overdue-sweep';
+
 const SENT = { status: 'eq.sent' } as const;
-/** #35/AC-3: a cobrança não se repete: só grava rascunho ou recusa quem ainda não tem nenhum dos dois. */
+/** #35/AC-3: a cobrança não se repete: só grava rascunho quem ainda não tem rascunho nem a recusa antiga da tarefa do Claude. */
 const NO_TEXT = { ...SENT, follow_up_draft: 'is.null', follow_up_rejection: 'is.null' } as const;
 /**
  * #35: a reivindicação do envio tem o prazo da #12 (`LEASE_MS`, o do `send_claim`): sem reivindicação, ou com uma mais velha que o
@@ -46,15 +47,27 @@ const claimable = (at: Date): Filters => ({
   follow_up_sent_at: 'is.null',
   or: `(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.${new Date(at.getTime() - LEASE_MS).toISOString()})`,
 });
+/**
+ * #58/AC-4, AC-5: a guarda da edição, a mesma de `claimable`: o rascunho existe, não foi carimbado e nenhum envio está reivindicado
+ * dentro do prazo (o e-mail pode estar saindo com o texto lido). Passado o `LEASE_MS` o envio é dado como morto e a edição volta a valer;
+ * a edição solta a ficha vencida, e o antigo detentor, se voltar, perde o carimbo (`lost`).
+ */
+const editable = claimable;
+/** #58/AC-5: a reivindicação de pé: gravada há menos que o prazo (LEASE_MS) de `at`. */
+const heldAt = (claimedAt: string | null, at: Date): boolean => claimedAt !== null && Date.parse(claimedAt) >= at.getTime() - LEASE_MS;
+/** #58/AC-5: o mesmo texto: o assunto, o corpo e os itens (o novo prazo é do rascunho, não do texto que a pessoa lê e edita). */
+const sameText = (stored: SupplierRequestText, text: SupplierRequestText): boolean =>
+  stored.subject === text.subject && stored.body === text.body && JSON.stringify(stored.asks) === JSON.stringify(text.asks);
 /** #35: a guarda da falha e do carimbo: o envio ainda não carimbado e a reivindicação é a deste detentor, pela ficha. */
 const held = (claim: FollowUpClaim): Filters => ({ ...SENT, follow_up_claim: `eq.${claim}`, follow_up_sent_at: 'is.null' });
 
-type WriteRow = FollowUpColumns & { id: number; version: number; history: unknown[]; follow_up_claim: string | null };
+type WriteRow = FollowUpColumns & { id: number; status: string; version: number; history: unknown[]; follow_up_claim: string | null };
 
 const isWriteRow = shaped<WriteRow>({
   ...followUpShape,
   follow_up_claim: nullable(isString),
   id: isInteger,
+  status: isString,
   version: isInteger,
   history: arrayOf(isUnknown),
 } satisfies Shape<WriteRow>);
@@ -64,12 +77,16 @@ const isId = shaped<{ id: number }>({ id: isInteger });
 
 /** #35: uma gravação da cobrança: o que muda, quem e quando, e a guarda atômica da transição. */
 type FollowUpChange = {
-  readonly action: 'follow_up_drafted' | 'follow_up_rejected' | 'follow_up_claimed' | 'follow_up_failed' | 'follow_up_sent';
+  readonly action: 'follow_up_drafted' | 'follow_up_edited' | 'follow_up_claimed' | 'follow_up_failed' | 'follow_up_sent';
   readonly by: string;
   readonly at: Date;
   readonly guard: Filters;
   readonly columns: Partial<FollowUpColumns> & { follow_up_claim?: string | null };
+  /** #58/AC-5: o texto que quem grava leu e vai usar; se a linha lida já tem outro, nada é gravado (`stale`). */
+  readonly expects?: SupplierRequestText;
 };
+
+type Written = 'ok' | 'missing' | 'refused' | 'stale';
 
 export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): ReplyRequestStore {
   /** #35 QR1b: o número da nota de origem de cada pedido; a tabela do pedido não tem chave estrangeira para invoices. */
@@ -97,7 +114,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
 
   /** #35: a linha lida para montar a gravação da cobrança: a versão, o histórico, as colunas da cobrança e a ficha da reivindicação. */
   async function readForWrite(id: number): Promise<WriteRow | null> {
-    const select = `id,version,history,follow_up_claim,${FOLLOW_UP_COLUMNS}`;
+    const select = `id,status,version,history,follow_up_claim,${FOLLOW_UP_COLUMNS}`;
     const rows = await guarded(() => rest.select(OUTBOX_TABLE, { select, filters: { id: `eq.${id}` }, limit: 1 }));
     return parseRows(rows, isWriteRow, OUTBOX_TABLE)[0] ?? null;
   }
@@ -105,10 +122,13 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
   /**
    * #35: lê a linha e faz UM `PATCH` filtrado pela versão lida e pela guarda da transição, com a entrada de histórico no mesmo
    * `PATCH` (a disciplina da #12). `missing`: não há o pedido; `refused`: nenhuma linha passou na versão e na guarda.
+   * #58/AC-5: com `expects`, o texto da linha lida tem de ser o que quem grava leu (`stale` se não é), e o `PATCH` pela versão
+   * lida garante que nenhuma edição entrou entre esta leitura e a gravação.
    */
-  async function writeFollowUp(id: number, change: FollowUpChange): Promise<'ok' | 'missing' | 'refused'> {
+  async function writeFollowUp(id: number, change: FollowUpChange): Promise<Written> {
     const row = await readForWrite(id);
     if (row === null) return 'missing';
+    if (change.expects !== undefined && row.follow_up_draft !== null && !sameText(row.follow_up_draft, change.expects)) return 'stale'; // #58/AC-5: sem rascunho a guarda recusa
     const after: FollowUpColumns = { ...row, ...change.columns };
     const version = row.version + 1;
     const at = change.at.toISOString();
@@ -118,7 +138,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
     return updated.length > 0 ? 'ok' : 'refused';
   }
 
-  /** #35/AC-3: rascunho e recusa: com um dos dois já gravado, volta sem gravar; qualquer outro motivo de recusa lança. */
+  /** #35/AC-3: o rascunho: com ele (ou a recusa antiga) já gravado, volta sem gravar; qualquer outro motivo de recusa lança. */
   async function saveText(id: number, operation: string, change: FollowUpChange): Promise<void> {
     const written = await writeFollowUp(id, change);
     if (written === 'ok') return;
@@ -175,33 +195,46 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
       return (await newerThan(id, messageId)) ? 'superseded' : 'recorded';
     },
 
-    saveFollowUpDraft: (id: number, text: SupplierRequestText) =>
+    saveFollowUpDraft: (id: number, text: SupplierRequestText, dueOn: string) =>
       saveText(id, 'save_follow_up_draft', {
         action: 'follow_up_drafted',
-        by: SUPPLIER_FOLLOW_UP_TASK,
+        by: FOLLOW_UP_SWEEP_ACTOR,
         at: clock.now(),
         guard: NO_TEXT,
-        columns: { follow_up_draft: { subject: text.subject, body: text.body, asks: [...text.asks] } },
+        columns: { follow_up_draft: { subject: text.subject, body: text.body, asks: [...text.asks], dueOn } },
       }),
 
-    recordFollowUpRejection(id, reason) {
-      // #35/AC-3: só o motivo fechado da regra vai ao banco; o texto do modelo não é gravado.
-      if (!CLOSED_REASON.test(reason)) return Promise.reject(refused('record_follow_up_rejection', OUTBOX_TABLE));
-      return saveText(id, 'record_follow_up_rejection', {
-        action: 'follow_up_rejected',
-        by: SUPPLIER_FOLLOW_UP_TASK,
-        at: clock.now(),
-        guard: NO_TEXT,
-        columns: { follow_up_rejection: reason },
-      });
+    /**
+     * #58/AC-4, AC-5: lê a linha (para manter o novo prazo do rascunho), troca o texto num `PATCH` guardado pela versão e por `editable`.
+     * Com 0 linhas relê para dizer por quê: carimbado (`already_sent`), envio reivindicado (`send_in_progress`) ou a versão que andou (`stale`).
+     */
+    async editFollowUpDraft(id: number, text: SupplierRequestText, by: string): Promise<EditWrite> {
+      const row = await readForWrite(id);
+      if (row === null || row.follow_up_draft === null) throw refused('edit_follow_up_draft', OUTBOX_TABLE);
+      const draft = { subject: text.subject, body: text.body, asks: [...text.asks], ...(row.follow_up_draft.dueOn === undefined ? {} : { dueOn: row.follow_up_draft.dueOn }) };
+      const at = clock.now();
+      const columns = { follow_up_draft: draft, follow_up_claimed_at: null, follow_up_claim: null }; // #58/AC-5: solta a ficha vencida
+      const written = await writeFollowUp(id, { action: 'follow_up_edited', by, at, guard: editable(at), columns });
+      if (written === 'ok') return 'recorded';
+      if (written === 'missing') throw refused('edit_follow_up_draft', OUTBOX_TABLE);
+      const now = await readForWrite(id);
+      if (now === null || now.follow_up_draft === null) throw refused('edit_follow_up_draft', OUTBOX_TABLE);
+      if (now.follow_up_sent_at !== null) return 'already_sent';
+      return heldAt(now.follow_up_claimed_at, at) ? 'send_in_progress' : 'stale';
     },
 
-    async claimFollowUpSend(id, by) {
+    async claimFollowUpSend(id, by, draft): Promise<ClaimAttempt> {
       const at = clock.now();
       const claim = crypto.randomUUID();
       const columns = { follow_up_claimed_at: at.toISOString(), follow_up_claim: claim };
-      const change: FollowUpChange = { action: 'follow_up_claimed', by, at, guard: claimable(at), columns };
-      return (await writeFollowUp(id, change)) === 'ok' ? claim : null;
+      const written = await writeFollowUp(id, { action: 'follow_up_claimed', by, at, guard: claimable(at), columns, expects: draft });
+      if (written === 'ok') return { kind: 'won', claim };
+      if (written === 'stale') return { kind: 'stale' };
+      if (written === 'missing') return { kind: 'taken' };
+      // #58/AC-5: 0 linhas: ou outro envio ganhou (reivindicado ou carimbado: `taken`), ou a versão andou numa edição no meio (`stale`).
+      const now = await readForWrite(id);
+      const open = now !== null && now.status === 'sent' && now.follow_up_draft !== null && now.follow_up_sent_at === null && !heldAt(now.follow_up_claimed_at, at);
+      return open ? { kind: 'stale' } : { kind: 'taken' };
     },
 
     recordFollowUpFailure(id, claim, reason, by) {

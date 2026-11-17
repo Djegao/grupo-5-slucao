@@ -27,7 +27,7 @@ const attempt = (run: () => unknown): unknown => {
 
 describe('#35 followUpOf: o estado da cobrança nas colunas', () => {
   it('sem carimbo, sent é null', () => {
-    expect(followUpOf(empty)).toEqual({ draft: null, rejection: null, sent: null, failure: null });
+    expect(followUpOf(empty)).toEqual({ draft: null, dueOn: null, rejection: null, sent: null, failure: null });
   });
 
   it('com o carimbo completo, sent leva quem, quando, o canal e o identificador', () => {

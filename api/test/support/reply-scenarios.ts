@@ -1,9 +1,8 @@
-// #36: apoio dos cenários da leitura da resposta (#4): o Claude falso das duas tarefas e o mundo com o pedido já enviado por uma pessoa.
+// #36: apoio dos cenários da leitura da resposta (#4): o Claude falso e o mundo com o pedido já enviado por uma pessoa.
 import { expect } from 'vitest';
 import type { Ask } from '../../src/claude/client.js';
 import { sweepSupplierOverdue } from '../../src/cron/supplier-sweep.js';
 import { GOOD_TEXT } from '../supplier/doubles.js';
-import { GOOD_FOLLOW_UP } from '../supplier/reply-doubles.js';
 import { supplierWorld, type SupplierWorld } from './supplier-world.js';
 
 export type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- #36 os corpos de resposta são lidos campo a campo
@@ -22,11 +21,11 @@ export const READING = {
   injection_flag: null,
 };
 
-/** #36: o Claude falso das duas tarefas: devolve a leitura ou a cobrança conforme o esquema da ferramenta que a tarefa pediu. */
-export const replyAsk = (reading: Record<string, unknown> = READING, followUp: unknown = GOOD_FOLLOW_UP): Ask & { calls: number } => {
-  const ask = (async (options: unknown) => {
+/** #36: o Claude falso da leitura da resposta; #58: a cobrança já não passa por ele, então `calls` conta as perguntas que ele recebe (a cobrança não é uma). */
+export const replyAsk = (reading: Record<string, unknown> = READING): Ask & { calls: number } => {
+  const ask = (async (_options: unknown) => {
     ask.calls += 1;
-    return JSON.stringify(options).includes('reply_outcome') ? reading : followUp;
+    return reading;
   }) as Ask & { calls: number };
   ask.calls = 0;
   return ask;
@@ -44,11 +43,10 @@ export const viewOf = async (w: SupplierWorld): Promise<Json> => ((await w.call(
 export const listOf = async (w: SupplierWorld, filter: string): Promise<Json> => (await w.call('GET', `/api/supplier-requests?status=${filter}`)).body;
 
 
-/** #4/AC-2: o pedido atrasado, já marcado no_reply pela varredura e com o rascunho da cobrança que a tarefa do Claude fez. */
+/** #4/AC-2: o pedido atrasado, já marcado no_reply pela varredura, que também montou, pela regra, o rascunho da cobrança (#58/AC-1). */
 export async function overdueWorld(options: Parameters<typeof supplierWorld>[0] = {}): Promise<SupplierWorld> {
   const w = await sentWorld(options);
   w.setNow(AFTER_DUE);
   await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE });
-  await w.runAllTasks(replyAsk());
   return w;
 }

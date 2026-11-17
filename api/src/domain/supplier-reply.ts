@@ -1,6 +1,6 @@
-import { parseIsoDate } from './calendar.js';
-import { textChecks, type FactCatalog } from './dossier.js';
-import type { RequestStatus } from './supplier-request.js';
+import { addBusinessDays, formatBrazilianDate, parseIsoDate } from './calendar.js';
+import { factKey, textChecks, type FactCatalog } from './dossier.js';
+import { DEFAULT_DUE_BUSINESS_DAYS, type RequestStatus, type SupplierRequestText } from './supplier-request.js';
 
 // #33: a leitura da resposta do fornecedor (#4). O Claude lê a resposta e devolve um objeto; a regra
 // #33: confere esse objeto, corrige o próximo passo e diz em que filtro da lista cada pedido cai.
@@ -164,6 +164,26 @@ export function overdueReading(request: RequestDeadline, reading: SupplierReadin
   return request.status === 'sent' && reading === null && pastDue ? OVERDUE_READING : null;
 }
 
+/**
+ * #58/AC-2 (como a followUpDraftFor da PR #40): a leitura que pede a cobrança é a que não respondeu (`no_reply`) e as respostas
+ * `partially_fulfilled` e `needs_information` cujo próximo passo é `follow_up`. Outro próximo passo é resposta nossa, não cobrança.
+ */
+export function owesFollowUp(reading: SupplierReading | null): boolean {
+  if (reading === null) return false;
+  if (reading.replyOutcome === 'no_reply') return true;
+  const partial = reading.replyOutcome === 'partially_fulfilled' || reading.replyOutcome === 'needs_information';
+  return partial && reading.nextStep === 'follow_up';
+}
+
+/**
+ * #58/AC-2: a cobrança é devida hoje: o pedido está `sent`, a leitura a pede e, nas respostas (`partially_fulfilled`,
+ * `needs_information`), o prazo do pedido já passou (no dia do prazo ainda está no prazo). O `no_reply` só nasce depois do prazo.
+ */
+export function followUpDue(request: RequestDeadline, reading: SupplierReading | null, today: string): boolean {
+  if (request.status !== 'sent' || reading === null || !owesFollowUp(reading)) return false;
+  return reading.replyOutcome === 'no_reply' || isPastDue(request.dueOn, today);
+}
+
 /** #4: os filtros da lista "Pedidos ao fornecedor"; o rótulo que a pessoa lê mora fora do domínio. */
 export type RequestFilter = 'awaiting' | 'answered' | 'needs_you' | 'overdue';
 
@@ -178,4 +198,45 @@ export function filterOf(request: RequestDeadline, reading: SupplierReading | nu
   if (reading.replyOutcome === 'no_reply') return 'overdue';
   if (reading.replyOutcome === 'fulfilled' && reading.nextStep === 'close') return 'answered';
   return 'needs_you';
+}
+
+/** #58/AC-2: o que a regra precisa do pedido para montar a cobrança: o que pedimos (forma com {{chave}}) e o que o fornecedor já atendeu. */
+export type FollowUpBasis = { readonly asks: readonly string[]; readonly fulfilledAsks: readonly string[] };
+
+/** #58/AC-2: o texto da cobrança (forma com {{chave}}) e o novo prazo, AAAA-MM-DD. */
+export type FollowUpDraft = { readonly text: SupplierRequestText; readonly dueOn: string };
+
+/**
+ * #58/AC-1: a cobrança montada pela regra, sem o Claude. #58/AC-2: pede só o que o fornecedor ainda não atendeu (os `asks` fora
+ * de `fulfilledAsks`; com tudo atendido, o que uma leitura parcial ou de pedido de informação pode listar, volta a pedir os itens do pedido, para o texto nunca ficar sem itens), cita a nota de origem
+ * e traz o novo prazo, 3 dias úteis depois de `today`. #58/AC-3: todo número do texto é um marcador {{chave}} do catálogo: o número
+ * da nota (`nota.numero`) e o novo prazo (`cobranca.prazo`, que `withFollowUpDueDate` põe no catálogo); os itens vêm do pedido, que já os guarda assim.
+ */
+export function followUpDraftFor(basis: FollowUpBasis, today: string): FollowUpDraft {
+  const open = basis.asks.filter((ask) => !basis.fulfilledAsks.includes(ask));
+  const asks = open.length > 0 ? open : [...basis.asks];
+  const body = [
+    'Olá.',
+    '',
+    `Não recebemos a resposta ao nosso pedido sobre a nota {{${factKey.invoiceNumber()}}} dentro do prazo.`,
+    `Pedimos, por favor, até {{${factKey.followUpDueDate()}}}:`,
+    ...asks.map((ask) => `- ${ask}`),
+    '',
+    'Ficamos no aguardo.',
+    '',
+    'Obrigado,',
+    'Contas a pagar · Já Chegou',
+  ].join('\n');
+  const text: SupplierRequestText = Object.freeze({
+    subject: `Lembrete: pedido sobre a nota {{${factKey.invoiceNumber()}}}`,
+    body,
+    asks: Object.freeze(asks),
+  });
+  return Object.freeze({ text, dueOn: addBusinessDays(today, DEFAULT_DUE_BUSINESS_DAYS) });
+}
+
+/** #58/AC-3: o catálogo do pedido com o novo prazo da cobrança, a data como o e-mail a escreve; o prazo original segue em `prazo`. */
+export function withFollowUpDueDate(catalog: FactCatalog, dueOn: string): FactCatalog {
+  const fact = Object.freeze({ label: 'Novo prazo de resposta do fornecedor', value: formatBrazilianDate(dueOn), source: 'return_note' as const });
+  return Object.freeze({ facts: Object.freeze({ ...catalog.facts, [factKey.followUpDueDate()]: fact }), identifiers: catalog.identifiers });
 }

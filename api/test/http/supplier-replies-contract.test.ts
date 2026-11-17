@@ -88,7 +88,7 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
     const request = await viewOf(w);
     expect(Object.keys(request).sort()).toEqual([...VIEW_KEYS_13, 'followUp', 'reading'].sort());
     expect(request.reading).toBeNull();
-    expect(request.followUp).toEqual({ drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null });
+    expect(request.followUp).toEqual({ drafted: false, sent: false, draft: null, dueOn: null, sentBy: null, sentAt: null, failure: null });
     expect(request).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'nota-devolucao-ND-1.pdf' } }); // #57/AC-5
   });
 
@@ -102,11 +102,13 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
   it('#36/AC-2: a cobrança rascunhada vem renderizada e com a forma {{chave}}, para "Cobrar" abrir, revisar e enviar', async () => {
     const w = await overdueWorld();
     const { followUp } = await viewOf(w);
-    expect(Object.keys(followUp).sort()).toEqual(['draft', 'drafted', 'failure', 'sent', 'sentAt', 'sentBy']);
+    expect(Object.keys(followUp).sort()).toEqual(['draft', 'drafted', 'dueOn', 'failure', 'sent', 'sentAt', 'sentBy']);
+    expect(followUp.dueOn).toBe('2026-11-25'); // #59: o novo prazo da cobrança, AAAA-MM-DD
     expect(Object.keys(followUp.draft).sort()).toEqual(['asks', 'body', 'subject', 'template']);
     expect(followUp.draft.body).toContain('R$ 59,43');
     expect(followUp.draft.body).not.toContain('{{');
     expect(followUp.draft.template).toContain('{{devolucao.total}}');
+    expect(followUp.draft.template).toContain('{{cobranca.prazo}}'); // #58/AC-3
   });
 
   it('#36/AC-2: o rascunho que já não confere com o catálogo vem nulo, e o resto da visão continua', async () => {
@@ -153,10 +155,11 @@ describe('#36/AC-3 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect((await w.call('POST', w.path('/send'), { body: {} })).body).toEqual({ error: 'conflict', reason: 'already_sent' });
   });
 
-  it('#36/AC-3: no_reply sem rascunho é 409 conflict no_draft', async () => {
+  it('#36/AC-3: no_reply sem rascunho (o rascunho que a varredura não chegou a gravar) é 409 conflict no_draft', async () => {
     const w = await sentWorld();
     w.setNow(AFTER_DUE);
     await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE });
+    (w.rows('outbox_supplier_emails')[0] as Json).follow_up_draft = null;
     expect(await w.call('POST', w.path('/send'), { body: {} })).toMatchObject({ status: 409, body: { error: 'conflict', reason: 'no_draft' } });
   });
 

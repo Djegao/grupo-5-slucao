@@ -46,7 +46,7 @@ export type WireRequest =
 export type ViewResult = { readonly ok: true; readonly view: WireRequest } | { readonly ok: false; readonly reason: 'source_missing' | 'text_invalid' };
 
 /** #36: o pedido enviado sem a leitura da #35 à mão (não deve ocorrer): a cobrança vazia. */
-const NO_FOLLOW_UP: WireFollowUp = { drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null };
+const NO_FOLLOW_UP: WireFollowUp = { drafted: false, sent: false, draft: null, dueOn: null, sentBy: null, sentAt: null, failure: null };
 
 /** #13: o dinheiro em reais, em texto pt-BR, feito no servidor a partir do valor da nota. */
 const money = (reais: number): WireMoney => ({ text: Money.fromReais(reais).toString() });
