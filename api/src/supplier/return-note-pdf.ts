@@ -55,62 +55,86 @@ function wrap(text: string, width: number): string[] {
   return lines.length === 0 ? [''] : lines;
 }
 
-/** #57: as páginas: o cabeçalho da nota, os itens (passam de página sem perder nenhum) e o total. */
-function layout(note: KitReturnNote): Page[] {
-  const pages: Page[] = [[]];
-  let y = TOP;
-  const page = (): Page => pages[pages.length - 1] as Page;
-  const add = (x: number, size: number, text: string): void => {
-    page().push([x, y, size, text]);
-  };
-  const down = (amount: number): void => {
-    y -= amount;
-  };
+/** #57: a folha em montagem: as páginas, a página corrente e a altura em que a próxima linha entra. */
+class Sheet {
+  y = TOP;
+  private current: Page = [];
+  readonly pages: Page[] = [this.current];
 
-  add(LEFT, 16, `Nota de devolução ${note.nota_id}`);
-  down(18);
-  add(LEFT, 9, 'Emissão emulada (demonstração) · sem valor fiscal');
-  down(26);
-  add(LEFT, 10, `Número ${note.numero} · série ${note.serie} · emitida em ${dayMonthYear(note.data_emissao)}`);
-  down(LINE);
-  add(LEFT, 10, `Chave de acesso: ${note.chave}`);
-  down(LINE);
-  add(LEFT, 10, `Emitente: ${note.emitente.nome} · destino ${note.emitente.destino}`);
-  down(LINE);
-  add(LEFT, 10, `Fornecedor: ${note.fornecedor_id}`);
-  down(LINE);
-  add(LEFT, 10, `Nota referenciada: ${note.nota_referenciada}`);
-  down(LINE);
-  add(LEFT, 10, `Natureza: ${note.natureza}`);
-  down(28);
+  add(x: number, size: number, text: string): void {
+    this.current.push([x, this.y, size, text]);
+  }
 
-  const header = (): void => {
-    for (const [x, label] of [[LEFT, 'Código'], [130, 'Descrição'], [360, 'Qtd.'], [420, 'Preço unit.'], [500, 'Valor']] as const) add(x, 10, label);
-    down(16);
-  };
-  const nextPage = (): void => {
-    pages.push([]);
-    y = TOP;
-    header();
-  };
+  down(amount: number): void {
+    this.y -= amount;
+  }
 
-  header();
+  nextPage(): void {
+    this.current = [];
+    this.pages.push(this.current);
+    this.y = TOP;
+  }
+}
+
+const COLUMNS = [[LEFT, 'Código'], [130, 'Descrição'], [360, 'Qtd.'], [420, 'Preço unit.'], [500, 'Valor']] as const;
+
+function drawColumns(sheet: Sheet): void {
+  for (const [x, label] of COLUMNS) sheet.add(x, 10, label);
+  sheet.down(16);
+}
+
+function drawHeader(sheet: Sheet, note: KitReturnNote): void {
+  const rows: readonly (readonly [size: number, text: string, gapAfter: number])[] = [
+    [16, `Nota de devolução ${note.nota_id}`, 18],
+    [9, 'Emissão emulada (demonstração) · sem valor fiscal', 26],
+    [10, `Número ${note.numero} · série ${note.serie} · emitida em ${dayMonthYear(note.data_emissao)}`, LINE],
+    [10, `Chave de acesso: ${note.chave}`, LINE],
+    [10, `Emitente: ${note.emitente.nome} · destino ${note.emitente.destino}`, LINE],
+    [10, `Fornecedor: ${note.fornecedor_id}`, LINE],
+    [10, `Nota referenciada: ${note.nota_referenciada}`, LINE],
+    [10, `Natureza: ${note.natureza}`, 28],
+  ];
+  for (const [size, text, gapAfter] of rows) {
+    sheet.add(LEFT, size, text);
+    sheet.down(gapAfter);
+  }
+}
+
+function drawItems(sheet: Sheet, note: KitReturnNote): void {
   for (const item of note.itens) {
     const description = wrap(item.descricao, DESCRIPTION_WIDTH);
-    if (y - (description.length - 1) * LINE < BOTTOM) nextPage();
-    add(LEFT, 9, item.codigo_fornecedor);
-    add(360, 9, `${item.quantidade} ${item.unidade}`);
-    add(420, 9, reais(item.preco_unitario));
-    add(500, 9, reais(item.valor));
+    if (sheet.y - (description.length - 1) * LINE < BOTTOM) {
+      sheet.nextPage();
+      drawColumns(sheet);
+    }
+    sheet.add(LEFT, 9, item.codigo_fornecedor);
+    sheet.add(360, 9, `${item.quantidade} ${item.unidade}`);
+    sheet.add(420, 9, reais(item.preco_unitario));
+    sheet.add(500, 9, reais(item.valor));
     for (const part of description) {
-      add(130, 9, part);
-      down(LINE);
+      sheet.add(130, 9, part);
+      sheet.down(LINE);
     }
   }
-  down(12);
-  if (y < BOTTOM) nextPage();
-  add(420, 11, `Total: ${reais(note.valor_total)}`);
-  return pages;
+}
+
+function drawTotal(sheet: Sheet, note: KitReturnNote): void {
+  sheet.down(12);
+  if (sheet.y < BOTTOM) {
+    sheet.nextPage();
+    drawColumns(sheet);
+  }
+  sheet.add(420, 11, `Total: ${reais(note.valor_total)}`);
+}
+
+/** #57: as páginas: o cabeçalho da nota, os itens (passam de página sem perder nenhum) e o total. */
+function layout(note: KitReturnNote): Page[] {
+  const sheet = new Sheet();
+  drawHeader(sheet, note);
+  drawColumns(sheet);
+  drawItems(sheet, note);
+  drawTotal(sheet, note);
+  return sheet.pages;
 }
 
 const contentOf = (page: Page): string =>
