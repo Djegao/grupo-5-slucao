@@ -111,7 +111,7 @@ describe("#20 fluxo da cobrança", () => {
   });
 
   it("#5/AC-4: enviando trava a edição e o descarte", () => {
-    const sending = run([{ type: "edit" }, { type: "sendStarted", id: "r-late" }], review);
+    const sending = run([{ type: "sendStarted", id: "r-late" }], review);
     expect(run([{ type: "changeBody", body: "x" }, { type: "discard" }, { type: "edit" }], sending)).toEqual(sending);
   });
 
@@ -133,10 +133,13 @@ describe("#20 fluxo da cobrança", () => {
   });
 
   it("#5/AC-4: envio falho guarda o motivo, mantém o rascunho e a situação, e tentar de novo volta a enviando", () => {
-    const failed = run([{ type: "edit" }, { type: "changeBody", body: "Texto" }, { type: "sendStarted", id: "r-late" }, { type: "sendFailed", id: "r-late", failure: "mailRefused" }], review);
-    expect(failed.drawer?.followUp).toEqual({ phase: { phase: "failed", failure: "mailRefused" }, editing: true, body: "Texto" });
+    const failed = run([{ type: "sendStarted", id: "r-late" }, { type: "sendFailed", id: "r-late", failure: "mailRefused" }], review);
+    expect(failed.drawer?.followUp).toEqual({ phase: { phase: "failed", failure: "mailRefused" }, editing: false, body: null });
     expect(failed.charged).toEqual({});
     expect(run([{ type: "sendStarted", id: "r-late" }], failed).drawer?.followUp?.phase).toEqual({ phase: "sending" });
+    // #59 Depois da falha a edição segue possível: o texto digitado fica e o envio espera salvar ou cancelar (#59/AC-3).
+    const edited = run([{ type: "edit" }, { type: "changeBody", body: "Texto" }], failed);
+    expect(edited.drawer?.followUp).toEqual({ phase: { phase: "failed", failure: "mailRefused" }, editing: true, body: "Texto" });
   });
 
   it("#5/AC-4: o resultado de um envio de outro pedido não mexe na fase do que está aberto", () => {
@@ -215,5 +218,49 @@ describe("#21 cobranças que o servidor já fez", () => {
     const opened = run([{ type: "openRow", id: "r-late" }, { type: "openFollowUp", id: "r-late" }, { type: "sendStarted", id: "r-late" }]);
     const done = screenReducer(opened, { type: "sendSucceeded", id: "r-late", dueOn: "2026-11-19", sentOn: "2026-11-16", sentBy: "beto@example.test" });
     expect(done.drawer?.followUp?.phase).toEqual({ phase: "sent", sentOn: "2026-11-16", sentBy: "beto@example.test" });
+  });
+});
+
+// #59 A edição do rascunho da cobrança: salvar pelo PATCH, cancelar, e o envio travado enquanto se edita.
+describe("#59 edição do rascunho da cobrança", () => {
+  const review = run([{ type: "openFollowUp", id: "r-late" }]);
+  const editing = run([{ type: "edit" }, { type: "changeBody", body: "Texto com {{nota.numero}}" }], review);
+
+  it("#59/AC-3: enquanto se edita, o envio não começa: a fase continua revisar e nenhum id entra em envio", () => {
+    const refused = run([{ type: "sendStarted", id: "r-late" }], editing);
+    expect(refused).toEqual(editing);
+    expect(refused.sending).toEqual([]);
+  });
+
+  it("#59/AC-2: salvar vai a 'salvando' e um segundo salvar durante o salvamento não muda nada", () => {
+    const saving = run([{ type: "saveStarted", id: "r-late" }], editing);
+    expect(saving.drawer?.followUp).toMatchObject({ editing: true, saving: true, body: "Texto com {{nota.numero}}" });
+    expect(run([{ type: "saveStarted", id: "r-late" }], saving)).toEqual(saving);
+  });
+
+  it("#59/AC-2: salvar só começa em edição aberta", () => {
+    expect(run([{ type: "saveStarted", id: "r-late" }], review)).toEqual(review);
+  });
+
+  it("#59/AC-2: salvo, a edição fecha e o texto editado deixa de valer: o do servidor volta a ser o rascunho", () => {
+    const saved = run([{ type: "saveStarted", id: "r-late" }, { type: "saveSucceeded", id: "r-late" }], editing);
+    expect(saved.drawer?.followUp).toEqual({ phase: { phase: "review" }, editing: false, body: null });
+  });
+
+  it("#59/AC-2: o 422 mantém a edição aberta, com o texto digitado e o motivo fechado", () => {
+    const failed = run([{ type: "saveStarted", id: "r-late" }, { type: "saveFailed", id: "r-late", failure: "invalid" }], editing);
+    expect(failed.drawer?.followUp).toMatchObject({ editing: true, body: "Texto com {{nota.numero}}", saveFailure: "invalid" });
+    expect(failed.drawer?.followUp?.saving).toBeFalsy();
+  });
+
+  it("#59/AC-2: salvar de novo limpa o motivo da falha anterior", () => {
+    const failed = run([{ type: "saveStarted", id: "r-late" }, { type: "saveFailed", id: "r-late", failure: "invalid" }], editing);
+    expect(run([{ type: "saveStarted", id: "r-late" }], failed).drawer?.followUp?.saveFailure).toBeUndefined();
+  });
+
+  it("#59/AC-1: cancelar fecha a edição e joga fora o texto digitado, sem salvar; durante o salvamento não cancela", () => {
+    expect(run([{ type: "cancelEdit" }], editing).drawer?.followUp).toEqual({ phase: { phase: "review" }, editing: false, body: null });
+    const saving = run([{ type: "saveStarted", id: "r-late" }], editing);
+    expect(run([{ type: "cancelEdit" }], saving)).toEqual(saving);
   });
 });

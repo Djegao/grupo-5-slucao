@@ -12,6 +12,7 @@ import {
   screenReducer,
   visibleRows,
   type FollowUpFlow,
+  type SaveResult,
   type SendResult,
 } from "./supplier-request-state";
 import type {
@@ -49,6 +50,8 @@ export interface SupplierRequestsProps {
   draftOf: (row: SupplierRequestRow) => FollowUpDraftView | null;
   /** #20 Envia a cobrança; devolve quando saiu ou o motivo fechado da falha. Uma rejeição vira "unknown": o erro de fora não chega à tela. */
   send: (row: SupplierRequestRow, draft: FollowUpDraftView) => Promise<SendResult>;
+  /** #59 Salva o molde editado da cobrança (PATCH); devolve salvo ou o motivo fechado. Uma rejeição vira "unknown": o erro de fora não chega à tela. Sem isto, o texto não se edita. */
+  saveDraft?: (row: SupplierRequestRow, template: string) => Promise<SaveResult>;
   /** #20 Os próximos passos da leitura que não são cobrar (encerrar, confirmar, responder) são de outra camada; chegam por aqui. */
   onNextStep?: (row: SupplierRequestRow, step: SupplierNextStep) => void;
   /** #21 O pedido da gaveta aberta (ou nulo, fechada): a rota o lê da API. Sem isto, a gaveta está sempre pronta. */
@@ -58,7 +61,7 @@ export interface SupplierRequestsProps {
   onDrawerRetry?: () => void;
   /** #21 Avisa qual linha está aberta na gaveta (`null`: nenhuma), para a rota buscar o pedido dela. */
   onDrawerChange?: (id: string | null) => void;
-  /** #21 Falso: o texto da cobrança não se edita (o envio não o leva ao servidor, #36). */
+  /** #21 Falso: o texto da cobrança não se edita. Verdadeiro (o padrão), e com `saveDraft`, "Editar" abre o molde e Salvar o guarda no servidor (#59). */
   editableDraft?: boolean;
   renderDrawer?: DrawerShell;
 }
@@ -71,11 +74,13 @@ function DrawerBody(props: {
   editable: boolean;
   onNextStep: (step: SupplierNextStep) => void;
   onEdit: () => void;
+  onSave: () => void;
+  onCancelEdit: () => void;
   onBodyChange: (body: string) => void;
   onSend: () => void;
   onDiscard: () => void;
 }): ReactElement {
-  const { conversation, flow, draft, editable, onNextStep, onEdit, onBodyChange, onSend, onDiscard } = props;
+  const { conversation, flow, draft, editable, onNextStep, onEdit, onSave, onCancelEdit, onBodyChange, onSend, onDiscard } = props;
   return (
     <div style={{ display: "grid", gap: "var(--spacing-lg)", padding: "var(--spacing-lg)" }}>
       <SupplierConversation conversation={conversation} onNextStep={onNextStep} />
@@ -83,7 +88,11 @@ function DrawerBody(props: {
         <FollowUpDraft
           draft={draft}
           editing={flow.editing}
+          saving={flow.saving}
+          saveFailure={flow.saveFailure}
           onEdit={editable ? onEdit : undefined}
+          onSave={onSave}
+          onCancelEdit={onCancelEdit}
           onBodyChange={onBodyChange}
           onSend={onSend}
           onDiscard={onDiscard}
@@ -126,14 +135,14 @@ function DrawerPending({ failed, message, onRetry }: { failed: boolean; message:
   );
 }
 
-/** #5/AC-4 O rascunho que a pessoa vê e envia: o do dado, com o texto que ela editou, se editou. */
+/** #59 O rascunho que a pessoa vê: o do servidor, e, editando, o molde com o texto que ela digitou (o que ainda não foi salvo não sai). */
 function currentDraft(base: FollowUpDraftView, flow: FollowUpFlow | null): FollowUpDraftView {
-  return { ...base, body: flow?.body ?? base.body };
+  return { ...base, template: flow?.body ?? base.template };
 }
 
 /** #5 A tela "Pedidos ao fornecedor": liga a lista, a gaveta e o rascunho da cobrança ao estado da #20; os dados entram por props (a rota os lê, #21). */
 export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
-  const { state, rows, counts, onFilterChange, onRetry, conversationOf, draftOf, send, onNextStep } = props;
+  const { state, rows, counts, onFilterChange, onRetry, conversationOf, draftOf, send, saveDraft, onNextStep } = props;
   const { drawerState = "ready", drawerError, onDrawerRetry, onDrawerChange, editableDraft = true, renderDrawer = defaultShell } = props;
   const [screen, dispatch] = useReducer(screenReducer, INITIAL_STATE);
   // #5/AC-4 Só a cobrança desta sessão muda a linha (Aguardando, cobrado). A que o servidor já enviou fica no chip dele e sem "Cobrar" (`alreadyCharged`, #21).
@@ -150,10 +159,10 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
   }, [openId]);
 
   async function sendFollowUp(row: SupplierRequestRow): Promise<void> {
-    if (!flow || flow.phase.phase === "sending" || flow.phase.phase === "sent") return;
-    const base = draftOf(row);
-    if (!base) return;
-    const draft = currentDraft(base, flow);
+    // #59/AC-3 Editando, o texto da tela ainda não é o do servidor: o envio espera salvar ou cancelar.
+    if (!flow || flow.editing || flow.phase.phase === "sending" || flow.phase.phase === "sent") return;
+    const draft = draftOf(row);
+    if (!draft) return;
     dispatch({ type: "sendStarted", id: row.id });
     let result: SendResult;
     try {
@@ -167,6 +176,22 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
         ? { type: "sendSucceeded", id: row.id, dueOn: draft.dueOn, sentOn: result.sentOn, sentTime: result.sentTime, sentBy: result.sentBy }
         : { type: "sendFailed", id: row.id, failure: result.failure },
     );
+  }
+
+  /** #59/AC-2 Salva o molde digitado pelo PATCH: salvo, a edição fecha e o rascunho passa a ser o do servidor; recusado, fica aberta com o motivo fechado. */
+  async function saveFollowUp(row: SupplierRequestRow): Promise<void> {
+    if (!flow || !flow.editing || flow.saving || !saveDraft) return;
+    const base = draftOf(row);
+    if (!base) return;
+    dispatch({ type: "saveStarted", id: row.id });
+    let result: SaveResult;
+    try {
+      result = await saveDraft(row, flow.body ?? base.template);
+    } catch {
+      // #59 O erro de quem salvou não é lido nem mostrado: a tela só conhece o motivo fechado "unknown" (layer-exposure).
+      result = { ok: false, failure: "unknown" };
+    }
+    dispatch(result.ok ? { type: "saveSucceeded", id: row.id } : { type: "saveFailed", id: row.id, failure: result.failure });
   }
 
   function handleNextStep(row: SupplierRequestRow, step: SupplierNextStep): void {
@@ -188,9 +213,11 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
         conversation={conversation}
         flow={flow}
         draft={base ? currentDraft(base, flow) : null}
-        editable={editableDraft}
+        editable={editableDraft && saveDraft !== undefined}
         onNextStep={(step) => handleNextStep(row, step)}
         onEdit={() => dispatch({ type: "edit" })}
+        onSave={() => void saveFollowUp(row)}
+        onCancelEdit={() => dispatch({ type: "cancelEdit" })}
         onBodyChange={(body) => dispatch({ type: "changeBody", body })}
         onSend={() => void sendFollowUp(row)}
         onDiscard={() => dispatch({ type: "discard" })}

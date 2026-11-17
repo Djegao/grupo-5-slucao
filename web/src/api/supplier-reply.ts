@@ -1,13 +1,25 @@
 /**
  * #21 O fio da lista "Pedidos ao fornecedor" (#5) e da leitura da resposta (#4): `api/src/http/supplier-requests.ts` (#36).
  * A lista vem por filtro, com as contagens dos quatro filtros calculadas pelo servidor; a gaveta lê o pedido pela chave de acesso,
- * e "Cobrar" envia pelo `POST .../send`. O erro de uma chamada vira um motivo fechado (`SupplierReplyReason`): o corpo da resposta não sai daqui.
+ * "Cobrar" envia pelo `POST .../send`, e "Editar" guarda o texto pelo `PATCH .../follow-up` (#59). O erro de uma chamada vira um motivo fechado (`SupplierReplyReason`): o corpo da resposta não sai daqui.
  */
-import { ApiError, apiGet, apiPost } from "./client";
+import { ApiError, apiGet, apiPatch, apiPost } from "./client";
 import type { ReadingListDto, ReplyFilterDto, SentRequestDetailDto, SupplierRequestDetailResponseDto } from "./contract";
 
 /** #21 O prazo do envio da cobrança, como o do envio do pedido (#17): a chamada parada termina, não fica pendurada. */
 export const FOLLOW_UP_SEND_TIMEOUT_MS = 30_000;
+
+/** #59 O prazo do salvamento da cobrança editada: o servidor reconfere o texto contra o catálogo antes de gravar; a chamada parada termina. */
+export const FOLLOW_UP_SAVE_TIMEOUT_MS = 20_000;
+
+/** #59 Os motivos fechados de um salvamento recusado: 422 (texto que não confere), 409 (o pedido mudou) e o resto; o corpo da resposta não entra. */
+export type SaveFailure = "invalid" | "conflict" | "unknown";
+
+/** #59 O que o salvamento devolve: o pedido como ficou, e se o servidor recusou por conflito (já enviado, envio em curso, sem rascunho, texto trocado no meio). */
+export interface SavedFollowUp {
+  kind: "saved" | "conflict";
+  detail: SentRequestDetailDto;
+}
 
 /** #21 Os motivos fechados de uma chamada falha; é o que a tela sabe de um erro (layer-exposure). */
 export type SupplierReplyReason = "unauthorized" | "not_found" | "conflict" | "unavailable" | "unknown";
@@ -46,6 +58,27 @@ async function sendFollowUpOf(accessKey: string): Promise<SentRequestDetailDto> 
   }
 }
 
+/** #59 O motivo de um salvamento recusado: só o status decide (422 texto inválido, 409 conflito), nunca o texto nem o corpo da resposta. */
+export function saveFailureOf(error: unknown): SaveFailure {
+  if (!(error instanceof ApiError)) return "unknown";
+  if (error.status === 422) return "invalid";
+  if (error.status === 409) return "conflict";
+  return "unknown";
+}
+
+/**
+ * #59 Salva o molde editado da cobrança (PATCH .../follow-up, #58): o servidor revalida os números contra o catálogo e devolve o pedido com o rascunho novo.
+ * #59 Um 422 falha como erro (o texto anterior fica no servidor); um 409 relê o pedido, como o envio, e o devolve como conflito. O corpo não é lido (layer-exposure).
+ */
+async function saveFollowUpOf(accessKey: string, template: string): Promise<SavedFollowUp> {
+  try {
+    return { kind: "saved", detail: sentOf(await apiPatch<SupplierRequestDetailResponseDto>(pathOf(accessKey, "/follow-up"), { template }, { timeoutMs: FOLLOW_UP_SAVE_TIMEOUT_MS })) };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 409) throw error;
+    return { kind: "conflict", detail: sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey))) };
+  }
+}
+
 export interface SupplierReplyApi {
   /** #21 As linhas do filtro e as contagens dos quatro filtros. */
   list: (filter: ReplyFilterDto, signal: AbortSignal) => Promise<ReadingListDto>;
@@ -53,10 +86,13 @@ export interface SupplierReplyApi {
   detail: (accessKey: string, signal: AbortSignal) => Promise<SentRequestDetailDto>;
   /** #21 Envia a cobrança do rascunho que o servidor guarda; devolve o pedido como ficou (com `followUp.sent` ou `followUp.failure`). */
   sendFollowUp: (accessKey: string) => Promise<SentRequestDetailDto>;
+  /** #59 Salva o molde editado da cobrança (com os `{{chave}}`); o servidor reconfere os números e guarda o texto, e o envio manda o que ele guarda. */
+  saveFollowUp: (accessKey: string, template: string) => Promise<SavedFollowUp>;
 }
 
 export const supplierReplyApi: SupplierReplyApi = {
   list: (filter, signal) => apiGet<ReadingListDto>(`/api/supplier-requests?status=${filter}`, { signal }),
   detail: async (accessKey, signal) => sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey), { signal })),
   sendFollowUp: sendFollowUpOf,
+  saveFollowUp: saveFollowUpOf,
 };

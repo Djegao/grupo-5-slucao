@@ -22,9 +22,6 @@ export const FILTER_OF_CHIP: Record<SupplierFilter, ReplyFilterDto> = {
   late: "overdue",
 };
 
-/** #5/AC-4 Em quantos dias úteis vence a cobrança que a pessoa envia (o "Novo prazo" do rascunho, estado 8 do wireframe). */
-export const FOLLOW_UP_BUSINESS_DAYS = 3;
-
 const ZONE = "America/Sao_Paulo";
 
 /** #21 O dia de hoje em São Paulo, AAAA-MM-DD: o mesmo dia que o servidor usa para decidir o que está no prazo (#36). */
@@ -39,18 +36,6 @@ export function momentOf(instant: string | null): { sentOn: string; sentTime?: s
   if (Number.isNaN(at.getTime())) return { sentOn: "—" };
   const sentTime = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
   return { sentOn: todayInSaoPaulo(at), sentTime };
-}
-
-/** #5/AC-4 O dia útil `days` dias depois de `from` (AAAA-MM-DD), pulando sábado e domingo; feriados não entram. */
-export function followUpDueOn(from: string, days: number = FOLLOW_UP_BUSINESS_DAYS): string {
-  const day = new Date(`${from}T00:00:00Z`);
-  let left = days;
-  while (left > 0) {
-    day.setUTCDate(day.getUTCDate() + 1);
-    const weekday = day.getUTCDay();
-    if (weekday !== 0 && weekday !== 6) left -= 1;
-  }
-  return day.toISOString().slice(0, 10);
 }
 
 /** #5/AC-1 A coluna Fornecedor: o código e, havendo, o nome ("F07 Limpeza"). */
@@ -160,15 +145,17 @@ export function conversationOf(row: SupplierRequestRow, detail: SentRequestDetai
   };
 }
 
-/** #5/AC-4 O rascunho da cobrança que o servidor guarda; nulo quando não há, já não confere com o catálogo (#36) ou a cobrança já foi enviada. */
-export function draftOf(detail: SentRequestDetailDto, today: string): FollowUpDraftView | null {
+/** #5/AC-4 O rascunho da cobrança que o servidor guarda; nulo quando não há, já não confere com o catálogo (#36) ou a cobrança já foi enviada. O novo prazo é o do servidor (#59), nunca calculado aqui. */
+export function draftOf(detail: SentRequestDetailDto): FollowUpDraftView | null {
   const draft = detail.followUp.draft;
   if (draft === null || detail.followUp.sent) return null;
   return {
     to: detail.email.to,
-    dueOn: followUpDueOn(today),
+    // #59 `?? null`: o servidor de antes da #58 não traz o campo, e a tela então não mostra data.
+    dueOn: detail.followUp.dueOn ?? null,
     subject: draft.subject,
     body: draft.body,
+    template: draft.template,
     // #36 A cobrança sai sem anexo (o servidor manda `attachments: []`).
     attachmentName: texts.supplierRequests.draft.noAttachment,
   };

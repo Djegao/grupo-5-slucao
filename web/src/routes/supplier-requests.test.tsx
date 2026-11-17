@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import type { ReadingListDto, ReadingRowDto, ReplyFilterDto, SentRequestDetailDto } from "../api/contract";
 import type { SupplierReplyApi } from "../api/supplier-reply";
 import { FILTER_OF_CHIP } from "../components/supplier-request-map";
-import { loadList, sendOf } from "./supplier-requests";
+import { loadList, saveOf, sendOf } from "./supplier-requests";
 
 // #21 A rota "Pedidos ao fornecedor" lê a lista do servidor: o filtro, as quatro contagens e a chave de cada linha; o envio exige a chave. Dados fictícios.
 
@@ -77,5 +78,36 @@ describe("#21 rota Pedidos ao fornecedor: o envio da cobrança", () => {
     const sendFollowUp = vi.fn<SupplierReplyApi["sendFollowUp"]>(async () => detail);
     await expect(sendOf(key(1), { sendFollowUp })).resolves.toBe(detail);
     expect(sendFollowUp).toHaveBeenCalledWith(key(1));
+  });
+});
+
+// #59 O salvamento da edição pela rota: a chave da linha, o resultado fechado e o pedido relido que vai à gaveta.
+describe("#59 rota Pedidos ao fornecedor: salvar a edição da cobrança", () => {
+  const detail = { followUp: { sent: false } } as SentRequestDetailDto;
+
+  it("#59/AC-2: sem a chave de acesso da linha, nada é salvo e o resultado é a falha fechada 'unknown'", async () => {
+    const saveFollowUp = vi.fn<SupplierReplyApi["saveFollowUp"]>();
+    await expect(saveOf(null, "x", { saveFollowUp })).resolves.toEqual({ result: { ok: false, failure: "unknown" }, reread: null });
+    expect(saveFollowUp).not.toHaveBeenCalled();
+  });
+
+  it("#59/AC-2: salvo, o resultado é 'ok' e o pedido que o servidor devolveu vai à gaveta", async () => {
+    const saveFollowUp = vi.fn<SupplierReplyApi["saveFollowUp"]>(async () => ({ kind: "saved", detail }));
+    await expect(saveOf(key(1), "Texto {{cobranca.prazo}}", { saveFollowUp })).resolves.toEqual({ result: { ok: true }, reread: detail });
+    expect(saveFollowUp).toHaveBeenCalledWith(key(1), "Texto {{cobranca.prazo}}");
+  });
+
+  it("#59/AC-2: o 422 vira a falha 'invalid' sem pedido relido (o texto anterior fica no servidor)", async () => {
+    const saveFollowUp = vi.fn<SupplierReplyApi["saveFollowUp"]>(async () => {
+      throw new ApiError(422, "invalid", "number_mismatch com dados do banco");
+    });
+    const outcome = await saveOf(key(1), "263,62", { saveFollowUp });
+    expect(outcome).toEqual({ result: { ok: false, failure: "invalid" }, reread: null });
+    expect(JSON.stringify(outcome)).not.toContain("banco");
+  });
+
+  it("#59: o conflito (409) devolve a falha 'conflict' com o pedido relido, para a gaveta mostrar o estado atual", async () => {
+    const saveFollowUp = vi.fn<SupplierReplyApi["saveFollowUp"]>(async () => ({ kind: "conflict", detail }));
+    await expect(saveOf(key(1), "x", { saveFollowUp })).resolves.toEqual({ result: { ok: false, failure: "conflict" }, reread: detail });
   });
 });

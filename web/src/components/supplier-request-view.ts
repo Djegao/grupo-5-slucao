@@ -103,9 +103,13 @@ export interface SupplierConversationView {
 /** #157 follow_up_draft: o rascunho da cobrança, no formato do pedido da #3. */
 export interface FollowUpDraftView {
   to: string;
-  dueOn: string;
+  /** #59 O novo prazo que o servidor gravou (AAAA-MM-DD); nulo quando ele não o tem, e então a tela não mostra data. */
+  dueOn: string | null;
   subject: string;
+  /** #59 O texto renderizado, o que a pessoa lê. */
   body: string;
+  /** #59 O molde com os `{{chave}}`: a edição abre com ele, e o PATCH o reenvia. */
+  template: string;
   attachmentName: string;
 }
 
