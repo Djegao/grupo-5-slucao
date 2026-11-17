@@ -16,6 +16,8 @@ import type {
   RequestRecord,
   SupplierDeps,
 } from '../../src/supplier/ports.js';
+import { queueEntryOf } from '../../src/supplier/draft.js';
+import type { SupplierDraftInput } from '../../src/supplier/draft-task.js';
 import { SOURCE_KEY, sourceInvoice } from '../domain/supplier-request-fixtures.js';
 
 // #11: dublês das portas do pedido ao fornecedor; nenhum banco, nenhuma rede.
@@ -62,6 +64,12 @@ export const queueView = (id: number, overrides: Partial<ReturnNoteView> = {}): 
   ...overrides,
 });
 
+/** #12: a entrada que o `pending()` da tarefa entrega ao `run`, para a devolução 7 (ou a que `over` descreve). */
+export const draftInput = (over: Partial<ReturnNoteView> = {}): SupplierDraftInput => {
+  const { id, ...rest } = queueEntryOf(queueView(7, over));
+  return { queueId: id, ...rest };
+};
+
 export type FakeQueue = ReturnNoteQueue & { views: ReturnNoteView[]; emitCalls: unknown[][] };
 
 export const fakeQueue = (views: ReturnNoteView[]): FakeQueue => {
@@ -83,19 +91,53 @@ export const fakeQueue = (views: ReturnNoteView[]): FakeQueue => {
   return queue;
 };
 
-type Stored = RequestRecord & { stamps: RequestChange[] };
+type Stored = RequestRecord & { stamps: RequestChange[]; claim: string | null };
 
-export type FakeRequests = SupplierDeps['requests'] & { rows: Stored[]; saves: number };
+export type FakeRequests = SupplierDeps['requests'] & {
+  rows: Stored[];
+  saves: number;
+  claims: number;
+  releases: number;
+  /** #12: o que o caso de uso mandou criar, para conferir quem fez. */
+  created: NewRequest[];
+  /** #12: quando true, o próximo save diz `stale`, como o PATCH que não achou a versão lida. */
+  staleNext: boolean;
+  /** #12: quando true, a próxima trava é recusada (outro envio em curso). */
+  refuseClaim: boolean;
+  /** #12: quantas vezes cada leitura foi chamada, para conferir o custo do `pending()` da tarefa. */
+  findOpenCalls: number;
+  listOpenKeysCalls: number;
+  /** #12: as chaves que cada `listOpenKeys` recebeu, para conferir que só as pendentes foram perguntadas. */
+  listOpenKeysArgs: string[][];
+};
 
 export const fakeRequests = (): FakeRequests => {
   const rows: Stored[] = [];
   const store: FakeRequests = {
     rows,
     saves: 0,
-    findOpen: async (key, type) =>
-      rows.find((r) => r.request.invoiceAccessKey === key && r.request.requestType === type && r.request.isOpen) ?? null,
+    claims: 0,
+    releases: 0,
+    created: [],
+    staleNext: false,
+    refuseClaim: false,
+    findOpenCalls: 0,
+    listOpenKeysCalls: 0,
+    listOpenKeysArgs: [],
+    findOpen: async (key, type) => {
+      store.findOpenCalls += 1;
+      return rows.find((r) => r.request.invoiceAccessKey === key && r.request.requestType === type && r.request.isOpen) ?? null;
+    },
+    listOpenKeys: async (type, keys) => {
+      store.listOpenKeysCalls += 1;
+      store.listOpenKeysArgs.push([...keys]);
+      return new Set(
+        rows.filter((r) => r.request.requestType === type && r.request.isOpen && keys.includes(r.request.invoiceAccessKey)).map((r) => r.request.invoiceAccessKey),
+      );
+    },
     get: async (id) => rows.find((r) => r.request.id === id) ?? null,
     create: async (input: NewRequest): Promise<CreateResult> => {
+      store.created.push(input);
       const opens = input.outcome.kind === 'draft';
       if (opens && rows.some((r) => r.request.invoiceAccessKey === input.invoiceAccessKey && r.request.isOpen)) {
         return { kind: 'conflict' };
@@ -105,14 +147,36 @@ export const fakeRequests = (): FakeRequests => {
         input.outcome.kind === 'draft'
           ? SupplierRequest.draft({ ...base, text: input.outcome.text })
           : SupplierRequest.rejected({ ...base, rejection: input.outcome.rejection });
-      const row: Stored = { request, queueId: input.queueId, to: input.to, stamps: [] };
+      const row: Stored = { request, queueId: input.queueId, to: input.to, stamps: [], claim: null };
       rows.push(row);
       return { kind: 'ok', record: row };
     },
     save: async (request, change) => {
-      store.saves += 1;
+      if (store.staleNext) {
+        store.staleNext = false;
+        return 'stale';
+      }
       const row = rows.find((r) => r.request === request);
-      if (row !== undefined && change !== undefined) row.stamps.push(change);
+      // #12: a trava é explícita: com chave, só grava quem a tem; sem chave, só grava com a trava livre.
+      if (row !== undefined && row.claim !== (change.claim ?? null)) return 'stale';
+      store.saves += 1;
+      if (row !== undefined) {
+        row.stamps.push(change);
+        if (change.action === 'sent' || change.action === 'send_failed') row.claim = null;
+      }
+      return 'ok';
+    },
+    claimSend: async (id) => {
+      store.claims += 1;
+      const row = rows.find((r) => r.request.id === id);
+      if (row === undefined || store.refuseClaim || row.claim !== null) return { kind: 'conflict' };
+      row.claim = `claim-${store.claims}`;
+      return { kind: 'claimed', claim: row.claim };
+    },
+    releaseSend: async (id, claim) => {
+      store.releases += 1;
+      const row = rows.find((r) => r.request.id === id);
+      if (row !== undefined && row.claim === claim) row.claim = null;
     },
   };
   return store;

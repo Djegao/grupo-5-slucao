@@ -12,6 +12,11 @@ import { tasksFor } from './tasks/index.js';
 /**
  * #171 Pedidos por tarefa a cada rodada. Cada pedido custa 2 subrequests (a Messages API e o upsert) e a rodada
  * lê umas 7 vezes antes: 2 tarefas × 5 × 2 + 7 = 27, dentro dos 50 do plano gratuito. A rodada vai depois da captura.
+ * #12 A tarefa do rascunho do pedido ao fornecedor tem limite próprio de 2 (`SUPPLIER_DRAFT_LIMIT`). Conta dela: leituras
+ * #12 4 (claude_suggestions, a fila, as notas de origem da fila e os pedidos abertos só dessas notas, numa leitura) e, por pedido,
+ * #12 5 (a nota de origem e o fornecedor, a Messages API, o insert do pedido e o upsert da sugestão; a fila e o pedido aberto
+ * #12 não são relidos). 4 + 2 × 5 = 14.
+ * #12 Rodada no pior caso, com as outras duas no limite delas: 27 + 14 = 41, dentro dos 50 e sem crescer com as devoluções pendentes.
  */
 export const CRON_LIMIT = 5;
 

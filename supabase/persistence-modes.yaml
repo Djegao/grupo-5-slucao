@@ -11,6 +11,8 @@
 # growth:   fixed para tabela de consulta que só um carregador versionado ou uma migração grava
 # gap:      o que as gravações de hoje ainda não cumprem do modo declarado; decisão a registrar
 #
+# #12: acrescenta issued_return_notes e outbox_supplier_emails (desenho em
+# supabase/persistence-supplier-request.md); a estratégia de unidade de trabalho é a da #8.
 # Primeira versão (#8): declara as tabelas que a camada de persistência da devolução lê ou grava e
 # toda a base do kit. Ainda sem modo declarado, a declarar pelo dono de cada uma: titles,
 # outbox_dock_actions, outbox_registry_corrections, outbox_store_actions, claude_suggestions,
@@ -79,8 +81,32 @@ tables:
       _cancelada_check. Não é a forma de docs/entity-history.md (uma linha de histórico por mudança);
       vale enquanto houver uma só transição terminal. ops/reconferir.ts apaga a tabela inteira (PER-5).
 
+  # Pedido ao fornecedor e nota emitida pelo mock (#12). Desenho: supabase/persistence-supplier-request.md.
+  issued_return_notes:
+    mode: append-only
+    history: none
+    # #12: a nota que o mock emitiu é um fato; nunca muda nem sai.
+    # #12/PER-5: queue_id referencia outbox_return_notes por identidade, sem FK: o reconferir (ops/reconferir.ts)
+    # apaga outbox_return_notes e esta linha sobrevive como referência órfã, por desenho.
+    projection: none             # lida direto pela chave (queue_id ou id); não há estado derivado
+    refusal: grant               # revoke update, delete, truncate de anon, authenticated e service_role
+    ids: "id bigint generated always as identity (maxvalue 999999999) = a sequência: ND-<id>, número <id>"
+
+  outbox_supplier_emails:
+    mode: upsert-with-history
+    history: json-column
+    history_column: history      # jsonb, lista de {version, at, by, action, state}; estado inteiro depois
+    version_column: version
+    # #12: o pedido ao fornecedor (raiz SupplierRequest): a pessoa edita o corpo do rascunho e o estado
+    # anda; histórico na própria linha porque o PostgREST não dá transação entre duas tabelas.
+    # #12/PER-5: queue_id referencia outbox_return_notes por identidade, sem FK: o reconferir (ops/reconferir.ts)
+    # apaga outbox_return_notes e esta linha sobrevive como referência órfã, por desenho.
+    send_guard: "send_claim uuid + send_claimed_at timestamptz (trava do envio, com prazo)"
+    deletion: none               # nada é apagado; o fim é status = discarded com motivo, quem e quando
+    erasure: not stated          # sent_by e discarded_by identificam pessoas (ADR-005); sem caminho de apagamento registrado
+
   # Base do kit (#52, ADR-001): espelho dos JSON de data/kit/, que é a fonte versionada.
-  kit_fornecedores: &kit
+  kit_fornecedores: &kit   # #12: ganha a coluna email (migração da #12); o modo é o da #8
     mode: ephemeral
     reason: >-
       Cópia de data/kit/*.json recarregada por scripts/load_kit.py com upsert na chave primária; o
