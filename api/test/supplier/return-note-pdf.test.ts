@@ -54,19 +54,19 @@ describe('#57/AC-3 o PDF traz a nota no formato do kit, com os valores do JSON',
 
   it('#57/AC-3: uma descrição longa não é cortada: sai inteira, em linhas seguidas', () => { // ADR-002
     const base = kit();
-    const longo = 'Arroz tipo 1 agulhinha integral organico em pacote de cinco quilos reforcado';
-    const pdf = returnNotePdf({ ...base, itens: [{ ...base.itens[0]!, descricao: longo }] });
-    expect(shown(pdf).join(' ')).toContain(longo);
+    const longDescription = 'Arroz tipo 1 agulhinha integral organico em pacote de cinco quilos reforcado';
+    const pdf = returnNotePdf({ ...base, itens: [{ ...base.itens[0]!, descricao: longDescription }] });
+    expect(shown(pdf).join(' ')).toContain(longDescription);
   });
 
   it('#57/AC-3: uma nota com muitos itens passa para outra página sem perder nenhum item', () => { // ADR-002
     const base = kit();
-    const itens = Array.from({ length: 80 }, (_, i) => ({ ...base.itens[0]!, codigo_fornecedor: `F02-${String(i).padStart(3, '0')}` }));
-    const pdf = returnNotePdf({ ...base, itens });
+    const items = Array.from({ length: 80 }, (_, i) => ({ ...base.itens[0]!, codigo_fornecedor: `F02-${String(i).padStart(3, '0')}` }));
+    const pdf = returnNotePdf({ ...base, itens: items });
     const pages = pdf.match(/\/Type \/Page /g) ?? [];
     expect(pages.length).toBeGreaterThan(1);
     expect(pdf).toContain(`/Count ${pages.length}`);
-    for (const item of itens) expect(shown(pdf)).toContain(item.codigo_fornecedor);
+    for (const item of items) expect(shown(pdf)).toContain(item.codigo_fornecedor);
   });
 });
 
@@ -91,8 +91,10 @@ describe('#57/AC-4 a geração é uma função pura, sem dependência nova', () 
   });
 
   it('#57/AC-4: o package.json da API não ganhou dependência de execução nem de desenvolvimento', () => { // ADR-002
-    const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as Record<string, unknown>;
-    expect(manifest.dependencies).toBeUndefined();
-    expect(Object.keys(manifest.devDependencies as object).sort()).toEqual(['@cloudflare/workers-types', 'typescript', 'vitest', 'wrangler']);
+    const manifest: unknown = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+    if (typeof manifest !== 'object' || manifest === null) throw new Error('package.json não é um objeto');
+    const { dependencies, devDependencies } = manifest as { dependencies?: unknown; devDependencies?: unknown };
+    expect(dependencies).toBeUndefined();
+    expect(typeof devDependencies === 'object' && devDependencies !== null ? Object.keys(devDependencies).sort() : devDependencies).toEqual(['@cloudflare/workers-types', 'typescript', 'vitest', 'wrangler']);
   });
 });

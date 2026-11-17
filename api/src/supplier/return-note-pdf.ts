@@ -12,7 +12,7 @@ type Page = Text[];
 const TOP = 800;
 const BOTTOM = 60;
 const LEFT = 50;
-const DESCRIPTION_WIDTH = 38; // caracteres da coluna Descrição, a 9 pt, antes de quebrar a linha
+const DESCRIPTION_WIDTH = 38; // #57: caracteres da coluna Descrição, a 9 pt, antes de quebrar a linha
 const LINE = 14;
 
 const reais = (value: number): string => `R$ ${value.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
