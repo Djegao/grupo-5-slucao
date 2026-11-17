@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { SupplierRequestBlock } from "./SupplierRequestBlock";
-import type { SupplierRequestPort } from "../api/supplier-request";
+import type { SupplierRequestPort } from "./supplier-request-state";
 import { useSupplierRequest } from "./useSupplierRequest";
 
 /** #3 O que a gaveta recebe para mostrar o pedido: as chamadas (#17), quem olha e, se preciso, o intervalo da consulta. */

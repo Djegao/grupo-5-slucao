@@ -4,12 +4,22 @@
  * desenha são useSupplierRequest e SupplierRequestBlock (#16).
  */
 import { ApiError } from "../api/client";
-import type { SupplierRequestPort } from "../api/supplier-request";
 import { texts } from "../texts";
 import type { SupplierRequestPending, SupplierRequestView } from "./SupplierRequestBlock";
 
-/** #17 A porta é da camada de contrato (web/src/api/supplier-request.ts); o estado só a usa. */
-export type { SupplierRequestPort };
+/**
+ * #17 As chamadas que o estado precisa, na visão que o bloco desenha; cada ação devolve o pedido como ficou. Quem a implementa
+ * é web/src/api/supplier-request.ts, cujo `SupplierRequestDto` cabe nesta visão.
+ */
+export interface SupplierRequestPort {
+  load: (accessKey: string, signal: AbortSignal) => Promise<SupplierRequestView | null>;
+  send: (accessKey: string) => Promise<SupplierRequestView>;
+  resend: (accessKey: string) => Promise<SupplierRequestView>;
+  discard: (accessKey: string) => Promise<SupplierRequestView>;
+  redo: (accessKey: string) => Promise<SupplierRequestView>;
+  /** #17/AC-6 Salva o molde do texto (com os `{{chave}}`); o servidor reconfere os números. */
+  saveTemplate: (accessKey: string, template: string) => Promise<SupplierRequestView>;
+}
 
 export interface SupplierRequestState {
   /** #3/AC-1 O pedido guardado; nulo, o bloco não existe. A edição é à parte: o `editing` do bloco sai de `editing`. */
@@ -99,6 +109,8 @@ export function supplierRequestError(reason: unknown): string {
     if (reason.status === 403) return errors.forbidden;
     if (reason.status === 409) return errors.conflict;
     if (reason.status === 422) return errors.unprocessable;
+    // #3/AC-4 Status 0: o prazo estourou ou a rede caiu; o servidor pode ter concluído, e a tela relê o pedido.
+    if (reason.status === 0) return errors.timeout;
   }
   return errors.other;
 }

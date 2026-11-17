@@ -96,9 +96,9 @@ export interface SupplierRequestBlockProps {
 /** #3 "2026-11-18" vira "18/11", sem passar por fuso. */
 const dayMonth = (day: string): string => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
-/** #3 "2026-11-15T13:40:00Z" vira "10h40" na hora de quem olha; sem carimbo (#17), "--h--". */
-function clock(instant: string | null): string {
-  if (instant === null) return t.noTime;
+/** #3 "2026-11-15T13:40:00Z" vira "10h40" na hora de quem olha; sem carimbo (#17), sem hora. */
+function clock(instant: string | null): string | null {
+  if (instant === null) return null;
   const at = new Date(instant);
   return `${String(at.getHours()).padStart(2, "0")}h${String(at.getMinutes()).padStart(2, "0")}`;
 }
@@ -147,8 +147,8 @@ function State(props: SupplierRequestBlockProps & { request: SupplierRequestView
 }
 
 /** #17 Sem quem agiu (nulo), a frase não diz por quem; o resto segue "por você" ou "por fulano". */
-const actor = (who: string | null | undefined, viewer: string): string => {
-  if (who === null) return t.byUnknown;
+const actor = (who: string | null | undefined, viewer: string): string | null => {
+  if (who === null) return null;
   return who === undefined || who === viewer ? t.byYou : t.by(who);
 };
 
@@ -240,11 +240,9 @@ function AttachmentLink({ attachment }: { attachment: SupplierRequestAttachment 
 }
 
 function Sent({ request, viewer }: { request: Extract<SupplierRequestView, { status: "sent" }>; viewer: string }): JSX.Element {
-  const by = actor(request.sentBy, viewer);
+  const stamp = t.stamp(actor(request.sentBy, viewer), clock(request.sentAt));
   const until = dayMonth(request.email.dueOn);
-  const line = request.returnNote?.number
-    ? t.sentWithNote(request.returnNote.number, by, clock(request.sentAt), until)
-    : t.sentEmailOnly(by, clock(request.sentAt), until);
+  const line = request.returnNote?.number ? t.sentWithNote(request.returnNote.number, stamp, until) : t.sentEmailOnly(stamp, until);
   return (
     <>
       <Text variant="body-sm">{line}</Text>
@@ -279,7 +277,7 @@ function Discarded(props: Pick<SupplierRequestBlockProps, "viewer" | "pending" |
   const { request, pending } = props;
   return (
     <>
-      <Text variant="body-sm">{t.discarded(actor(request.discardedBy, props.viewer), clock(request.discardedAt))}</Text>
+      <Text variant="body-sm">{t.discarded(t.stamp(actor(request.discardedBy, props.viewer), clock(request.discardedAt)))}</Text>
       <PrimaryAction label={pending === "redo" ? t.pending.redo : t.actions.redo} onClick={props.onRedo} pending={pending !== undefined} />
     </>
   );

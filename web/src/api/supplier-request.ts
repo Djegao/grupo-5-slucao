@@ -1,12 +1,13 @@
 /**
  * #17 O fio do pedido ao fornecedor (`api/src/http/supplier-requests.ts`, #13): as rotas são pela chave de acesso
- * da nota de origem. É a implementação de `SupplierRequestPort`, que o estado (#16) usa sem saber de rede.
+ * da nota de origem. `supplierRequestApi` devolve o `SupplierRequestDto` do fio, que cabe na `SupplierRequestPort`
+ * do estado (#16, web/src/approval/supplier-request-state.ts): quem declara a porta é quem a usa, e o fio não importa a tela.
  */
 import { ApiError, apiGet, apiPatch, apiPost } from "./client";
 import type { SupplierRequestDto, SupplierRequestResponseDto } from "./contract";
 
-/** #17 As chamadas que o estado precisa; cada ação devolve o pedido como ficou. */
-export interface SupplierRequestPort {
+/** #17 As chamadas do fio; cada ação devolve o pedido como a API o deixou. */
+export interface SupplierRequestApi {
   load: (accessKey: string, signal: AbortSignal) => Promise<SupplierRequestDto | null>;
   send: (accessKey: string) => Promise<SupplierRequestDto>;
   resend: (accessKey: string) => Promise<SupplierRequestDto>;
@@ -24,22 +25,22 @@ function requestOf(response: SupplierRequestResponseDto): SupplierRequestDto {
   return response.request;
 }
 
-const post = async (accessKey: string, action: string): Promise<SupplierRequestDto> =>
-  requestOf(await apiPost<SupplierRequestResponseDto>(pathOf(accessKey, action), {}));
+/**
+ * #17/AC-4 Prazos por ação: o redo espera o Claude (até 45 s, api/src/claude/client.ts); o envio emite a nota, grava e manda o
+ * e-mail. As demais ações usam o prazo padrão do cliente.
+ */
+export const SEND_TIMEOUT_MS = 30_000;
+export const REDO_TIMEOUT_MS = 50_000;
 
-export const supplierRequestApi: SupplierRequestPort = {
-  load: async (accessKey, signal) => {
-    try {
-      return (await apiGet<SupplierRequestResponseDto>(pathOf(accessKey), { signal })).request ?? null;
-    } catch (reason) {
-      // #17/AC-1 Nota sem pedido: é o bloco que não existe, não falha de carga.
-      if (reason instanceof ApiError && reason.status === 404) return null;
-      throw reason;
-    }
-  },
-  send: (accessKey) => post(accessKey, "/send"),
-  resend: (accessKey) => post(accessKey, "/resend"),
+const post = async (accessKey: string, action: string, options: { timeoutMs?: number } = {}): Promise<SupplierRequestDto> =>
+  requestOf(await apiPost<SupplierRequestResponseDto>(pathOf(accessKey, action), {}, options));
+
+export const supplierRequestApi: SupplierRequestApi = {
+  // #17/AC-1 O contrato responde 200 com `request` nulo quando a nota não tem pedido; qualquer erro é falha de carga.
+  load: async (accessKey, signal) => (await apiGet<SupplierRequestResponseDto>(pathOf(accessKey), { signal })).request ?? null,
+  send: (accessKey) => post(accessKey, "/send", { timeoutMs: SEND_TIMEOUT_MS }),
+  resend: (accessKey) => post(accessKey, "/resend", { timeoutMs: SEND_TIMEOUT_MS }),
   discard: (accessKey) => post(accessKey, "/discard"),
-  redo: (accessKey) => post(accessKey, "/redo"),
+  redo: (accessKey) => post(accessKey, "/redo", { timeoutMs: REDO_TIMEOUT_MS }),
   saveTemplate: async (accessKey, template) => requestOf(await apiPatch<SupplierRequestResponseDto>(pathOf(accessKey), { template })),
 };
