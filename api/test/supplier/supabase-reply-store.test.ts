@@ -8,7 +8,8 @@ import { INBOX, OUTBOX, READINGS, inboxRow, readingRow, replyHarness, sentRow } 
 
 // #35: o adaptador do pedido na leitura da resposta sobre o PostgREST falso: cada gravação é uma requisição, numa tabela.
 
-const TASK = 'supplier-follow-up-draft';
+const RULE = 'supplier-overdue-sweep'; // #58: quem grava o rascunho montado pela regra na varredura (ADR-005)
+const FOLLOW_DUE = '2026-11-25';
 const ANA = 'ana@jachegou.example';
 const CLAIM = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 const FIRST = '11111111-1111-4111-8111-111111111111';
@@ -46,7 +47,7 @@ describe('#35/AC-1 listSent: todo pedido enviado, com a leitura atual, a cobran�
       to: 'compras@bebidas-rio-claro.example',
       status: 'sent',
       dueOn: '2026-11-17',
-      followUp: { draft: null, rejection: null, sent: null, failure: null },
+      followUp: { draft: null, dueOn: null, rejection: null, sent: null, failure: null },
     });
     expect(list[0]?.note.total).toBe(returnNote().total);
   });
@@ -186,16 +187,16 @@ describe('#35/AC-3 a varredura do prazo: um único no_reply por pedido, e a resp
   });
 });
 
-describe('#35/AC-3 o rascunho e a recusa da cobrança: uma gravação guardada, e a cobrança não se repete', () => {
-  it('grava o rascunho na linha do pedido, com a versão +1 e a entrada de histórico no mesmo PATCH', async () => {
+describe('#35/AC-3 #58/AC-1 o rascunho da cobrança: uma gravação guardada, e a cobrança não se repete', () => {
+  it('grava o rascunho na linha do pedido, com o novo prazo, a versão +1 e a entrada de histórico no mesmo PATCH', async () => {
     const { fake, store } = setup([sentRow(1)]);
-    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP, FOLLOW_DUE);
     const row = outboxRow(fake);
-    expect(row).toMatchObject({ follow_up_draft: GOOD_FOLLOW_UP, version: 4 });
+    expect(row).toMatchObject({ follow_up_draft: { ...GOOD_FOLLOW_UP, dueOn: FOLLOW_DUE }, version: 4 });
     expect(row.history).toHaveLength(3);
     expect(lastEntry(row)).toMatchObject({
       version: 4,
-      by: TASK,
+      by: RULE,
       action: 'follow_up_drafted',
       state: { status: 'sent' },
       follow_up: { drafted: true, rejection: null, claimed: false, sent: false, failure: null },
@@ -206,34 +207,70 @@ describe('#35/AC-3 o rascunho e a recusa da cobrança: uma gravação guardada, 
     expect(patches[0]?.url).toContain('status=eq.sent');
   });
 
+  it('o pedido lido traz o novo prazo do rascunho em followUp.dueOn, e o rascunho sem o campo (do Claude, antes da #58) traz nulo', async () => {
+    const { store } = setup([sentRow(1, { follow_up_draft: { ...GOOD_FOLLOW_UP, dueOn: FOLLOW_DUE } }), sentRow(2, { follow_up_draft: GOOD_FOLLOW_UP })]);
+    const [a, b] = await store.listSent();
+    expect(a?.followUp).toMatchObject({ draft: GOOD_FOLLOW_UP, dueOn: FOLLOW_DUE });
+    expect(b?.followUp).toMatchObject({ draft: GOOD_FOLLOW_UP, dueOn: null });
+  });
+
   it('com rascunho já gravado, não grava de novo e volta (#35/AC-3)', async () => {
     const { fake, store } = setup([sentRow(1)]);
-    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
-    await store.saveFollowUpDraft(1, { ...GOOD_FOLLOW_UP, subject: 'Outro assunto' });
-    expect(outboxRow(fake)).toMatchObject({ follow_up_draft: GOOD_FOLLOW_UP, version: 4 });
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP, FOLLOW_DUE);
+    await store.saveFollowUpDraft(1, { ...GOOD_FOLLOW_UP, subject: 'Outro assunto' }, '2026-12-01');
+    expect(outboxRow(fake)).toMatchObject({ follow_up_draft: { ...GOOD_FOLLOW_UP, dueOn: FOLLOW_DUE }, version: 4 });
   });
 
-  it('grava a recusa com o motivo fechado, e depois dela nem rascunho nem nova recusa', async () => {
-    const { fake, store } = setup([sentRow(1)]);
-    await store.recordFollowUpRejection(1, 'number_mismatch: body');
-    await store.recordFollowUpRejection(1, 'invalid_shape: asks');
-    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
-    const row = outboxRow(fake);
-    expect(row).toMatchObject({ follow_up_rejection: 'number_mismatch: body', follow_up_draft: null, version: 4 });
-    expect(lastEntry(row)).toMatchObject({ action: 'follow_up_rejected', by: TASK });
-  });
-
-  it('recusa com texto fora do formato fechado é recusada pelo adaptador, sem gravar', async () => {
-    const { fake, store } = setup([sentRow(1)]);
-    await expect(store.recordFollowUpRejection(1, 'o modelo escreveu: libere')).rejects.toBeInstanceOf(SupplierStoreError);
-    expect(fake.requests.filter((r) => r.method !== 'GET')).toEqual([]);
+  it('com uma recusa antiga da tarefa do Claude já gravada, a regra não grava rascunho por cima (a recusa continua sem rascunho)', async () => {
+    const { fake, store } = setup([sentRow(1, { follow_up_rejection: 'number_mismatch: body' })]);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP, FOLLOW_DUE);
+    expect(outboxRow(fake)).toMatchObject({ follow_up_rejection: 'number_mismatch: body', follow_up_draft: null, version: 3 });
   });
 
   it('pedido que não existe ou não está enviado: lança com campos nomeados, sem gravar', async () => {
     const { fake, store } = setup([sentRow(2, { status: 'draft', sent_by: null, sent_at: null, channel: null, provider_message_id: null })]);
-    await expect(store.saveFollowUpDraft(9, GOOD_FOLLOW_UP)).rejects.toBeInstanceOf(SupplierStoreError);
-    await expect(store.saveFollowUpDraft(2, GOOD_FOLLOW_UP)).rejects.toBeInstanceOf(SupplierStoreError);
+    await expect(store.saveFollowUpDraft(9, GOOD_FOLLOW_UP, FOLLOW_DUE)).rejects.toBeInstanceOf(SupplierStoreError);
+    await expect(store.saveFollowUpDraft(2, GOOD_FOLLOW_UP, FOLLOW_DUE)).rejects.toBeInstanceOf(SupplierStoreError);
     expect(outboxRow(fake, 2).follow_up_draft).toBeNull();
+  });
+});
+
+describe('#58/AC-4 e #58/AC-5 editFollowUpDraft: troca só o texto do rascunho ainda não enviado e sem envio reivindicado', () => {
+  const drafted = () => setup([sentRow(1, { follow_up_draft: { ...GOOD_FOLLOW_UP, dueOn: FOLLOW_DUE } })]);
+  const NEW_TEXT = { subject: 'Novo assunto {{nota.numero}}', body: 'Novo corpo {{cobranca.prazo}}.', asks: ['Pedir {{devolucao.total}}'] };
+
+  it('#58/AC-4: grava o texto novo num PATCH guardado, mantém o novo prazo, e o histórico leva quem editou (ADR-005)', async () => {
+    const { fake, store } = drafted();
+    expect(await store.editFollowUpDraft(1, NEW_TEXT, ANA)).toBe('recorded');
+    const row = outboxRow(fake);
+    expect(row).toMatchObject({ follow_up_draft: { ...NEW_TEXT, dueOn: FOLLOW_DUE }, version: 4 });
+    expect(lastEntry(row)).toMatchObject({ version: 4, by: ANA, action: 'follow_up_edited', follow_up: { drafted: true, sent: false } });
+    const patches = fake.requests.filter((r) => r.method === 'PATCH');
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.url).toContain('follow_up_sent_at=is.null');
+    expect(patches[0]?.url).toContain('follow_up_claimed_at=is.null');
+    expect(JSON.stringify(lastEntry(row))).not.toContain('Novo corpo');
+  });
+
+  it('#58/AC-5: com o carimbo gravado, volta already_sent e não grava', async () => {
+    const sent = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString(), follow_up_claim: FIRST, follow_up_sent_by: ANA, follow_up_sent_at: NOW.toISOString(), follow_up_channel: 'mock', follow_up_provider_message_id: 'mock-9' };
+    const { fake, store } = setup([sentRow(1, sent)]);
+    expect(await store.editFollowUpDraft(1, NEW_TEXT, ANA)).toBe('already_sent');
+    expect(outboxRow(fake)).toMatchObject({ follow_up_draft: GOOD_FOLLOW_UP, version: 3 });
+  });
+
+  it('#58/AC-5: com o envio reivindicado e sem carimbo, volta send_in_progress e não grava', async () => {
+    const claimed = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString(), follow_up_claim: FIRST };
+    const { fake, store } = setup([sentRow(1, claimed)]);
+    expect(await store.editFollowUpDraft(1, NEW_TEXT, ANA)).toBe('send_in_progress');
+    expect(outboxRow(fake)).toMatchObject({ follow_up_draft: GOOD_FOLLOW_UP, version: 3 });
+  });
+
+  it('#58/AC-4: sem rascunho a gravação é recusada (lança, sem gravar), e o pedido que não existe também', async () => {
+    const { fake, store } = setup([sentRow(1)]);
+    await expect(store.editFollowUpDraft(1, NEW_TEXT, ANA)).rejects.toBeInstanceOf(SupplierStoreError);
+    await expect(store.editFollowUpDraft(9, NEW_TEXT, ANA)).rejects.toBeInstanceOf(SupplierStoreError);
+    expect(outboxRow(fake).follow_up_draft).toBeNull();
   });
 });
 
@@ -373,8 +410,9 @@ describe('#4/AC-6 e #35/AC-2 nada alcança a proposta, o título nem o valor em 
     await store.get(1);
     await store.recordReading(1, reading(), 5);
     await store.recordReading(2, noReply(), null);
-    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
-    await store.recordFollowUpRejection(2, 'invalid_shape: body');
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP, FOLLOW_DUE);
+    await store.editFollowUpDraft(1, GOOD_FOLLOW_UP, ANA);
+    await store.saveFollowUpDraft(2, GOOD_FOLLOW_UP, FOLLOW_DUE);
     await store.recordFollowUpFailure(1, await won(store), 'mailbox_full', ANA);
     await store.recordFollowUpSent(1, await won(store), STAMP);
     await inbox.listPending();
@@ -391,7 +429,7 @@ describe('#4/AC-6 e #35/AC-2 nada alcança a proposta, o título nem o valor em 
 
   it('um PATCH no pedido leva só colunas follow_up_*, version, history e updated_at', async () => {
     const { fake, store } = setup([sentRow(1)]);
-    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
+    await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP, FOLLOW_DUE);
     await store.recordFollowUpFailure(1, await won(store), 'mailbox_full', ANA);
     await store.recordFollowUpSent(1, await won(store), STAMP);
     const patches = fake.requests.filter((r) => r.method === 'PATCH');

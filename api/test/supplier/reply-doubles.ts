@@ -54,7 +54,7 @@ export const fakeAsk = (answer: unknown): FakeAsk => {
   return ask;
 };
 
-const emptyFollowUp = { draft: null, rejection: null, sent: null, failure: null } as const;
+const emptyFollowUp = { draft: null, dueOn: null, rejection: null, sent: null, failure: null } as const;
 
 export const replyRequest = (id: number, overrides: Partial<ReplyRequest> = {}): ReplyRequest => ({
   id,
@@ -136,10 +136,16 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
       await patch(id, 'recordReading', [id, r, messageId], (current) => ({ ...current, reading: r }));
       return 'recorded';
     },
-    saveFollowUpDraft: (id, text: SupplierRequestText) =>
-      patch(id, 'saveFollowUpDraft', [id, text], (row) => ({ ...row, followUp: { ...row.followUp, draft: text } })),
-    recordFollowUpRejection: (id, reason) =>
-      patch(id, 'recordFollowUpRejection', [id, reason], (row) => ({ ...row, followUp: { ...row.followUp, rejection: reason } })),
+    saveFollowUpDraft: (id, text: SupplierRequestText, dueOn: string) =>
+      patch(id, 'saveFollowUpDraft', [id, text, dueOn], (row) => ({ ...row, followUp: { ...row.followUp, draft: text, dueOn } })),
+    // #58/AC-4, AC-5: troca só o texto do rascunho ainda não enviado e sem envio reivindicado; o novo prazo fica.
+    editFollowUpDraft: async (id, text, by) => {
+      const row = map.get(id);
+      if (row?.followUp.sent != null) return 'already_sent';
+      if (claims.has(id)) return 'send_in_progress';
+      await patch(id, 'editFollowUpDraft', [id, text, by], (current) => ({ ...current, followUp: { ...current.followUp, draft: text } }));
+      return 'recorded';
+    },
     // #35: a gravação da falha e a do carimbo só valem para quem ainda detém a ficha; a de quem a perdeu volta `lost` e não grava.
     recordFollowUpFailure: async (id, claim, reason, by) => {
       if (claims.get(id) !== claim) {

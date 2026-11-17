@@ -30,14 +30,14 @@ function round(today: string, requests = 1): { fake: FakePostgrest; run: () => P
 }
 
 describe('#36/AC-4 a rodada do Cron varre o prazo dos pedidos ao fornecedor, mesmo sem o Claude', () => {
-  it('#4/AC-2: sem credencial do Claude, o pedido enviado depois do prazo vira no_reply com follow_up, e nenhum rascunho de cobrança é gravado', async () => {
+  it('#4/AC-2 #58/AC-1: sem credencial do Claude, o pedido enviado depois do prazo vira no_reply com follow_up, e a regra deixa o rascunho da cobrança na mesma varredura', async () => {
     const { fake, run } = round('2026-11-18');
 
     await run();
 
     expect(fake.rows('supplier_reply_readings')).toHaveLength(1);
     expect(fake.rows('supplier_reply_readings')[0]).toMatchObject({ request_id: 1, message_id: null, reply_outcome: 'no_reply', next_step: 'follow_up' });
-    expect(fake.rows('outbox_supplier_emails')[0]?.follow_up_draft).toBeNull();
+    expect(fake.rows('outbox_supplier_emails')[0]?.follow_up_draft).toMatchObject({ dueOn: '2026-11-23', body: expect.stringContaining('{{cobranca.prazo}}') });
   });
 
   it('#4/AC-2: a rodada seguinte não marca de novo (a varredura é idempotente)', async () => {

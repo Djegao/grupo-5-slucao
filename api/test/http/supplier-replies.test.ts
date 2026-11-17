@@ -6,7 +6,6 @@ import { runClaudeRound } from '../../src/claude/cron.js';
 import { tasksFor } from '../../src/claude/tasks/index.js';
 import { sweepSupplierOverdue } from '../../src/cron/supplier-sweep.js';
 import { fakeMailer } from '../supplier/doubles.js';
-import { GOOD_FOLLOW_UP } from '../supplier/reply-doubles.js';
 import { AFTER_DUE, ANA, ASK_OK, HIDDEN_ORDER, READING, listOf, replyAsk, sentWorld, viewOf, type Json } from '../support/reply-scenarios.js';
 import { askFailingWith, supplierWorld, type SupplierWorld } from '../support/supplier-world.js';
 
@@ -94,21 +93,32 @@ describe('#4/AC-5 e #4/AC-6 uma ordem escondida na resposta só chega a injectio
 });
 
 describe('#4/AC-2 passado o prazo sem resposta, o pedido vira no_reply e ganha o rascunho da cobrança', () => {
-  it('#4/AC-2: a varredura marca no_reply com follow_up e a tarefa da cobrança deixa o rascunho no formato do pedido', async () => {
+  it('#4/AC-2 #58/AC-1: a varredura marca no_reply com follow_up e deixa, pela regra, o rascunho da cobrança no formato do pedido', async () => {
     const w = await sentWorld();
     w.setNow(AFTER_DUE);
 
     expect((await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE })).marked).toBe(1);
-    await w.runAllTasks(replyAsk());
 
     const view = await viewOf(w);
     expect(view.reading).toMatchObject({ replyOutcome: 'no_reply', nextStep: 'follow_up' });
     expect(view.followUp).toMatchObject({ drafted: true, sent: false, sentBy: null, sentAt: null, failure: null });
     expect(view.followUp.draft).toEqual({
-      subject: 'Cobrança da nota de devolução da nota 43894',
-      body: 'Ainda não recebemos sua resposta sobre R$ 59,43. O prazo era 17/11/2026.',
-      template: GOOD_FOLLOW_UP.body,
-      asks: ['Responder ao pedido da nota 43894'],
+      subject: 'Lembrete: pedido sobre a nota 43894',
+      body: [
+        'Olá.',
+        '',
+        'Não recebemos a resposta ao nosso pedido sobre a nota 43894 dentro do prazo.',
+        'Pedimos, por favor, até 25/11/2026:',
+        '- Confirmar o recebimento da nota de devolução',
+        '- Creditar R$ 59,43 até 17/11/2026',
+        '',
+        'Ficamos no aguardo.',
+        '',
+        'Obrigado,',
+        'Contas a pagar · Já Chegou',
+      ].join('\n'),
+      template: expect.stringContaining('{{cobranca.prazo}}'),
+      asks: ['Confirmar o recebimento da nota de devolução', 'Creditar R$ 59,43 até 17/11/2026'],
     });
     expect((await listOf(w, 'overdue')).requests).toHaveLength(1);
   });
@@ -124,18 +134,7 @@ describe('#4/AC-2 passado o prazo sem resposta, o pedido vira no_reply e ganha o
     expect((await viewOf(w)).reading).toBeNull();
   });
 
-  it('#4/AC-2: a cobrança com número fora do catálogo não deixa rascunho', async () => {
-    const w = await sentWorld();
-    w.setNow(AFTER_DUE);
-    await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE });
-
-    await w.runAllTasks(replyAsk(READING, { ...GOOD_FOLLOW_UP, body: 'Cobramos 99 itens, no valor de {{devolucao.total}}.' }));
-
-    expect((await viewOf(w)).followUp).toMatchObject({ drafted: false, draft: null });
-    expect(w.rows('outbox_supplier_emails')[0]?.follow_up_draft).toBeNull();
-  });
-
-  it('#4/AC-2: a varredura roda sem o Claude: sem credencial a rodada pula as tarefas e o pedido já está atrasado', async () => {
+  it('#4/AC-2 #58/AC-1: a varredura roda sem o Claude: sem credencial a rodada pula as tarefas, o pedido está atrasado e a cobrança já está montada', async () => {
     const w = await sentWorld();
     w.setNow(AFTER_DUE);
 
@@ -144,7 +143,7 @@ describe('#4/AC-2 passado o prazo sem resposta, o pedido vira no_reply e ganha o
 
     expect(round.ran).toBe(false);
     expect((await listOf(w, 'overdue')).requests).toHaveLength(1);
-    expect((await viewOf(w)).followUp).toMatchObject({ drafted: false });
+    expect((await viewOf(w)).followUp).toMatchObject({ drafted: true });
   });
 });
 
@@ -154,7 +153,6 @@ describe('#4/AC-3 a cobrança só sai quando uma pessoa a envia pela rota de env
     mailer.sent.length = 0;
     w.setNow(AFTER_DUE);
     await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE });
-    await w.runAllTasks(replyAsk());
     return w;
   };
 
@@ -167,7 +165,7 @@ describe('#4/AC-3 a cobrança só sai quando uma pessoa a envia pela rota de env
 
     expect(sent.status).toBe(200);
     expect(mailer.sent).toHaveLength(1);
-    expect(mailer.sent[0]).toMatchObject({ to: 'compras@bebidas-rio-claro.example', subject: 'Cobrança da nota de devolução da nota 43894' });
+    expect(mailer.sent[0]).toMatchObject({ to: 'compras@bebidas-rio-claro.example', subject: 'Lembrete: pedido sobre a nota 43894' });
     expect((sent.body.request as Json).followUp).toMatchObject({ drafted: true, sent: true, sentBy: ANA, sentAt: AFTER_DUE.toISOString(), failure: null });
   });
 
@@ -264,13 +262,13 @@ describe('#36/AC-4 #4 canto: sem credencial do Claude, ou com 401 ou 429, nenhum
 });
 
 describe('#36/AC-4 o registro de tarefas do Cron tem a leitura e a cobrança, com teto próprio para caber nas subrequests do Worker', () => {
-  it('#36/AC-1: tasksFor registra supplier-reply-reading e supplier-follow-up-draft, cada uma com limit', async () => {
+  it('#36/AC-1: tasksFor registra supplier-reply-reading com limit, e a cobrança já não é tarefa do Claude (#58/AC-1)', async () => {
     const w = await supplierWorld();
     const tasks = tasksFor(w.rest);
     const byName = new Map(tasks.map((t) => [t.name, t]));
-    expect([...byName.keys()]).toEqual(expect.arrayContaining(['supplier-reply-reading', 'supplier-follow-up-draft', 'supplier-request-draft']));
+    expect([...byName.keys()]).toEqual(expect.arrayContaining(['supplier-reply-reading', 'supplier-request-draft']));
+    expect([...byName.keys()]).not.toContain('supplier-follow-up-draft');
     expect(byName.get('supplier-reply-reading')?.limit).toBe(1);
-    expect(byName.get('supplier-follow-up-draft')?.limit).toBe(1);
   });
 });
 

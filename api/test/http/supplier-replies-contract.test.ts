@@ -107,6 +107,7 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
     expect(followUp.draft.body).toContain('R$ 59,43');
     expect(followUp.draft.body).not.toContain('{{');
     expect(followUp.draft.template).toContain('{{devolucao.total}}');
+    expect(followUp.draft.template).toContain('{{cobranca.prazo}}'); // #58/AC-3
   });
 
   it('#36/AC-2: o rascunho que já não confere com o catálogo vem nulo, e o resto da visão continua', async () => {
@@ -153,10 +154,11 @@ describe('#36/AC-3 POST /api/supplier-requests/{accessKey}/send da cobrança', (
     expect((await w.call('POST', w.path('/send'), { body: {} })).body).toEqual({ error: 'conflict', reason: 'already_sent' });
   });
 
-  it('#36/AC-3: no_reply sem rascunho é 409 conflict no_draft', async () => {
+  it('#36/AC-3: no_reply sem rascunho (o rascunho que a varredura não chegou a gravar) é 409 conflict no_draft', async () => {
     const w = await sentWorld();
     w.setNow(AFTER_DUE);
     await sweepSupplierOverdue(w.rest, { now: () => AFTER_DUE });
+    (w.rows('outbox_supplier_emails')[0] as Json).follow_up_draft = null;
     expect(await w.call('POST', w.path('/send'), { body: {} })).toMatchObject({ status: 409, body: { error: 'conflict', reason: 'no_draft' } });
   });
 

@@ -1,8 +1,7 @@
 import { arrayOf, isInteger, isString, isUnknown, nullable, parseRows, shaped, type Shape } from '../connectors/guards.js';
 import { SupabaseRestError, type Filters, type SupabaseRest } from '../connectors/supabase-rest.js';
 import type { SupplierReading, SupplierRequestText } from '../domain/index.js';
-import { SUPPLIER_FOLLOW_UP_TASK } from './follow-up-task.js';
-import type { ClaimWrite, Clock, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
+import type { ClaimWrite, Clock, EditWrite, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
 import { guarded, pgCode, refused } from './supabase-reply-call.js';
 import { LEASE_MS } from './supabase-store.js';
 import { READINGS_TABLE, readingToRow } from './supabase-reply-reading.js';
@@ -27,11 +26,13 @@ import {
 const INVOICES = 'invoices';
 /** #35: as notas por requisição: a URL cresce com as chaves (44 algarismos cada). */
 const KEYS_PER_REQUEST = 50;
-const CLOSED_REASON = /^[a-z_]+: [a-z_]+$/;
 const SHORT_REASON = /^[a-z][a-z0-9_]{0,39}$/;
 
+/** #58/AC-1 (ADR-005): quem grava o rascunho montado pela regra na varredura do prazo: o nome da varredura, não uma pessoa. */
+export const FOLLOW_UP_SWEEP_ACTOR = 'supplier-overdue-sweep';
+
 const SENT = { status: 'eq.sent' } as const;
-/** #35/AC-3: a cobrança não se repete: só grava rascunho ou recusa quem ainda não tem nenhum dos dois. */
+/** #35/AC-3: a cobrança não se repete: só grava rascunho quem ainda não tem rascunho nem a recusa antiga da tarefa do Claude. */
 const NO_TEXT = { ...SENT, follow_up_draft: 'is.null', follow_up_rejection: 'is.null' } as const;
 /**
  * #35: a reivindicação do envio tem o prazo da #12 (`LEASE_MS`, o do `send_claim`): sem reivindicação, ou com uma mais velha que o
@@ -46,6 +47,8 @@ const claimable = (at: Date): Filters => ({
   follow_up_sent_at: 'is.null',
   or: `(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.${new Date(at.getTime() - LEASE_MS).toISOString()})`,
 });
+/** #58/AC-4, AC-5: a guarda da edição: o rascunho existe, não foi carimbado e nenhum envio está reivindicado (o e-mail pode estar saindo com o texto lido). */
+const editable: Filters = { ...SENT, follow_up_draft: 'not.is.null', follow_up_sent_at: 'is.null', follow_up_claimed_at: 'is.null' };
 /** #35: a guarda da falha e do carimbo: o envio ainda não carimbado e a reivindicação é a deste detentor, pela ficha. */
 const held = (claim: FollowUpClaim): Filters => ({ ...SENT, follow_up_claim: `eq.${claim}`, follow_up_sent_at: 'is.null' });
 
@@ -64,7 +67,7 @@ const isId = shaped<{ id: number }>({ id: isInteger });
 
 /** #35: uma gravação da cobrança: o que muda, quem e quando, e a guarda atômica da transição. */
 type FollowUpChange = {
-  readonly action: 'follow_up_drafted' | 'follow_up_rejected' | 'follow_up_claimed' | 'follow_up_failed' | 'follow_up_sent';
+  readonly action: 'follow_up_drafted' | 'follow_up_edited' | 'follow_up_claimed' | 'follow_up_failed' | 'follow_up_sent';
   readonly by: string;
   readonly at: Date;
   readonly guard: Filters;
@@ -118,7 +121,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
     return updated.length > 0 ? 'ok' : 'refused';
   }
 
-  /** #35/AC-3: rascunho e recusa: com um dos dois já gravado, volta sem gravar; qualquer outro motivo de recusa lança. */
+  /** #35/AC-3: o rascunho: com ele (ou a recusa antiga) já gravado, volta sem gravar; qualquer outro motivo de recusa lança. */
   async function saveText(id: number, operation: string, change: FollowUpChange): Promise<void> {
     const written = await writeFollowUp(id, change);
     if (written === 'ok') return;
@@ -175,25 +178,30 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
       return (await newerThan(id, messageId)) ? 'superseded' : 'recorded';
     },
 
-    saveFollowUpDraft: (id: number, text: SupplierRequestText) =>
+    saveFollowUpDraft: (id: number, text: SupplierRequestText, dueOn: string) =>
       saveText(id, 'save_follow_up_draft', {
         action: 'follow_up_drafted',
-        by: SUPPLIER_FOLLOW_UP_TASK,
+        by: FOLLOW_UP_SWEEP_ACTOR,
         at: clock.now(),
         guard: NO_TEXT,
-        columns: { follow_up_draft: { subject: text.subject, body: text.body, asks: [...text.asks] } },
+        columns: { follow_up_draft: { subject: text.subject, body: text.body, asks: [...text.asks], dueOn } },
       }),
 
-    recordFollowUpRejection(id, reason) {
-      // #35/AC-3: só o motivo fechado da regra vai ao banco; o texto do modelo não é gravado.
-      if (!CLOSED_REASON.test(reason)) return Promise.reject(refused('record_follow_up_rejection', OUTBOX_TABLE));
-      return saveText(id, 'record_follow_up_rejection', {
-        action: 'follow_up_rejected',
-        by: SUPPLIER_FOLLOW_UP_TASK,
-        at: clock.now(),
-        guard: NO_TEXT,
-        columns: { follow_up_rejection: reason },
-      });
+    /**
+     * #58/AC-4, AC-5: lê a linha (para manter o novo prazo do rascunho), troca o texto num `PATCH` guardado pela versão e por `editable`.
+     * Com 0 linhas relê para dizer por quê: carimbado (`already_sent`), envio reivindicado (`send_in_progress`) ou a versão que andou (`stale`).
+     */
+    async editFollowUpDraft(id: number, text: SupplierRequestText, by: string): Promise<EditWrite> {
+      const row = await readForWrite(id);
+      if (row === null || row.follow_up_draft === null) throw refused('edit_follow_up_draft', OUTBOX_TABLE);
+      const draft = { subject: text.subject, body: text.body, asks: [...text.asks], ...(row.follow_up_draft.dueOn === undefined ? {} : { dueOn: row.follow_up_draft.dueOn }) };
+      const written = await writeFollowUp(id, { action: 'follow_up_edited', by, at: clock.now(), guard: editable, columns: { follow_up_draft: draft } });
+      if (written === 'ok') return 'recorded';
+      if (written === 'missing') throw refused('edit_follow_up_draft', OUTBOX_TABLE);
+      const now = await readForWrite(id);
+      if (now === null || now.follow_up_draft === null) throw refused('edit_follow_up_draft', OUTBOX_TABLE);
+      if (now.follow_up_sent_at !== null) return 'already_sent';
+      return now.follow_up_claimed_at !== null ? 'send_in_progress' : 'stale';
     },
 
     async claimFollowUpSend(id, by) {

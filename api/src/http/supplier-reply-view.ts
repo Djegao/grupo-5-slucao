@@ -1,7 +1,7 @@
 // #36: a leitura da resposta do fornecedor (#4) e a cobrança como a API as entrega; o formato é o autorado no cabeçalho de supplier-requests.ts.
 // #36: montada campo a campo: nada da linha, da ficha da reivindicação nem do histórico sai que não esteja nomeado aqui (layer-exposure).
 import { validateRequestText, type NextStep, type ReplyOutcome, type RequestFilter, type RequestStatus, type SupplierReading } from '../domain/index.js';
-import { catalogOf } from '../supplier/reply-catalog.js';
+import { followUpCatalogOf } from '../supplier/reply-catalog.js';
 import type { ReplyList, ReplyListRow, ReplyRequest } from '../supplier/reply-ports.js';
 
 export type WireReading = {
@@ -62,7 +62,7 @@ export const readingOf = (reading: SupplierReading | null): WireReading | null =
 function renderedDraft(reply: ReplyRequest): WireFollowUp['draft'] {
   const { draft } = reply.followUp;
   if (draft === null) return null;
-  const checked = validateRequestText(draft, catalogOf(reply));
+  const checked = validateRequestText(draft, followUpCatalogOf(reply));
   return checked.ok ? { ...checked.rendered, template: draft.body } : null;
 }
 

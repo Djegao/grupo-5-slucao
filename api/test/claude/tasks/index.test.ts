@@ -51,7 +51,7 @@ describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude'
 });
 
 describe('#36/AC-4 o teto efetivo de cada tarefa numa rodada do Cron é o menor entre o da tarefa e o da rodada', () => {
-  it('#36/AC-4: a conta de subrequests de api/src/claude/cron.ts vale: 1, 1, 2, 1, 1', () => {
+  it('#36/AC-4: a conta de subrequests de api/src/claude/cron.ts vale: 1, 1, 2, 1 (#58: a cobrança saiu do Cron)', () => {
     const { rest } = harness();
     const effective = Object.fromEntries(tasksFor(rest).map((t) => [t.name, Math.min(t.limit ?? MAX_PER_RUN, CRON_LIMIT)]));
     expect(effective).toEqual({
@@ -59,7 +59,6 @@ describe('#36/AC-4 o teto efetivo de cada tarefa numa rodada do Cron é o menor 
       [PROBABLE_ORDER_TASK]: 1,
       [SUPPLIER_DRAFT_TASK]: 2,
       'supplier-reply-reading': 1,
-      'supplier-follow-up-draft': 1,
     });
   });
 
@@ -71,14 +70,20 @@ describe('#36/AC-4 o teto efetivo de cada tarefa numa rodada do Cron é o menor 
     expect(CRON_LIMIT).toBe(2);
   });
 
-  it('#36/AC-4: as duas tarefas da #4 vêm antes da ordem provável, para não passarem fome primeiro quando o Worker esgota as subrequests', () => {
+  it('#36/AC-4: a leitura da #4 vem antes da ordem provável, para não passar fome primeiro quando o Worker esgota as subrequests', () => {
     const { rest } = harness();
     expect(tasksFor(rest).map((t) => t.name)).toEqual([
       'description-match',
       'supplier-reply-reading',
-      'supplier-follow-up-draft',
       PROBABLE_ORDER_TASK,
       SUPPLIER_DRAFT_TASK,
     ]);
+  });
+});
+
+describe('#58/AC-1 a cobrança é montada pela regra na varredura, e a tarefa do Claude saiu do registro', () => {
+  it('#58/AC-1: o registro não tem a tarefa supplier-follow-up-draft', () => {
+    const { rest } = harness();
+    expect(tasksFor(rest).map((t) => t.name)).not.toContain('supplier-follow-up-draft');
   });
 });

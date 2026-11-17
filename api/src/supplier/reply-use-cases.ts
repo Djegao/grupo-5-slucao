@@ -1,8 +1,8 @@
-import { filterOf, overdueReading, validateRequestText, type RequestFilter } from '../domain/index.js';
-import { catalogOf, todayIso } from './reply-catalog.js';
+import { filterOf, followUpDraftFor, overdueReading, validateRequestText, type RequestFilter, type SupplierReading, type TextField } from '../domain/index.js';
+import { followUpCatalogOf, todayIso } from './reply-catalog.js';
 import type { FollowUpMail, FollowUpMailResult, FollowUpStamp, ReplyDeps, ReplyList, ReplyListRow, ReplyRequest } from './reply-ports.js';
 
-// #34: os casos de uso da leitura da resposta (#4): a varredura do prazo, o envio da cobrança e a lista.
+// #34: os casos de uso da leitura da resposta (#4): a varredura do prazo (que monta a cobrança pela regra, #58), a edição e o envio da cobrança e a lista.
 // #34: cada um devolve um resultado tipado que a camada da API mapeia para HTTP; aqui não há HTTP.
 
 const SEND_FAILED_FALLBACK = 'send_failed';
@@ -16,29 +16,68 @@ export type SendFollowUpResult =
   | { readonly kind: 'invalid'; readonly reason: 'text_invalid' }
   | { readonly kind: 'send_failed'; readonly reason: string };
 
+/** #58/AC-4, AC-5: o que a edição do texto da cobrança devolve; a camada da API mapeia para HTTP. */
+export type EditFollowUpResult =
+  | { readonly kind: 'ok'; readonly request: ReplyRequest }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'conflict'; readonly reason: 'no_draft' | 'already_sent' | 'send_in_progress' | 'stale' }
+  | { readonly kind: 'invalid'; readonly reason: 'number_mismatch' | 'invalid_shape'; readonly field: TextField };
+
+export type SweepResult = {
+  /** #34/AC-3: os pedidos que a varredura marcou no_reply agora. */
+  readonly marked: readonly number[];
+  /** #58/AC-1: os pedidos que ganharam o rascunho da cobrança agora: os marcados e os já marcados que ficaram sem o rascunho. */
+  readonly drafted: readonly number[];
+};
+
 export type ReplyUseCases = {
   /**
    * #34/AC-3: cada pedido `sent` sem leitura depois do prazo vira no_reply com follow_up; sem Claude, sem envio.
-   * #36/AC-4: marca no máximo `limit` pedidos por chamada (os de menor id); a chamada seguinte marca os próximos.
+   * #58/AC-1: e ganha, na mesma varredura, o rascunho da cobrança montado pela regra (o pedido já no_reply que ficou sem rascunho,
+   * numa rodada que caiu entre as duas gravações, ganha na seguinte). Nada é enviado: o envio é do `sendFollowUp` (#58/AC-7).
+   * #36/AC-4: trata no máximo `limit` pedidos por chamada (os de menor id); a chamada seguinte trata os próximos.
    */
-  sweepOverdue(limit?: number): Promise<{ readonly marked: readonly number[] }>;
+  sweepOverdue(limit?: number): Promise<SweepResult>;
+  /** #58/AC-4: troca o texto (o corpo, revalidado) da cobrança ainda não enviada; só uma pessoa chama, e fica gravado quem. */
+  editFollowUp(id: number, template: string, by: string): Promise<EditFollowUpResult>;
   /** #34/AC-4: envia a cobrança rascunhada; só uma pessoa chama, e fica gravado quem e quando. */
   sendFollowUp(id: number, by: string): Promise<SendFollowUpResult>;
   /** #34/AC-5: os pedidos de um filtro, com a leitura, e as contagens de todos os filtros. */
   listRequests(filter: RequestFilter, today: string): Promise<ReplyList>;
 };
 
-async function sweepOverdue(deps: ReplyDeps, limit: number = Infinity): Promise<{ readonly marked: readonly number[] }> {
+/** #58/AC-1: o pedido já no_reply que espera a cobrança: sem rascunho, sem recusa antiga do Claude e sem envio. */
+const awaitsDraft = (r: ReplyRequest): boolean =>
+  r.status === 'sent' && r.reading?.replyOutcome === 'no_reply' && r.followUp.draft === null && r.followUp.rejection === null && r.followUp.sent === null;
+
+/** #58/AC-1, AC-2: monta pela regra a cobrança do que a leitura não deu por atendido, com o novo prazo de hoje, e grava o rascunho. */
+async function draftFollowUp(deps: ReplyDeps, request: ReplyRequest, reading: SupplierReading, today: string): Promise<void> {
+  const { text, dueOn } = followUpDraftFor({ asks: request.asks, fulfilledAsks: reading.fulfilledAsks }, today);
+  await deps.requests.saveFollowUpDraft(request.id, text, dueOn);
+}
+
+async function sweepOverdue(deps: ReplyDeps, limit: number = Infinity): Promise<SweepResult> {
   const today = todayIso(deps.clock.now());
   const marked: number[] = [];
+  const drafted: number[] = [];
+  let handled = 0;
   for (const request of await deps.requests.listSent()) {
-    if (marked.length >= limit) break; // #36/AC-4: o teto da rodada; o resto fica para a próxima
+    if (handled >= limit) break; // #36/AC-4: o teto da rodada; o resto fica para a próxima
     const overdue = overdueReading(request, request.reading, today);
-    if (overdue === null) continue;
-    // #34/AC-3: sem mensagem de origem (null): o OLTP só grava se o pedido ainda não tem leitura.
-    if ((await deps.requests.recordReading(request.id, overdue, null)) === 'recorded') marked.push(request.id);
+    if (overdue !== null) {
+      // #34/AC-3: sem mensagem de origem (null): o OLTP só grava se o pedido ainda não tem leitura.
+      if ((await deps.requests.recordReading(request.id, overdue, null)) !== 'recorded') continue;
+      marked.push(request.id);
+      await draftFollowUp(deps, request, overdue, today);
+      drafted.push(request.id);
+      handled += 1;
+    } else if (request.reading !== null && awaitsDraft(request)) {
+      await draftFollowUp(deps, request, request.reading, today);
+      drafted.push(request.id);
+      handled += 1;
+    }
   }
-  return { marked };
+  return { marked, drafted };
 }
 
 /** #34/AC-4: erro lançado pela porta, ou motivo fora do formato curto, vira um motivo próprio; o texto do provedor não é gravado. */
@@ -71,7 +110,7 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
   const { draft, sent } = request.followUp;
   if (sent !== null) return { kind: 'conflict', reason: 'already_sent' };
   if (draft === null) return { kind: 'conflict', reason: 'no_draft' };
-  const text = validateRequestText(draft, catalogOf(request));
+  const text = validateRequestText(draft, followUpCatalogOf(request));
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
   // #34/AC-4: a reivindicação vem antes do e-mail; quem não a ganha não envia, e a que fica presa após o envio impede o segundo e-mail.
   const claim = await deps.requests.claimFollowUpSend(id, by);
@@ -83,7 +122,7 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
     to: request.to,
     ...text.rendered,
     attachments: [],
-    dueOn: request.dueOn,
+    dueOn: request.followUp.dueOn ?? request.dueOn, // #58/AC-2: o prazo que a cobrança traz é o novo
   });
   if (!result.ok) {
     // #35: a reivindicação venceu e outro a retomou durante o envio: a falha não é mais deste pedido de envio, e quem manda agora é o outro.
@@ -95,6 +134,22 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
   // #35: se a reivindicação foi perdida no meio, o carimbo é do outro envio: este e-mail saiu, mas não grava nem se declara enviado.
   if ((await deps.requests.recordFollowUpSent(id, claim, stamp)) === 'lost') return lostClaim(id, 'follow-up-stamp');
   return { kind: 'ok', request: { ...request, followUp: { ...request.followUp, sent: stamp, failure: null } } };
+}
+
+/** #58/AC-4, AC-5: o estado de partida (enviado, no_reply, com rascunho ainda sem carimbo) e o texto novo revalidado contra o catálogo da cobrança. */
+async function editFollowUp(deps: ReplyDeps, id: number, template: string, by: string): Promise<EditFollowUpResult> {
+  const request = await deps.requests.get(id);
+  if (request === null) return { kind: 'not_found' };
+  const { draft, sent } = request.followUp;
+  if (request.status !== 'sent' || request.reading?.replyOutcome !== 'no_reply') return { kind: 'conflict', reason: 'no_draft' };
+  if (sent !== null) return { kind: 'conflict', reason: 'already_sent' };
+  if (draft === null) return { kind: 'conflict', reason: 'no_draft' };
+  // #58/AC-4: troca só o corpo, como o PATCH do rascunho da #13: o assunto e os itens ficam; o texto cru, com {{chave}}, é o que se confere e o que se guarda.
+  const checked = validateRequestText({ subject: draft.subject, body: template, asks: draft.asks }, followUpCatalogOf(request));
+  if (!checked.ok) return { kind: 'invalid', reason: checked.reason, field: checked.field };
+  const written = await deps.requests.editFollowUpDraft(id, checked.text, by);
+  if (written !== 'recorded') return { kind: 'conflict', reason: written };
+  return { kind: 'ok', request: { ...request, followUp: { ...request.followUp, draft: checked.text } } };
 }
 
 const rowOf = (r: ReplyRequest): ReplyListRow => ({
@@ -127,6 +182,7 @@ async function listRequests(deps: ReplyDeps, filter: RequestFilter, today: strin
 /** #34: os casos de uso ligados às portas. */
 export const createReplyUseCases = (deps: ReplyDeps): ReplyUseCases => ({
   sweepOverdue: (limit) => sweepOverdue(deps, limit),
+  editFollowUp: (id, template, by) => editFollowUp(deps, id, template, by),
   sendFollowUp: (id, by) => sendFollowUp(deps, id, by),
   listRequests: (filter, today) => listRequests(deps, filter, today),
 });

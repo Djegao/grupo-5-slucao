@@ -249,9 +249,9 @@ describe('#34/AC-2 (#4/AC-5, #4/AC-6): a tarefa grava só as colunas da leitura'
 
   it('as portas não têm método de escrita da proposta, do título nem do valor em risco', () => {
     const { deps } = open();
-    const writes = Object.keys(deps.requests).filter((k) => /^(record|save|mark|update|set|claim)[A-Z]/.test(k));
+    const writes = Object.keys(deps.requests).filter((k) => /^(record|save|mark|update|set|claim|edit)[A-Z]/.test(k));
     expect(writes.sort()).toEqual(
-      ['claimFollowUpSend', 'recordFollowUpFailure', 'recordFollowUpRejection', 'recordFollowUpSent', 'recordReading', 'saveFollowUpDraft'].sort(),
+      ['claimFollowUpSend', 'editFollowUpDraft', 'recordFollowUpFailure', 'recordFollowUpSent', 'recordReading', 'saveFollowUpDraft'].sort(),
     );
     expect(Object.keys(deps)).toEqual(expect.not.arrayContaining(['proposals', 'titles', 'amountAtRisk']));
   });

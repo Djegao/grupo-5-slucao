@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NEXT_STEPS, REPLY_OUTCOMES, type RequestFilter } from '../../src/domain/index.js';
 import { createReplyUseCases } from '../../src/supplier/reply-use-cases.js';
 import {
+  ASKS,
   GOOD_FOLLOW_UP,
   NOW,
   PROVIDER_TEXT,
@@ -16,30 +17,30 @@ import {
 // #34: os casos de uso da leitura da resposta (#4): varredura do prazo, envio da cobrança e lista. Nomes de `it` no ADR-004.
 
 describe('#34/AC-3 (#4/AC-2): a varredura do prazo vira no_reply o pedido enviado sem leitura', () => {
-  it('marca no_reply com follow_up o pedido sent sem leitura depois do prazo', async () => {
+  it('marca no_reply com follow_up o pedido sent sem leitura depois do prazo, e monta a cobrança', async () => {
     const { deps, store } = parts([replyRequest(7)]);
     const out = await createReplyUseCases(deps).sweepOverdue();
-    expect(out).toEqual({ marked: [7] });
+    expect(out).toEqual({ marked: [7], drafted: [7] });
     expect(store.rows.get(7)?.reading).toMatchObject({ replyOutcome: 'no_reply', nextStep: 'follow_up' });
   });
 
   it('com um teto, marca só os primeiros atrasados e a chamada seguinte marca o próximo', async () => {
     const { deps, store } = parts([replyRequest(7), replyRequest(8), replyRequest(9)]);
     const useCases = createReplyUseCases(deps);
-    expect(await useCases.sweepOverdue(2)).toEqual({ marked: [7, 8] });
-    expect(await useCases.sweepOverdue(2)).toEqual({ marked: [9] });
-    expect(store.calls.map((c) => c.op)).toEqual(['recordReading', 'recordReading', 'recordReading']);
+    expect(await useCases.sweepOverdue(2)).toEqual({ marked: [7, 8], drafted: [7, 8] });
+    expect(await useCases.sweepOverdue(2)).toEqual({ marked: [9], drafted: [9] });
+    expect(store.calls.map((c) => c.op)).toEqual(['recordReading', 'saveFollowUpDraft', 'recordReading', 'saveFollowUpDraft', 'recordReading', 'saveFollowUpDraft']);
   });
 
   it('com teto 0 não marca nada', async () => {
     const { deps, store } = parts([replyRequest(7)]);
-    expect(await createReplyUseCases(deps).sweepOverdue(0)).toEqual({ marked: [] });
+    expect(await createReplyUseCases(deps).sweepOverdue(0)).toEqual({ marked: [], drafted: [] });
     expect(store.calls).toEqual([]);
   });
 
   it('no dia do prazo ainda está no prazo, e pedido que não foi enviado fica como está', async () => {
     const { deps, store } = parts([replyRequest(7, { dueOn: TODAY }), replyRequest(8, { status: 'draft' })]);
-    expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [] });
+    expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [], drafted: [] });
     expect(store.calls).toEqual([]);
   });
 
@@ -48,8 +49,8 @@ describe('#34/AC-3 (#4/AC-2): a varredura do prazo vira no_reply o pedido enviad
     const { deps, store } = parts([replyRequest(7), replyRequest(8, { reading: read })]);
     const useCases = createReplyUseCases(deps);
     await useCases.sweepOverdue();
-    expect(await useCases.sweepOverdue()).toEqual({ marked: [] });
-    expect(store.calls.map((c) => c.op)).toEqual(['recordReading']);
+    expect(await useCases.sweepOverdue()).toEqual({ marked: [], drafted: [] });
+    expect(store.calls.map((c) => c.op)).toEqual(['recordReading', 'saveFollowUpDraft']);
     expect(store.rows.get(8)?.reading).toEqual(read);
   });
 
@@ -60,8 +61,48 @@ describe('#34/AC-3 (#4/AC-2): a varredura do prazo vira no_reply o pedido enviad
   });
 });
 
+describe('#58/AC-1 (#58/AC-7): a varredura monta a cobrança pela regra, sem o Claude, e nada sai', () => {
+  it('#58/AC-1: o pedido atrasado ganha o rascunho da cobrança na mesma varredura que o marca, com o novo prazo de 3 dias úteis', async () => {
+    const { deps, store } = parts([replyRequest(7)]);
+    await createReplyUseCases(deps).sweepOverdue();
+    const { followUp } = store.rows.get(7) ?? replyRequest(0);
+    expect(followUp.draft).toMatchObject({ subject: expect.stringContaining('{{nota.numero}}'), body: expect.stringContaining('{{cobranca.prazo}}') });
+    expect(followUp.dueOn).toBe('2026-11-25'); // #58/AC-2: hoje é a sexta 2026-11-20
+    expect(followUp.sent).toBeNull();
+  });
+
+  it('#58/AC-2: pede só o que o fornecedor não atendeu: os asks fora de fulfilledAsks da leitura', async () => {
+    const done = reading({ replyOutcome: 'no_reply', nextStep: 'follow_up', fulfilledAsks: [ASKS[0] as string] });
+    const { deps, store } = parts([replyRequest(7, { reading: done })]);
+    await createReplyUseCases(deps).sweepOverdue();
+    expect(store.rows.get(7)?.followUp.draft?.asks).toEqual([ASKS[1]]);
+  });
+
+  it('#58/AC-1: o pedido já marcado no_reply por uma rodada que caiu antes do rascunho ganha o rascunho na rodada seguinte, e uma só vez', async () => {
+    const { deps, store } = parts([replyRequest(7, { reading: noReply() })]);
+    const useCases = createReplyUseCases(deps);
+    expect(await useCases.sweepOverdue()).toEqual({ marked: [], drafted: [7] });
+    expect(await useCases.sweepOverdue()).toEqual({ marked: [], drafted: [] });
+    expect(store.calls.map((c) => c.op)).toEqual(['saveFollowUpDraft']);
+  });
+
+  it('#58/AC-1: cobrança já enviada não é refeita pela varredura', async () => {
+    const stamp = { by: 'ana', at: NOW, channel: 'mock', providerMessageId: 'm' } as const;
+    const { deps, store } = parts([replyRequest(7, { reading: noReply(), followUp: { draft: GOOD_FOLLOW_UP, dueOn: null, rejection: null, sent: stamp, failure: null } })]);
+    expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [], drafted: [] });
+    expect(store.calls).toEqual([]);
+  });
+
+  it('#58/AC-7: a varredura nunca envia: nenhum e-mail sai, só o rascunho fica gravado', async () => {
+    const { deps, mailer, store } = parts([replyRequest(7), replyRequest(8, { reading: noReply() })]);
+    await createReplyUseCases(deps).sweepOverdue();
+    expect(mailer.sent).toEqual([]);
+    expect(store.calls.map((c) => c.op)).not.toContain('claimFollowUpSend');
+  });
+});
+
 const drafted = () =>
-  replyRequest(7, { reading: noReply(), followUp: { draft: GOOD_FOLLOW_UP, rejection: null, sent: null, failure: null } });
+  replyRequest(7, { reading: noReply(), followUp: { draft: GOOD_FOLLOW_UP, dueOn: null, rejection: null, sent: null, failure: null } });
 
 describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, chamado por uma pessoa', () => {
   it('envia o rascunho renderizado pela porta e grava quem enviou e quando (ADR-005)', async () => {
@@ -186,7 +227,7 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
 
   it('revalida o rascunho contra o catálogo: texto com número fora dele não sai', async () => {
     const bad = { ...GOOD_FOLLOW_UP, body: 'Faltam 9999 caixas, total {{devolucao.total}}.' };
-    const { deps, mailer } = parts([replyRequest(7, { ...drafted(), followUp: { draft: bad, rejection: null, sent: null, failure: null } })]);
+    const { deps, mailer } = parts([replyRequest(7, { ...drafted(), followUp: { draft: bad, dueOn: null, rejection: null, sent: null, failure: null } })]);
     expect(await createReplyUseCases(deps).sendFollowUp(7, 'ana')).toEqual({ kind: 'invalid', reason: 'text_invalid' });
     expect(mailer.sent).toEqual([]);
   });
@@ -314,5 +355,80 @@ describe('#50/AC-3: a lista põe cada pedido enviado em um filtro só', () => {
     const seen = lists.flatMap((l) => l.rows.map((r) => r.id)).sort((a, b) => a - b);
     expect(seen).toEqual(sent.map((r) => r.id));
     for (const l of lists) expect(l.rows).toHaveLength(l.counts[l.filter]);
+  });
+});
+
+const RULE_DRAFT = {
+  subject: 'Cobrança do pedido sobre a nota {{nota.numero}}',
+  body: 'Não recebemos a resposta. Responda até {{cobranca.prazo}}.',
+  asks: [...ASKS],
+};
+const ruleDrafted = () =>
+  replyRequest(7, { reading: noReply(), followUp: { draft: RULE_DRAFT, dueOn: '2026-11-25', rejection: null, sent: null, failure: null } });
+
+describe('#58/AC-4: editar o texto da cobrança ainda não enviada, revalidado contra o catálogo', () => {
+  it('#58/AC-4: troca só o corpo; o assunto, os itens e o novo prazo ficam, e quem editou fica gravado', async () => {
+    const { deps, store } = parts([ruleDrafted()]);
+    const out = await createReplyUseCases(deps).editFollowUp(7, 'Prezados, respondam até {{cobranca.prazo}} sobre {{devolucao.total}}.', 'ana@jachegou.example');
+    expect(out.kind).toBe('ok');
+    expect(store.rows.get(7)?.followUp.draft).toEqual({ ...RULE_DRAFT, body: 'Prezados, respondam até {{cobranca.prazo}} sobre {{devolucao.total}}.' });
+    expect(store.rows.get(7)?.followUp.dueOn).toBe('2026-11-25');
+    expect(store.calls).toEqual([{ op: 'editFollowUpDraft', args: [7, expect.objectContaining({ subject: RULE_DRAFT.subject }), 'ana@jachegou.example'] }]);
+  });
+
+  it('#58/AC-4: número solto no texto é recusado (number_mismatch, campo body) e o texto anterior fica', async () => {
+    const { deps, store } = parts([ruleDrafted()]);
+    const out = await createReplyUseCases(deps).editFollowUp(7, 'Faltam 99 caixas, total {{devolucao.total}}.', 'ana');
+    expect(out).toEqual({ kind: 'invalid', reason: 'number_mismatch', field: 'body' });
+    expect(store.rows.get(7)?.followUp.draft).toEqual(RULE_DRAFT);
+    expect(store.calls).toEqual([]);
+  });
+
+  it('#58/AC-4: marcador fora do catálogo é recusado e o texto anterior fica', async () => {
+    const { deps, store } = parts([ruleDrafted()]);
+    const out = await createReplyUseCases(deps).editFollowUp(7, 'Responda até {{cobranca.prazo_inventado}}.', 'ana');
+    expect(out).toEqual({ kind: 'invalid', reason: 'number_mismatch', field: 'body' });
+    expect(store.rows.get(7)?.followUp.draft).toEqual(RULE_DRAFT);
+  });
+
+  it('#58/AC-4: texto vazio não tem a forma pedida (invalid_shape)', async () => {
+    const { deps, store } = parts([ruleDrafted()]);
+    expect(await createReplyUseCases(deps).editFollowUp(7, '   ', 'ana')).toEqual({ kind: 'invalid', reason: 'invalid_shape', field: 'body' });
+    expect(store.calls).toEqual([]);
+  });
+
+  it('#58/AC-5: depois de enviada, a cobrança não se edita (conflict already_sent) e nada é gravado', async () => {
+    const stamp = { by: 'ana', at: NOW, channel: 'mock', providerMessageId: 'm' } as const;
+    const sent = replyRequest(7, { ...ruleDrafted(), followUp: { ...ruleDrafted().followUp, sent: stamp } });
+    const { deps, store } = parts([sent]);
+    expect(await createReplyUseCases(deps).editFollowUp(7, 'Novo texto {{cobranca.prazo}}.', 'ana')).toEqual({ kind: 'conflict', reason: 'already_sent' });
+    expect(store.calls).toEqual([]);
+  });
+
+  it('#58/AC-5: com o envio reivindicado e ainda não carimbado, a edição espera (conflict send_in_progress)', async () => {
+    const { deps, store } = parts([ruleDrafted()]);
+    store.claims.set(7, 'claim-de-beto');
+    expect(await createReplyUseCases(deps).editFollowUp(7, 'Novo texto {{cobranca.prazo}}.', 'ana')).toEqual({ kind: 'conflict', reason: 'send_in_progress' });
+    expect(store.rows.get(7)?.followUp.draft).toEqual(RULE_DRAFT);
+  });
+
+  it('#58/AC-5: sem rascunho, ou fora de no_reply, ou sem ser enviado, é conflict no_draft; pedido inexistente é not_found', async () => {
+    const { deps } = parts([replyRequest(8, { reading: noReply() }), replyRequest(9), { ...ruleDrafted(), id: 10, status: 'draft' as const }]);
+    const useCases = createReplyUseCases(deps);
+    expect(await useCases.editFollowUp(8, 'Texto.', 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
+    expect(await useCases.editFollowUp(9, 'Texto.', 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
+    expect(await useCases.editFollowUp(10, 'Texto.', 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
+    expect(await useCases.editFollowUp(1, 'Texto.', 'ana')).toEqual({ kind: 'not_found' });
+  });
+
+  it('#58/AC-7: editar não envia: o e-mail só sai pelo caso de uso de envio, e o texto editado é o que sai, renderizado', async () => {
+    const { deps, mailer } = parts([ruleDrafted()]);
+    const useCases = createReplyUseCases(deps);
+    await useCases.editFollowUp(7, 'Texto editado, responda até {{cobranca.prazo}}.', 'ana');
+    expect(mailer.sent).toEqual([]);
+    await useCases.sendFollowUp(7, 'ana');
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]?.body).toBe('Texto editado, responda até 25/11/2026.');
+    expect(mailer.sent[0]?.dueOn).toBe('2026-11-25');
   });
 });

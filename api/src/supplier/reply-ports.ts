@@ -45,7 +45,9 @@ export type FollowUpStamp = {
 export type FollowUpState = {
   /** #34/AC-3: o rascunho no formato do pedido, com {{chave}}; null enquanto não há. */
   readonly draft: SupplierRequestText | null;
-  /** #34/AC-3: o motivo de o texto do Claude ter sido recusado; sem rascunho. */
+  /** #58/AC-2: o novo prazo da cobrança (AAAA-MM-DD), gravado com o rascunho; é dele o fato `cobranca.prazo`. Nulo sem rascunho, ou no rascunho do Claude, de antes da #58. */
+  readonly dueOn: string | null;
+  /** #34/AC-3: o motivo de o texto do Claude ter sido recusado; sem rascunho. Só leitura: desde a #58 a regra monta a cobrança e nada grava uma recusa, mas as já gravadas seguem aqui. */
   readonly rejection: string | null;
   /** #34/AC-4: quem e quando enviou; null enquanto não saiu. */
   readonly sent: FollowUpStamp | null;
@@ -79,6 +81,9 @@ export type ReadingRecorded = 'recorded' | 'superseded';
 /** #35: a ficha da reivindicação do envio: o que a prende a quem a ganhou (como a da #12). Nunca sai do armazém nem entra em log. */
 export type FollowUpClaim = string;
 
+/** #58/AC-5: o resultado de editar o rascunho; só `recorded` gravou. */
+export type EditWrite = 'recorded' | 'already_sent' | 'send_in_progress' | 'stale';
+
 /** #35: `lost` quer dizer que a reivindicação já não é de quem gravou (venceu e outro a retomou, ou foi solta): nada foi gravado. */
 export type ClaimWrite = 'recorded' | 'lost';
 
@@ -88,7 +93,7 @@ export type ClaimWrite = 'recorded' | 'lost';
  */
 export interface ReplyRequestStore {
   get(id: number): Promise<ReplyRequest | null>;
-  /** #34: os pedidos `sent`; é de onde saem a varredura, a tarefa da cobrança e a lista. */
+  /** #34: os pedidos `sent`; é de onde saem a varredura (que monta a cobrança, #58) e a lista. */
   listSent(): Promise<ReplyRequest[]>;
   /**
    * #34/AC-1, #35: grava a leitura do pedido como um fato novo (append-only), numa requisição só, sem ler antes.
@@ -100,8 +105,17 @@ export interface ReplyRequestStore {
    * do prazo: grava um único no_reply por pedido e, se já havia um, devolve `superseded`.
    */
   recordReading(id: number, reading: SupplierReading, messageId: number | null): Promise<ReadingRecorded>;
-  saveFollowUpDraft(id: number, text: SupplierRequestText): Promise<void>;
-  recordFollowUpRejection(id: number, reason: string): Promise<void>;
+  /**
+   * #58/AC-1: grava o rascunho montado pela regra, com o novo prazo, só se o pedido ainda não tem rascunho nem recusa (a cobrança não
+   * se repete): com um dos dois já gravado, volta sem gravar. O histórico leva o nome da varredura como quem gravou (ADR-005).
+   */
+  saveFollowUpDraft(id: number, text: SupplierRequestText, dueOn: string): Promise<void>;
+  /**
+   * #58/AC-4, AC-5: troca o texto do rascunho (o novo prazo fica) e grava `by` no histórico (ADR-005). Só vale para o rascunho sem
+   * carimbo e sem envio reivindicado: `already_sent` e `send_in_progress` dizem por que não gravou, e `stale` é a versão que andou
+   * no meio. Pedido ou rascunho que não existem lançam, como as outras gravações.
+   */
+  editFollowUpDraft(id: number, text: SupplierRequestText, by: string): Promise<EditWrite>;
   /**
    * #34/AC-4: reivindica o envio da cobrança antes do e-mail sair. Devolve a ficha da reivindicação (#35, o `send_claim` da #12)
    * para quem ganhou, e `null` se já há envio reivindicado dentro do prazo ou carimbado. O OLTP tem de garantir que é uma transição
