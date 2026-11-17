@@ -182,9 +182,15 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
       return rows[0] === undefined ? null : toRecord(rows[0]);
     },
 
-    async listOpenKeys(requestType) {
+    async listOpenKeys(requestType, invoiceAccessKeys) {
+      // #12/AC-6: sem nota perguntada não há o que ler; com notas, a leitura se limita a elas e o payload não cresce com o histórico.
+      if (invoiceAccessKeys.length === 0) return new Set();
+      const keys = invoiceAccessKeys.map((key) => `"${key}"`).join(',');
       const rows = parseRows(
-        await rest.select(TABLE, { select: 'invoice_access_key', filters: { request_type: `eq.${requestType}`, status: OPEN } }),
+        await rest.select(TABLE, {
+          select: 'invoice_access_key',
+          filters: { invoice_access_key: `in.(${keys})`, request_type: `eq.${requestType}`, status: OPEN },
+        }),
         isKeyRow,
         TABLE,
       );

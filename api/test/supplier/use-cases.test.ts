@@ -311,6 +311,31 @@ describe('#12/AC-4 o envio toma a trava antes de qualquer efeito', () => { // AD
     expect([ok.requests.rows[0]?.claim, failed.requests.rows[0]?.claim]).toEqual([null, null]);
   });
 
+  it.each(['emitir a nota', 'mover a fila'])('erro ao %s, antes do e-mail, solta a trava e sobe; a nova tentativa não é send_in_progress', async (step) => { // ADR-002
+    const w = await drafted();
+    const boom = new Error('falha do dublê');
+    const notes = w.notes.issue;
+    const emit = w.queue.emit;
+    if (step === 'emitir a nota') w.notes.issue = async () => Promise.reject(boom);
+    else w.queue.emit = async () => Promise.reject(boom);
+    const useCases = createSupplierUseCases(w.deps);
+    await expect(useCases.send(41, BY)).rejects.toBe(boom);
+    expect([w.requests.releases, w.requests.rows[0]?.claim, w.mailer.sent]).toEqual([1, null, []]);
+    w.notes.issue = notes;
+    w.queue.emit = emit;
+    expect((await useCases.send(41, BY)).kind).toBe('ok');
+  });
+
+  it('erro ao registrar a emissão (save), antes do e-mail, também solta a trava', async () => { // ADR-002
+    const w = await drafted();
+    const save = w.requests.save;
+    w.requests.save = async () => Promise.reject(new Error('banco fora'));
+    await expect(createSupplierUseCases(w.deps).send(41, BY)).rejects.toThrow();
+    w.requests.save = save;
+    expect(w.requests.releases).toBe(1);
+    expect(w.requests.rows[0]?.claim).toBeNull();
+  });
+
   it('cada gravação do envio diz quem fez e quando', async () => { // ADR-002
     const w = await drafted(fakeMailer({ ok: false, reason: 'x' }));
     await createSupplierUseCases(w.deps).send(41, BY);

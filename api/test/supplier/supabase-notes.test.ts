@@ -9,8 +9,8 @@ import { harness } from './supabase-support.js';
 const TABLE = 'issued_return_notes';
 const DAY = '2026-11-12';
 
-describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () => {
-  it('a primeira emissão usa o id da tabela como sequência: ND-<id>, número <id>, série 9', async () => {
+describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () => { // ADR-002
+  it('a primeira emissão usa o id da tabela como sequência: ND-<id>, número <id>, série 9', async () => { // ADR-002
     const { fake, rest } = harness();
     const issued = await supabaseIssuedNoteStore(rest).issue(7, returnNote(), DAY);
     expect(issued).toEqual(issueReturnNote(returnNote(), { sequence: 1, issuedOn: DAY }));
@@ -18,7 +18,7 @@ describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () 
     expect(fake.rows(TABLE)).toHaveLength(1);
   });
 
-  it('guarda a devolução, a nota de origem, o fornecedor, o dia e a nota montada; não guarda a chave nem o emitente', async () => {
+  it('guarda a devolução, a nota de origem, o fornecedor, o dia e a nota montada; não guarda a chave nem o emitente', async () => { // ADR-002
     const { fake, rest } = harness();
     await supabaseIssuedNoteStore(rest).issue(7, returnNote(), DAY);
     const row = fake.rows(TABLE)[0]!;
@@ -27,7 +27,7 @@ describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () 
     expect(Object.keys(row).sort()).toEqual(['created_at', 'id', 'invoice_access_key', 'issued_on', 'note', 'queue_id', 'supplier_id']);
   });
 
-  it('emitir de novo a mesma devolução devolve a mesma nota, com o mesmo número e a mesma chave, sem outra linha', async () => {
+  it('emitir de novo a mesma devolução devolve a mesma nota, com o mesmo número e a mesma chave, sem outra linha', async () => { // ADR-002
     const { fake, rest } = harness();
     const store = supabaseIssuedNoteStore(rest);
     const first = await store.issue(7, returnNote(), DAY);
@@ -37,14 +37,14 @@ describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () 
     expect(fake.rows(TABLE)).toHaveLength(1);
   });
 
-  it('outra devolução recebe a sequência seguinte', async () => {
+  it('outra devolução recebe a sequência seguinte', async () => { // ADR-002
     const { rest } = harness();
     const store = supabaseIssuedNoteStore(rest);
     await store.issue(7, returnNote(), DAY);
     expect((await store.issue(8, returnNote(), DAY)).number).toBe(2);
   });
 
-  it('a corrida: o insert que perde para a restrição única (nada volta) lê a nota que já existe', async () => {
+  it('a corrida: o insert que perde para a restrição única (nada volta) lê a nota que já existe', async () => { // ADR-002
     const { fake, rest } = harness();
     const store = supabaseIssuedNoteStore(rest);
     const winner = await store.issue(7, returnNote(), DAY);
@@ -55,7 +55,7 @@ describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () 
     expect(fake.rows(TABLE)).toHaveLength(1);
   });
 
-  it('só lê e insere: nunca atualiza nem apaga uma nota emitida (a tabela é append-only)', async () => {
+  it('só lê e insere: nunca atualiza nem apaga uma nota emitida (a tabela é append-only)', async () => { // ADR-002
     const { fake, rest } = harness();
     const store = supabaseIssuedNoteStore(rest);
     await store.issue(7, returnNote(), DAY);
@@ -63,7 +63,7 @@ describe('#12/AC-2 uma devolução da fila tem no máximo uma nota emitida', () 
     expect(new Set(fake.requests.map((r) => r.method))).toEqual(new Set(['GET', 'POST']));
   });
 
-  it('o insert usa a restrição da devolução e ignora a duplicada', async () => {
+  it('o insert usa a restrição da devolução e ignora a duplicada', async () => { // ADR-002
     const { fake, rest } = harness();
     await supabaseIssuedNoteStore(rest).issue(7, returnNote(), DAY);
     const post = fake.requests.find((r) => r.method === 'POST');

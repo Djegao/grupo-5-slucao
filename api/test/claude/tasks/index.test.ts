@@ -11,13 +11,13 @@ import { harness, invoiceRow, queueRow, supplierRow } from '../../supplier/supab
 const db: Db = { select: async () => [], upsert: async () => [] };
 const seed = () => ({ outbox_return_notes: [queueRow()], invoices: [invoiceRow()], kit_fornecedores: [supplierRow()] });
 
-describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude', () => {
-  it('o registro tem a tarefa do pedido ao fornecedor', () => {
+describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude', () => { // ADR-002
+  it('o registro tem a tarefa do pedido ao fornecedor', () => { // ADR-002
     const { rest } = harness();
     expect(tasksFor(rest).map((t) => t.name)).toContain(SUPPLIER_DRAFT_TASK);
   });
 
-  it('a tarefa lista a devolução pendente e grava o rascunho no banco, para o e-mail do fornecedor, feito pelo agente', async () => {
+  it('a tarefa lista a devolução pendente e grava o rascunho no banco, para o e-mail do fornecedor, feito pelo agente', async () => { // ADR-002
     const { fake, rest } = harness(seed());
     const task = tasksFor(rest).find((t) => t.name === SUPPLIER_DRAFT_TASK);
     const { requests } = await task!.pending(db);
@@ -29,7 +29,7 @@ describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude'
     expect((row?.history as { by: string }[])[0]?.by).toBe('agente');
   });
 
-  it('com o rascunho feito, a devolução não volta à lista da tarefa; o rascunho nunca emite nota nem envia', async () => {
+  it('com o rascunho feito, a devolução não volta à lista da tarefa; o rascunho nunca emite nota nem envia', async () => { // ADR-002
     const { fake, rest } = harness(seed());
     const task = tasksFor(rest).find((t) => t.name === SUPPLIER_DRAFT_TASK)!;
     await task.run(draftInput(), fakeAsk(GOOD_TEXT));
@@ -38,7 +38,7 @@ describe('#12/AC-6 a tarefa do rascunho entra no registro das tarefas do Claude'
     expect(fake.rows('outbox_return_notes')[0]?.status).toBe('pendente');
   });
 
-  it('a rodada do Cron sem credencial do Claude não faz nenhum pedido ao banco e não grava rascunho', async () => {
+  it('a rodada do Cron sem credencial do Claude não faz nenhum pedido ao banco e não grava rascunho', async () => { // ADR-002
     const { fake, rest } = harness(seed());
     const lines: string[] = [];
     const round = await runClaudeRound(rest, {}, { log: (l) => lines.push(l) });

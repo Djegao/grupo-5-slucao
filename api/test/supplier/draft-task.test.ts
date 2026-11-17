@@ -44,6 +44,15 @@ describe('#12/AC-1 o custo do Cron: poucas leituras, e a entrada da tarefa basta
     expect([listCalls, w.requests.listOpenKeysCalls, w.requests.findOpenCalls]).toEqual([1, 1, 0]);
   });
 
+  it('pergunta pelos pedidos abertos só das notas pendentes (sem pendente, pergunta por nenhuma)', async () => { // ADR-002
+    const w = world(fakeMailer(), [queueView(7), queueView(8, { invoiceAccessKey: 'outra-chave' }), queueView(9, { status: 'emitida', invoiceAccessKey: 'emitida' })]);
+    await supplierRequestDraftTask(w.deps).pending(db);
+    expect(w.requests.listOpenKeysArgs).toEqual([[queueView(7).invoiceAccessKey, 'outra-chave']]);
+    const empty = world(fakeMailer(), [queueView(9, { status: 'emitida' })]);
+    expect((await supplierRequestDraftTask(empty.deps).pending(db)).requests).toEqual([]);
+    expect(empty.requests.listOpenKeysArgs).toEqual([[]]); // #12: o adaptador não lê com lista vazia (supabase-store.test.ts)
+  });
+
   it('a entrada leva o que o run precisa da fila: id, chave de acesso e linhas', async () => { // ADR-002
     const w = world();
     const { requests } = await supplierRequestDraftTask(w.deps).pending(db);

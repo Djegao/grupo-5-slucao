@@ -139,22 +139,19 @@ async function mail(
   return saved === 'ok' ? { kind: 'send_failed', record, reason } : STALE;
 }
 
-/** #12/AC-4: o envio depois da trava; devolve o resultado, e quem chama solta a trava se o envio parou antes do e-mail. */
-async function sendClaimed(
-  deps: SupplierDeps,
-  record: RequestRecord,
-  rendered: SupplierRequestText,
-  claim: string,
-  by: string,
-): Promise<SendResult> {
+/** #12/AC-4: o que sobra do envio antes do e-mail: o resultado que o encerra, ou a mensagem pronta e a nota emitida. */
+type Prepared = { readonly done: SendResult } | { readonly message: MailMessage; readonly issued: IssuedReturnNote };
+
+/** #12/AC-4: os passos antes do e-mail (fila, emissão, registro, movimento da fila); quem chama solta a trava se algum lança. */
+async function prepareSend(deps: SupplierDeps, record: RequestRecord, rendered: SupplierRequestText, claim: string, by: string): Promise<Prepared> {
   const { request } = record;
   const gate = await checkQueue(deps, record);
-  if (typeof gate === 'object') return gate;
+  if (typeof gate === 'object') return { done: gate };
   const issued = await ensureIssued(deps, record, by, claim);
-  if (issued === 'stale') return STALE;
-  if (issued === null) return { kind: 'conflict', reason: 'issuance_missing' };
+  if (issued === 'stale') return { done: STALE };
+  if (issued === null) return { done: { kind: 'conflict', reason: 'issuance_missing' } };
   const blocked = gate === 'pending' ? await moveQueue(deps, record, issued, by) : null;
-  if (blocked !== null) return blocked;
+  if (blocked !== null) return { done: blocked };
   const message: MailMessage = {
     invoiceAccessKey: request.invoiceAccessKey,
     supplierId: issued.supplierId,
@@ -165,7 +162,18 @@ async function sendClaimed(
     dueOn: request.dueOn,
     idempotencyKey: claim,
   };
-  return (await mail(deps, record, message, issued.number, by, claim)) ?? { kind: 'ok', record, issued };
+  return { message, issued };
+}
+
+/** #12/AC-4: um erro antes do e-mail solta a trava e sobe; o e-mail ainda não saiu, então o reenvio não abre segundo e-mail. */
+async function prepareOrRelease(deps: SupplierDeps, id: number, record: RequestRecord, rendered: SupplierRequestText, claim: string, by: string): Promise<Prepared> {
+  try {
+    return await prepareSend(deps, record, rendered, claim, by);
+  } catch (error) {
+    // #12/AC-4: se soltar também falhar, a trava vence sozinha pelo prazo (LEASE_MS) e o erro original é o que sobe.
+    await deps.requests.releaseSend(id, claim, by, deps.clock.now()).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function send(deps: SupplierDeps, id: number, by: string): Promise<SendResult> {
@@ -179,10 +187,14 @@ async function send(deps: SupplierDeps, id: number, by: string): Promise<SendRes
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
   const claimed = await deps.requests.claimSend(id, by, deps.clock.now());
   if (claimed.kind === 'conflict') return { kind: 'conflict', reason: 'send_in_progress' };
-  const result = await sendClaimed(deps, record, text.rendered, claimed.claim, by);
-  // #12/AC-4: o envio que termina (ok ou send_failed) limpa a trava no último save; o que para antes a solta aqui, pela chave dela.
-  if (result.kind !== 'ok' && result.kind !== 'send_failed') await deps.requests.releaseSend(id, claimed.claim, by, deps.clock.now());
-  return result;
+  const prepared = await prepareOrRelease(deps, id, record, text.rendered, claimed.claim, by);
+  // #12/AC-4: o envio que para antes do e-mail solta a trava aqui, pela chave dela; o que chega ao e-mail a limpa no último save.
+  if ('done' in prepared) {
+    await deps.requests.releaseSend(id, claimed.claim, by, deps.clock.now());
+    return prepared.done;
+  }
+  const { message, issued } = prepared;
+  return (await mail(deps, record, message, issued.number, by, claimed.claim)) ?? { kind: 'ok', record, issued };
 }
 
 async function editBody(deps: SupplierDeps, id: number, body: string, by: string): Promise<EditResult> {

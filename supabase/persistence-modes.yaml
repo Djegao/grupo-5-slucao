@@ -11,6 +11,8 @@
 # growth:   fixed para tabela de consulta que só um carregador versionado ou uma migração grava
 # gap:      o que as gravações de hoje ainda não cumprem do modo declarado; decisão a registrar
 #
+# #12: acrescenta issued_return_notes e outbox_supplier_emails (desenho em
+# supabase/persistence-supplier-request.md); a estratégia de unidade de trabalho é a da #8.
 # Primeira versão (#8): declara as tabelas que a camada de persistência da devolução lê ou grava e
 # toda a base do kit. Ainda sem modo declarado, a declarar pelo dono de cada uma: titles,
 # outbox_dock_actions, outbox_registry_corrections, outbox_store_actions, claude_suggestions,
@@ -79,36 +81,7 @@ tables:
       _cancelada_check. Não é a forma de docs/entity-history.md (uma linha de histórico por mudança);
       vale enquanto houver uma só transição terminal. ops/reconferir.ts apaga a tabela inteira (PER-5).
 
-  # Base do kit (#52, ADR-001): espelho dos JSON de data/kit/, que é a fonte versionada.
-  kit_fornecedores:
-    mode: ephemeral
-    reason: >-
-      Cópia de data/kit/fornecedores.json recarregada por scripts/load_kit.py com upsert na chave
-      primária; o registro é o arquivo versionado no git (ADR-001). A #12 acrescenta a coluna email,
-      que a mesma carga preenche. A aplicação só lê.
-    growth: fixed
-  kit_produtos: &kit
-    mode: ephemeral
-    reason: >-
-      Cópia de data/kit/*.json recarregada por scripts/load_kit.py com upsert na chave primária; o
-      registro é o arquivo versionado no git (ADR-001). A aplicação só lê.
-    growth: fixed
-  kit_ordens: *kit
-  kit_ordem_itens: *kit
-  kit_notas: *kit
-  kit_nota_itens: *kit
-  kit_notas_lancadas: *kit
-  kit_nota_lancada_itens: *kit
-  kit_pagamentos: *kit
-  kit_recebimentos: *kit
-  kit_recebimento_itens: *kit
-  kit_regua: *kit
-  kit_excecoes: *kit
-
-  # Pedido ao fornecedor (#12). Desenho: supabase/persistence-supplier-request.md.
-  # #12: kit_fornecedores (acima, ephemeral) ganha a coluna email.
-  # #12: a unidade de trabalho é uma requisição do PostgREST (unit_of_work acima), que toca uma tabela;
-  # #12: o que precisa ser atômico no pedido (entidade, histórico, versão e trava do envio) cabe numa linha.
+  # Pedido ao fornecedor e nota emitida pelo mock (#12). Desenho: supabase/persistence-supplier-request.md.
   issued_return_notes:
     mode: append-only
     history: none
@@ -157,3 +130,23 @@ tables:
     projection: "leitura atual por pedido: a primeira por message_id desc nulls last (no_reply só vale sem leitura de mensagem)"
     rebuild_test: "teste do adaptador que remonta a leitura atual de leituras gravadas em qualquer ordem (persistence-supplier-reply.md, Testes)"
     refusal: grant               # revoke update, delete, truncate de anon, authenticated e service_role
+
+  # Base do kit (#52, ADR-001): espelho dos JSON de data/kit/, que é a fonte versionada.
+  kit_fornecedores: &kit   # #12: ganha a coluna email (migração da #12); o modo é o da #8
+    mode: ephemeral
+    reason: >-
+      Cópia de data/kit/*.json recarregada por scripts/load_kit.py com upsert na chave primária; o
+      registro é o arquivo versionado no git (ADR-001). A aplicação só lê.
+    growth: fixed
+  kit_produtos: *kit
+  kit_ordens: *kit
+  kit_ordem_itens: *kit
+  kit_notas: *kit
+  kit_nota_itens: *kit
+  kit_notas_lancadas: *kit
+  kit_nota_lancada_itens: *kit
+  kit_pagamentos: *kit
+  kit_recebimentos: *kit
+  kit_recebimento_itens: *kit
+  kit_regua: *kit
+  kit_excecoes: *kit
