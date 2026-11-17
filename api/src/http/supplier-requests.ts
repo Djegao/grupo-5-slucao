@@ -160,6 +160,8 @@ async function list(ctx: Ctx, status: RequestStatus): Promise<Response> {
   for (const record of records) {
     const result = await show(ctx, record);
     if (result.ok) views.push(result.view);
+    // #13: a visão que não se monta fica fora da lista, e o motivo vai ao log só em campos nomeados (nunca o texto do pedido).
+    else console.error('supplier-requests: pedido fora da lista', { operation: 'supplier_requests.list', dropped: result.reason, invoiceAccessKey: record.request.invoiceAccessKey });
   }
   return Response.json({ requests: views });
 }

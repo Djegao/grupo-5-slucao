@@ -231,13 +231,23 @@ describe('#13/AC-3 GET /api/supplier-requests/{accessKey}/return-note.json', () 
 describe('#13/AC-3 GET /api/supplier-requests?status=', () => { // ADR-002
   it('#13/AC-3: lista os pedidos do estado, padrão draft', async () => { // ADR-002
     const w = await drafted();
-    const padrao = await w.call('GET', '/api/supplier-requests');
-    expect(padrao.body).toEqual({ requests: [DRAFT_SHAPE] });
+    const byDefault = await w.call('GET', '/api/supplier-requests');
+    expect(byDefault.body).toEqual({ requests: [DRAFT_SHAPE] });
     expect(((await w.call('GET', '/api/supplier-requests?status=sent')).body as Json).requests).toEqual([]);
     await w.call('POST', w.path('/send'), { body: {} });
     const sent = (await w.call('GET', '/api/supplier-requests?status=sent')).body as Json;
     expect(sent.requests).toHaveLength(1);
     expect(sent.requests[0].status).toBe('sent'); // ADR-002
+  });
+
+  it('#13/AC-3: o pedido sem a nota de origem sai da lista e o motivo vai ao log, só em campos', async () => { // ADR-002
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const w = await drafted();
+    w.rows('invoices').length = 0; // #13: a nota de origem some; a visão do rascunho não se monta
+    const reply = await w.call('GET', '/api/supplier-requests');
+    expect(reply.body).toEqual({ requests: [] });
+    expect(log.mock.calls).toHaveLength(1);
+    expect(log.mock.calls[0]?.[1]).toEqual({ operation: 'supplier_requests.list', dropped: 'source_missing', invoiceAccessKey: SOURCE_KEY });
   });
 
   it('#13/AC-3: estado fora dos quatro é 400 invalid_status', async () => { // ADR-002
