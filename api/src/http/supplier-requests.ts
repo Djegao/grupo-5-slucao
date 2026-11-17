@@ -11,6 +11,10 @@
 // #13:           422 { error: 'invalid', reason: 'number_mismatch' | 'invalid_shape', field: 'subject' | 'body' | 'asks' }
 // #13:   POST  /api/supplier-requests/{accessKey}/send     {}       200 { request }   só de rascunho: emite (mock), fila emitida, e-mail;
 // #13:           o resultado é `sent` ou `send_failed` (falha do envio é um estado, continua 200)
+// #36:           e do pedido `sent` com a leitura no_reply e a cobrança rascunhada (#4/AC-3): envia a cobrança, com `by` do Access; 200 { request }
+// #36:           com followUp.sent (ou followUp.failure, o motivo curto, se o envio falhou: continua 200); 409 conflict { reason } not_no_reply (o
+// #36:           pedido enviado não tem a leitura no_reply: o motivo da #13, not_draft, vale) | no_draft | already_sent | send_in_progress;
+// #36:           422 invalid { reason: 'text_invalid' }. Só esta rota envia a cobrança: nem o Cron nem as tarefas do Claude a enviam.
 // #13:   POST  /api/supplier-requests/{accessKey}/resend   {}       200 { request }   só de send_failed; nunca emite outra nota
 // #13:   POST  /api/supplier-requests/{accessKey}/discard  { reason?: string }   200 { request }   só de rascunho; reason aparado, até 500
 // #13:           caracteres, padrão 'discarded_by_user'
@@ -19,7 +23,29 @@
 // #13:   GET   /api/supplier-requests/{accessKey}/return-note.json  200 a nota emitida no formato do kit; 404 antes da emissão (é o `url` do anexo)
 // #13:   GET   /api/supplier-requests?status=draft|sent|send_failed|discarded   200 { requests: SupplierRequestView[] }
 // #13:           padrão draft; os 10 mais novos do estado; 400 { error: 'invalid_status' } fora dos quatro
+// #36:   GET   /api/supplier-requests?status=awaiting|answered|needs_you|overdue   200 { filter, requests: ReadingRow[], counts }
+// #36:           a lista da tela dos pedidos ao fornecedor (#5), pela leitura da resposta (#4): os filtros não colidem com os estados da #13.
+// #36:           `counts` são os quatro filtros, contados sobre todos os pedidos enviados, com o dia de hoje em São Paulo; as linhas são só as do filtro,
+// #36:           na ordem do id. 400 { error: 'invalid_status' } fora dos oito valores.
+// #36:             awaiting   enviado, sem leitura, dentro do prazo (no dia do prazo ainda está no prazo)
+// #36:             answered   fulfilled com next_step close
+// #36:             needs_you  needs_information, refused, partially_fulfilled, ou next_step confirm_document (atendeu com documento citado nunca fecha sozinho)
+// #36:             overdue    no_reply, ou enviado sem leitura depois do prazo
 // #13:
+// #36: ReadingRow (camelCase, como a SupplierRequestView):
+// #36:   { id, invoiceAccessKey, invoiceNumber, supplierId, supplierName: string | null, requestType: 'return_note',
+// #36:     totalCents (o total da nota de devolução, em centavos inteiros; a tela formata), dueOn ('AAAA-MM-DD'), status: 'sent',
+// #36:     reading: Reading | null, followUp: { drafted: boolean, sent: boolean } }
+// #36:   counts: { awaiting, answered, needs_you, overdue }, todos inteiros
+// #36: Reading: { replyOutcome: 'fulfilled' | 'partially_fulfilled' | 'refused' | 'needs_information' | 'no_reply',
+// #36:            fulfilledAsks: string[] (só itens do que pedimos), supplierDocument: string | null, summary, nextStep: 'close' | 'confirm_document' |
+// #36:            'answer_supplier' | 'follow_up', injectionFlag: string | null (o trecho da resposta com ordem escondida, citado; dado, nunca instrução) }
+// #36: a visão `sent` da SupplierRequestView (GET /{accessKey}, e o corpo do 200 das escritas) ganha, sem mudar nenhum campo da #13:
+// #36:   reading: Reading | null, followUp: { drafted, sent, draft: { subject, body (renderizados), template (com {{chave}}), asks } | null,
+// #36:                                          sentBy: string | null, sentAt: string | null, failure: string | null (código curto, nunca texto do provedor) }
+// #36: "Cobrar" na tela abre followUp.draft para a pessoa revisar e enviar pelo POST .../send; o rascunho que já não confere com o catálogo vem null.
+// #36: a leitura e a cobrança só existem no pedido `sent`; nenhum outro estado as traz.
+//
 // #13: SupplierRequestView (alinhada a web/src/approval/SupplierRequestBlock.tsx):
 // #13:   { status: 'writing' }
 // #13:   | { status: 'draft' | 'sent' | 'send_failed', invoiceAccessKey, requestType: 'return_note',
@@ -46,16 +72,21 @@
 // #13: quem age (`by`) é o e-mail da identidade do Access, nunca o corpo.
 import { ClaudeClient, ClaudeError, credentialsFromEnv, type Ask } from '../claude/client.js';
 import { SupabaseRestError, type SupabaseRest } from '../connectors/supabase-rest.js';
-import type { RequestStatus } from '../domain/index.js';
+import type { RequestFilter, RequestStatus } from '../domain/index.js';
 import type { Env } from '../env.js';
 import { mailerFromEnv } from '../supplier/mock-mailer.js';
 import { toKitNote } from '../supplier/kit-note.js';
 import type { Clock, RequestRecord, SupplierDeps, SupplierMailer } from '../supplier/ports.js';
 import { SupplierStoreError } from '../supplier/supabase-store.js';
 import { supplierDeps } from '../supplier/supabase-deps.js';
+import { createReplyUseCases, type ReplyUseCases } from '../supplier/reply-use-cases.js';
+import { todayIso } from '../supplier/reply-catalog.js';
+import type { ReplyDeps, ReplyRequest } from '../supplier/reply-ports.js';
+import { replyDeps } from '../supplier/supabase-reply-deps.js';
 import { createSupplierUseCases, type SupplierUseCases } from '../supplier/use-cases.js';
 import type { Identity } from './access.js';
 import { viewOf, type ViewResult, type WireRequest } from './supplier-request-view.js';
+import { listOf } from './supplier-reply-view.js';
 
 export interface SupplierRequestsDeps {
   /** #13: monta o cliente do Supabase a partir do Env; nulo sem credenciais. Os testes injetam um fake. */
@@ -77,11 +108,14 @@ const DEFAULT_REASON = 'discarded_by_user';
 /** #13: pedidos por lista; cada um custa leituras da nota de origem e da nota emitida, e o Worker limita as subrequests. */
 const LIST_LIMIT = 10;
 const STATUSES: readonly RequestStatus[] = ['draft', 'sent', 'send_failed', 'discarded']; // ADR-002
+/** #36: os filtros da lista de leitura (#4); não colidem com os estados do pedido da #13. */
+const FILTERS: readonly RequestFilter[] = ['awaiting', 'answered', 'needs_you', 'overdue']; // ADR-002
 
 const ACTIONS = ['send', 'resend', 'discard', 'redo', 'return-note.json'] as const;
 type Action = (typeof ACTIONS)[number];
 const isAction = (value: string | undefined): value is Action => (ACTIONS as readonly (string | undefined)[]).includes(value);
 const isStatus = (value: string): value is RequestStatus => (STATUSES as readonly string[]).includes(value);
+const isFilter = (value: string): value is RequestFilter => (FILTERS as readonly string[]).includes(value);
 type Body = Record<string, unknown>;
 
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}, headers?: HeadersInit): Response =>
@@ -109,6 +143,9 @@ async function bodyOf(request: Request): Promise<Body | null> {
 type Ctx = {
   readonly deps: SupplierDeps;
   readonly cases: SupplierUseCases;
+  /** #36: as portas e os casos de uso da leitura da resposta (#4) e da cobrança. */
+  readonly reply: ReplyDeps;
+  readonly replyCases: ReplyUseCases;
   readonly env: Env;
   readonly routeDeps: SupplierRequestsDeps;
   readonly key: string;
@@ -120,9 +157,12 @@ type Ctx = {
 const currentOf = async (ctx: Ctx): Promise<RequestRecord | null> =>
   (await ctx.deps.requests.findOpen(ctx.key, REQUEST_TYPE)) ?? (await ctx.deps.requests.findLatest(ctx.key, REQUEST_TYPE));
 
-async function show(ctx: Ctx, record: RequestRecord): Promise<ViewResult> {
+/** #36: o pedido enviado leva a leitura e a cobrança; `replies` é o que a lista já leu de uma vez (2 leituras, não 2 por pedido). */
+async function show(ctx: Ctx, record: RequestRecord, replies?: ReadonlyMap<number, ReplyRequest>): Promise<ViewResult> {
   const source = record.request.status === 'discarded' ? null : await ctx.deps.source.find(record.request.invoiceAccessKey); // ADR-002
-  return viewOf(record, source);
+  if (record.request.status !== 'sent') return viewOf(record, source); // ADR-002
+  const reply = replies === undefined ? await ctx.reply.requests.get(record.request.id) : (replies.get(record.request.id) ?? null);
+  return viewOf(record, source, reply);
 }
 
 const shown = (result: ViewResult): Response =>
@@ -156,14 +196,20 @@ async function read(ctx: Ctx): Promise<Response> {
 
 async function list(ctx: Ctx, status: RequestStatus): Promise<Response> {
   const records = await ctx.deps.requests.listByStatus(status, LIST_LIMIT);
+  const replies = status === 'sent' ? new Map((await ctx.reply.requests.listSent()).map((r) => [r.id, r])) : undefined; // ADR-002
   const views: WireRequest[] = [];
   for (const record of records) {
-    const result = await show(ctx, record);
+    const result = await show(ctx, record, replies);
     if (result.ok) views.push(result.view);
     // #13: a visão que não se monta fica fora da lista, e o motivo vai ao log só em campos nomeados (nunca o texto do pedido).
     else console.error('supplier-requests: pedido fora da lista', { operation: 'supplier_requests.list', dropped: result.reason, invoiceAccessKey: record.request.invoiceAccessKey });
   }
   return Response.json({ requests: views });
+}
+
+/** #36/AC-3 (#4/AC-3): a lista de leitura da tela dos pedidos ao fornecedor: o filtro, os pedidos dele e as contagens de todos, com o dia de hoje em São Paulo. */
+async function listReadings(ctx: Ctx, filter: RequestFilter): Promise<Response> {
+  return Response.json(listOf(await ctx.replyCases.listRequests(filter, todayIso(ctx.reply.clock.now()))));
 }
 
 async function edit(ctx: Ctx): Promise<Response> {
@@ -177,10 +223,23 @@ async function edit(ctx: Ctx): Promise<Response> {
   return result.kind === 'ok' ? shownAfter(ctx, record.request.id) : refusal(result);
 }
 
+/**
+ * #36/AC-3 (#4/AC-3): o pedido enviado com a leitura no_reply tem a cobrança a enviar: a rota de envio a manda pelo caso de uso
+ * da cobrança, com a identidade do Access. Os resultados tipados viram HTTP como os da #13; a falha do envio é um estado (200).
+ */
+async function sendFollowUp(ctx: Ctx, id: number): Promise<Response> {
+  const result = await ctx.replyCases.sendFollowUp(id, ctx.by);
+  return result.kind === 'ok' || result.kind === 'send_failed' ? shownAfter(ctx, id) : refusal(result); // ADR-002
+}
+
 /** #13: o envio exige o estado de partida da rota (rascunho no `send`, falha no `resend`), e só depois chama o caso de uso. */
 async function send(ctx: Ctx, from: RequestStatus, reason: string): Promise<Response> {
   const record = await currentOf(ctx);
   if (record === null) return fail(404, 'not_found');
+  if (from === 'draft' && record.request.status === 'sent') { // ADR-002
+    const reply = await ctx.reply.requests.get(record.request.id);
+    if (reply?.reading?.replyOutcome === 'no_reply') return sendFollowUp(ctx, record.request.id); // ADR-002
+  }
   if (record.request.status !== from) return conflict(reason);
   const result = await ctx.cases.send(record.request.id, ctx.by);
   return result.kind === 'ok' || result.kind === 'send_failed' ? shownAfter(ctx, record.request.id) : refusal(result); // ADR-002
@@ -252,15 +311,17 @@ function failureResponse(error: unknown, operation: string): Response {
 
 const contextOf = (rest: SupabaseRest, env: Env, routeDeps: SupplierRequestsDeps, key: string, by: string, body: Body): Ctx => {
   const deps = supplierDeps(rest, { ...(routeDeps.clock ? { clock: routeDeps.clock } : {}), mailer: routeDeps.mailer ?? mailerFromEnv(env) });
-  return { deps, cases: createSupplierUseCases(deps), env, routeDeps, key, by, body };
+  const reply = replyDeps(rest, { ...(routeDeps.clock ? { clock: routeDeps.clock } : {}), mailer: deps.mailer });
+  return { deps, cases: createSupplierUseCases(deps), reply, replyCases: createReplyUseCases(reply), env, routeDeps, key, by, body };
 };
 
-/** #13: a lista tem a sua rota, sem chave: valida o estado pedido e responde. */
+/** #13: a lista tem a sua rota, sem chave: valida o estado ou o filtro pedido e responde. */
 async function listRoute(request: Request, rest: SupabaseRest, env: Env, routeDeps: SupplierRequestsDeps): Promise<Response> {
   const status = new URL(request.url).searchParams.get('status') ?? 'draft'; // ADR-002
-  if (!isStatus(status)) return fail(400, 'invalid_status');
+  if (!isStatus(status) && !isFilter(status)) return fail(400, 'invalid_status');
   try {
-    return await list(contextOf(rest, env, routeDeps, '', '', {}), status);
+    const ctx = contextOf(rest, env, routeDeps, '', '', {});
+    return await (isFilter(status) ? listReadings(ctx, status) : list(ctx, status));
   } catch (error) {
     return failureResponse(error, 'list');
   }

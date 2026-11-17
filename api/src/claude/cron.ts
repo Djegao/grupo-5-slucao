@@ -17,8 +17,14 @@ import { tasksFor } from './tasks/index.js';
  * #12 5 (a nota de origem e o fornecedor, a Messages API, o insert do pedido e o upsert da sugestão; a fila e o pedido aberto
  * #12 não são relidos). 4 + 2 × 5 = 14.
  * #12 Rodada no pior caso, com as outras duas no limite delas: 27 + 14 = 41, dentro dos 50 e sem crescer com as devoluções pendentes.
+ * #36 A leitura da resposta e o rascunho da cobrança (#4) entraram, com limite de 1 pedido cada (`SUPPLIER_REPLY_LIMIT`). Conta da leitura:
+ * #36 4 leituras (claude_suggestions, a caixa de entrada, os pedidos enviados e as notas deles) e, por mensagem, 8 (a mensagem, o pedido e a nota,
+ * #36 a leitura gravada e relida, o status da mensagem, a Messages API e o upsert da sugestão) = 12. Conta da cobrança: 3 leituras e, por pedido,
+ * #36 6 (o pedido e a nota, a Messages API, o rascunho lido e gravado, o upsert) = 9. Com 27 + 14 + 12 + 9 = 62 os 50 não cabem; por isso
+ * #36 `CRON_LIMIT` caiu de 5 para 1: 2 × 1 × 2 + 7 = 11, e a rodada no pior caso é 11 + 14 + 12 + 9 = 46. Os 4 que sobram são da varredura do
+ * #36 prazo (api/src/cron/supplier-sweep.ts): 2 leituras e uma gravação por pedido marcado, que o caso de uso (#34) não limita: um teto ali é a próxima mudança da camada de baixo (#36).
  */
-export const CRON_LIMIT = 5;
+export const CRON_LIMIT = 1;
 
 /** #171 Orçamento da rodada: o Claude é periférico e a captura é o caminho crítico, então a rodada para cedo. */
 export const ROUND_BUDGET_MS = 2 * 60_000;

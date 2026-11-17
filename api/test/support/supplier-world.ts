@@ -9,8 +9,9 @@ import { route } from '../../src/http/router.js';
 import type { SupplierMailer } from '../../src/supplier/ports.js';
 import { supplierRequestDraftTask } from '../../src/supplier/draft-task.js';
 import { supplierDeps } from '../../src/supplier/supabase-deps.js';
+import { tasksFor } from '../../src/claude/tasks/index.js';
 import { SOURCE_KEY } from '../domain/supplier-request-fixtures.js';
-import { NOW, fakeAsk } from '../supplier/doubles.js';
+import { NOW, SUPPLIER_EMAIL, fakeAsk } from '../supplier/doubles.js';
 import { harness, invoiceRow, queueRow, supplierRow } from '../supplier/supabase-support.js';
 import { accessEnv, accessKit } from './access-token.js';
 import type { FakePostgrest } from './fake-postgrest.js';
@@ -26,6 +27,8 @@ export type WorldOptions = {
   readonly env?: Env;
   /** #13: sem a devolução pendente na fila. */
   readonly emptyQueue?: boolean;
+  /** #36: o relógio do Worker (o dia de hoje do prazo e o carimbo do envio); padrão, o dia do rascunho da #13. */
+  readonly now?: Date;
 };
 
 export type Reply = { readonly status: number; readonly body: Record<string, unknown>; readonly headers: Headers };
@@ -39,6 +42,12 @@ export type SupplierWorld = {
   readonly rest: SupabaseRest;
   readonly call: (method: string, path: string, init?: CallInit) => Promise<Reply>;
   readonly runCron: (ask?: Ask) => Promise<readonly string[]>;
+  /** #36: o laço do Cron com TODAS as tarefas registradas em tasksFor (a leitura, a cobrança e as demais); o `Ask` é o falso. */
+  /** #36: muda o dia de hoje do Worker (o prazo da cobrança). */
+  readonly setNow: (now: Date) => void;
+  /** #36/AC-1: o fornecedor responde: uma mensagem pendente na caixa de entrada mock, ligada ao pedido (o que o script de exemplo faz). */
+  readonly receive: (text: string, requestId?: number) => void;
+  readonly runAllTasks: (ask: Ask) => Promise<readonly string[]>;
   readonly path: (suffix?: string, key?: string) => string;
   readonly rows: (table: string) => Record<string, unknown>[];
   readonly key: string;
@@ -50,9 +59,13 @@ export async function supplierWorld(options: WorldOptions = {}): Promise<Supplie
     kit_fornecedores: [supplierRow()],
     outbox_return_notes: options.emptyQueue ? [] : [queueRow()],
   });
+  // #36: as restrições únicas da migração da leitura (#35): a caixa pela origem e o único no_reply por pedido.
+  fake.unique('inbox_supplier_messages', ['source_message_id']);
+  fake.unique('supplier_reply_readings', ['request_id'], (row) => row.message_id === null || row.message_id === undefined);
   const kit = await accessKit(options.email ?? 'ana@jachegou.test');
   const token = await kit.token();
-  const clock = { now: () => NOW };
+  let current = options.now ?? NOW;
+  const clock = { now: () => current };
   const env: Env = { ...accessEnv, ...options.env };
   const supplierRequests = {
     supabase: () => (options.supabase === 'missing' ? null : rest),
@@ -86,9 +99,26 @@ export async function supplierWorld(options: WorldOptions = {}): Promise<Supplie
     return log;
   }
 
+  /** #36/AC-1: o mesmo laço, com o registro de tarefas de produção (tasksFor); só a pergunta ao Claude é nossa. */
+  async function runAllTasks(ask: Ask): Promise<readonly string[]> {
+    const log: string[] = [];
+    await runTasks({ db: restDb(rest), ask, tasks: tasksFor(rest), log: (line) => log.push(line), now: clock.now });
+    return log;
+  }
+
+  const setNow = (now: Date): void => {
+    current = now;
+  };
+  let messages = 0;
+  const receive = (text: string, requestId = 1): void => {
+    messages += 1;
+    const row = { id: messages, request_id: requestId, source_message_id: `origem-${messages}`, from_address: SUPPLIER_EMAIL, body: text, attachments_meta: [], received_at: current.toISOString(), read_status: 'pending', read_error: null, read_status_at: null, read_status_by: null, created_at: current.toISOString() };
+    fake.tables.set('inbox_supplier_messages', [...fake.rows('inbox_supplier_messages'), row]);
+  };
+
   const path = (suffix = '', key = SOURCE_KEY): string => `/api/supplier-requests/${key}${suffix}`;
   const rows = (table: string) => fake.rows(table);
-  return { fake, rest, call, runCron, path, rows, key: SOURCE_KEY };
+  return { fake, rest, call, runCron, runAllTasks, setNow, receive, path, rows, key: SOURCE_KEY };
 }
 
 /** #13: um `Ask` de verdade (o cliente do Claude) sobre um fetch falso que responde com o status dado. */
