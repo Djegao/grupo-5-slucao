@@ -34,7 +34,7 @@ table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid
 </style></head><body><main>
 <h1>Bloco "Pedido ao fornecedor" na gaveta da proposta</h1>
 <p class="lead">Wireframe da camada 1 da #3 (história de frontend; origem: formacao-fde-solucao-case#156; a API é a #2). Fixa estrutura, estados e fluxo, nunca o visual final. Componentes: <code>InvoiceDrawer</code> &gt; <code>ProposalPanel</code> &gt; novo bloco logo após o <code>Alert</code> "Decisão registrada"; <code>Block</code>, <code>DataList</code>, <code>AiSourceBadge source="ai" label="Claude"</code>, <code>Alert</code>, <code>Button</code> (padrão busy/erro de <code>run()</code>/<code>decisionError()</code> em devolucoes.tsx).</p>
-<div class="alert"><b>Status: aprovado como desenhado.</b> Aprovação: dono do grupo 5, 15/11/2026. Inclui o estado 11 (#3/AC-8) e a pasta artifacts/wireframe-pedido-ao-fornecedor/.<br><b>Emenda aprovada:</b> estado 12 "não foi possível carregar o pedido" (#3/AC-9). Aprovação: dono do grupo 5, 15/11/2026.</div>
+<div class="alert"><b>Status: aprovado como desenhado.</b> Aprovação: dono do grupo 5, 15/11/2026. Inclui o estado 11 (#3/AC-8) e a pasta artifacts/wireframe-pedido-ao-fornecedor/.<br><b>Emenda aprovada:</b> estado 12 "não foi possível carregar o pedido" (#3/AC-9). Aprovação: dono do grupo 5, 15/11/2026.<br><b>Emenda aprovada:</b> Q3 (a edição abre com o modelo do e-mail, marcadores {{…}} visíveis, dica "Mantenha os marcadores {{...}}", 422 mantém a edição aberta com a mensagem fixa) e linhas de status sem carimbo quando a API não diz quem agiu nem quando. Aprovação: dono do grupo 5, 16/11/2026.</div>
 
 <h2>1. Lugar do bloco na gaveta</h2>
 <div class="grid"><figure><figcaption>Estrutura <small>(AC-1)</small></figcaption>
@@ -79,10 +79,11 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <div class="sec">E-mail</div>
 <div class="lock">Para, prazo e anexo: travados 🔒</div>
 <div><b>Assunto:</b> NF 20046 · devolução do item trocado 🔒</div>
-<textarea>Olá, equipe da Higiene Total.
-Na NF 20046 veio Shampoo 350 ml (40 UN, R$ 2.163,20) no lugar do Creme dental 90 g pedido.
-Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme dental.</textarea>
-<div class="lock">Os números do texto são conferidos com o banco ao salvar.</div>
+<textarea>Olá, equipe da {{fornecedor}}.
+Na NF {{nota_fiscal}} veio {{item_recebido}} ({{quantidade}}, {{valor}}) no lugar do {{item_pedido}} pedido.
+Segue a nota de devolução do {{item_recebido}}. Pedimos a retirada e a entrega do {{item_pedido}}.</textarea>
+<div class="lock">Mantenha os marcadores {{...}}</div>
+<div class="lock">Os números ficam travados no servidor: o texto salvo é o modelo, e a API preenche os marcadores. Se a API devolver 422, a edição continua aberta com a mensagem fixa. (Nomes dos marcadores ilustrativos; valem os do contrato da #2.)</div>
 <div class="btns"><button>Cancelar edição</button><div class="r"><button class="pri">Salvar texto</button></div></div>
 <div class="lock">Descartar e Emitir e enviar ficam desabilitados até salvar ou cancelar.</div></div></div></figure>
 
@@ -174,7 +175,7 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <h2>4. Perguntas de design (todas decididas pelo dono do grupo 5, em 15/11/2026)</h2>
 <div class="q ok"><b class="id">Q1</b><b>Confirmar antes de "Emitir e enviar"?</b> <b>Decidido: não.</b> O clique é a ação deliberada (#156/AC-3), a história pede "um clique" e o rascunho à vista já é a revisão. Alternativa: diálogo "Emitir a nota de devolução e enviar o e-mail?" (emitir não se desfaz).</div>
 <div class="q ok"><b class="id">Q2</b><b>Para onde volta "Refazer"?</b> <b>Decidido:</b> o estado <b>escrevendo</b> (novo rascunho do Claude), sem formulário. Alternativa: reabrir o rascunho descartado.</div>
-<div class="q ok"><b class="id">Q3</b><b>Como o texto editado é salvo ou cancelado, e o que aparece ao editar?</b> Recomendo <code>textarea</code> já preenchida com o texto do rascunho (números reais, não marcadores), "Salvar texto" e "Cancelar edição"; salvar chama a API, que confere os números (#156/AC-6/AC-7); número fora do banco volta como Alert de erro e mantém a edição aberta. Assunto, para, prazo, anexo, itens e valores ficam travados; Descartar e Emitir ficam desabilitados durante a edição. Depende do contrato da #2.</div>
+<div class="q ok"><b class="id">Q3</b><b>Como o texto editado é salvo ou cancelado, e o que aparece ao editar?</b> Recomendo <code>textarea</code> já preenchida com o texto do rascunho (o texto com os marcadores {{…}}; os números ficam travados no servidor), com a dica "Mantenha os marcadores {{...}}", "Salvar texto" e "Cancelar edição"; salvar chama a API, que confere os números (#156/AC-6/AC-7); a resposta 422 mantém a edição aberta com a mensagem fixa. Assunto, para, prazo, anexo, itens e valores ficam travados; Descartar e Emitir ficam desabilitados durante a edição. Depende do contrato da #2.</div>
 <div class="q ok"><b class="id">Q4</b><b>Onde fica o link da nota?</b> Recomendo no anexo "📎 nota-devolucao-ND-n.pdf", que vira link (nova aba) em emitida e enviada e em envio falho; no rascunho é só texto "anexa ao enviar". Depende de a API expor a URL do PDF.</div>
 <div class="q ok"><b class="id">Q5</b><b>Estado pendente.</b> Recomendo desabilitar todos os botões e trocar o texto do principal ("Emitindo e enviando…", "Enviando…", "Reenviando…"), sem modal nem barra.</div>
 <div class="q ok"><b class="id">Q6</b><b>Erro da ação.</b> Recomendo Alert de erro no topo do bloco, mensagens por status como em <code>decisionError()</code>, e o bloco volta ao estado anterior. Um 409 (outra pessoa já agiu) ganha mensagem própria pedindo para reabrir a gaveta.</div>
@@ -190,6 +191,8 @@ Segue a nota de devolução do Shampoo. Pedimos a retirada e a entrega do Creme 
 <tr><td>Emitida e enviada</td><td>Nota de devolução ND-n emitida e enviada por você às hh:mm · aguardando resposta até dd/mm</td></tr>
 <tr><td>Envio falho</td><td>A nota ND-n foi emitida, mas o e-mail não saiu: motivo.</td></tr>
 <tr><td>Descartado</td><td>Pedido descartado por você às hh:mm</td></tr>
+<tr><td>Emitida e enviada, sem carimbo</td><td>Nota de devolução ND-n emitida e enviada · aguardando resposta até dd/mm (a API não diz quem agiu nem quando: sem "por você" e sem hora)</td></tr>
+<tr><td>Descartado, sem carimbo</td><td>Pedido descartado</td></tr>
 <tr><td>Não preparado</td><td>Não foi possível preparar o pedido: motivo</td></tr>
 <tr><td>Não carregado</td><td>Não foi possível carregar o pedido · botão "Tentar de novo"</td></tr></table>
 <p class="note">Fora desta camada: a lista "Pedidos ao fornecedor" e a leitura da resposta (#157); a API (#2).</p>
