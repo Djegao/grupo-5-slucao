@@ -13,6 +13,7 @@ import { adminRoutes } from "./admin";
 import { automation } from "./automation";
 import { barredAmount } from "./barred-amount";
 import { returnNoteRoutes, type ReturnNotesDeps } from "./return-notes";
+import { supplierRequestRoutes, type SupplierRequestsDeps } from "./supplier-requests";
 
 type PublicHandler = () => Response;
 type ProtectedHandler = (identity: Identity, request: Request, env: Env) => Response | Promise<Response>;
@@ -51,6 +52,8 @@ export interface RouterDeps {
   dock?: DockDeps;
   /** #140 A fila de notas de devolução. Padrão: o Supabase do Env. */
   returnNotes?: ReturnNotesDeps;
+  /** #13 O pedido ao fornecedor: Supabase, relógio, envio e Claude injetáveis. Padrão: o Env. */
+  supplierRequests?: SupplierRequestsDeps;
   /** Leitura das duplicidades (#31/AC-6). Padrão: o Supabase, se o env tem as credenciais. */
   duplicates?: (env: Env) => DuplicatesReader;
 }
@@ -93,6 +96,9 @@ export async function route(request: Request, env: Env, deps: RouterDeps): Promi
 
   const returnNotes = await returnNoteRoutes(request, auth.identity, env, deps.returnNotes ?? {}, supabaseFromEnv);
   if (returnNotes) return returnNotes;
+
+  const supplierRequests = await supplierRequestRoutes(request, auth.identity, env, deps.supplierRequests ?? {}, supabaseFromEnv);
+  if (supplierRequests) return supplierRequests;
 
   const methods = own(protectedRoutes(deps), pathname);
   if (methods) return dispatch(request, methods, (handler) => handler(auth.identity, request, env));

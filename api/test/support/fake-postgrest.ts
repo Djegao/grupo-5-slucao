@@ -91,8 +91,9 @@ export class FakePostgrest {
         result = [...result].sort((a, b) => {
           for (const spec of cols) {
             const [c = '', dir] = spec.split('.');
-            const x = String(a[c] ?? '');
-            const y = String(b[c] ?? '');
+            // #13: coluna numérica ordena como número (id 10 vem depois do 9); as demais, como texto.
+            const [va, vb] = [a[c], b[c]];
+            const [x, y] = typeof va === 'number' && typeof vb === 'number' ? [va, vb] : [String(va ?? ''), String(vb ?? '')];
             if (x !== y) return (x < y ? -1 : 1) * (dir === 'desc' ? -1 : 1);
           }
           return 0;

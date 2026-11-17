@@ -61,6 +61,10 @@ type Row = {
   version: number;
   history: unknown[];
   send_claim: string | null;
+  sent_by: string | null;
+  sent_at: string | null;
+  discarded_by: string | null;
+  discarded_at: string | null;
 };
 
 const isRow = shaped<Row>({
@@ -81,6 +85,10 @@ const isRow = shaped<Row>({
   version: isInteger,
   history: arrayOf(isUnknown),
   send_claim: nullable(isString),
+  sent_by: nullable(isString),
+  sent_at: nullable(isString),
+  discarded_by: nullable(isString),
+  discarded_at: nullable(isString),
 } satisfies Shape<Row>);
 
 const isKeyRow = shaped<{ invoice_access_key: string }>({ invoice_access_key: isString });
@@ -152,7 +160,8 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
       throw error;
     }
     metas.set(row.id, { version: row.version, history: row.history, state: stateOf(request) });
-    return { request, queueId: row.queue_id, to: row.recipient };
+    const audit = { sentBy: row.sent_by, sentAt: row.sent_at, discardedBy: row.discarded_by, discardedAt: row.discarded_at };
+    return { request, queueId: row.queue_id, to: row.recipient, audit };
   }
 
   const entry = (version: number, change: { by: string; at: Date; action: string }, state: State) => ({
@@ -195,6 +204,21 @@ export function supabaseSupplierRequestStore(rest: SupabaseRest, clock: Clock = 
         TABLE,
       );
       return new Set(rows.map((row) => row.invoice_access_key));
+    },
+
+    async findLatest(invoiceAccessKey, requestType) {
+      // #13: o mais novo pela identidade (a sequência cresce a cada pedido da nota); uma só linha.
+      const rows = parseRows(
+        await rest.select(TABLE, { filters: { invoice_access_key: `eq.${invoiceAccessKey}`, request_type: `eq.${requestType}` }, order: 'id.desc', limit: 1 }),
+        isRow,
+        TABLE,
+      );
+      return rows[0] === undefined ? null : toRecord(rows[0]);
+    },
+
+    async listByStatus(status, limit) {
+      const rows = parseRows(await rest.select(TABLE, { filters: { status: `eq.${status}` }, order: 'id.desc', limit }), isRow, TABLE);
+      return Promise.all(rows.map(toRecord));
     },
 
     async get(id) {
