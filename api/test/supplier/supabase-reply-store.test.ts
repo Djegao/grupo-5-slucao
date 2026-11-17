@@ -345,14 +345,14 @@ describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômi
     const claimB = await won(second);
     expect(claimB).not.toBe(claimA);
 
-    // A estagnou e volta: a falha dele não solta a reivindicação de B, e o carimbo dele não vale.
+    // #35 REL-3: A estagnou e volta: a falha dele não solta a reivindicação de B, e o carimbo dele não vale.
     expect(await first.store.recordFollowUpFailure(1, claimA, 'mailbox_full', ANA)).toBe('lost');
     expect(outboxRow(first.fake)).toMatchObject({ follow_up_claim: claimB, follow_up_claimed_at: later.toISOString(), follow_up_failure: null });
-    expect(await second.claimFollowUpSend(1, 'beto@jachegou.example')).toBeNull(); // ninguém mais reivindica
+    expect(await second.claimFollowUpSend(1, 'beto@jachegou.example')).toBeNull(); // #35: ninguém mais reivindica
     expect(await first.store.recordFollowUpSent(1, claimA, STAMP)).toBe('lost');
     expect(outboxRow(first.fake)).toMatchObject({ follow_up_sent_at: null, follow_up_claim: claimB });
 
-    // B, o detentor, grava o carimbo.
+    // #35 REL-3: B, o detentor, grava o carimbo.
     expect(await second.recordFollowUpSent(1, claimB, { ...STAMP, by: 'beto@jachegou.example' })).toBe('recorded');
     expect(outboxRow(first.fake)).toMatchObject({ follow_up_sent_by: 'beto@jachegou.example', follow_up_claim: claimB });
   });

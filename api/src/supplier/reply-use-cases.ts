@@ -87,7 +87,7 @@ async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<Se
     return { kind: 'send_failed', reason: result.reason };
   }
   const stamp: FollowUpStamp = { by, at: deps.clock.now(), channel: result.channel, providerMessageId: result.providerMessageId };
-  // #34/AC-4: se esta gravação falhar, o e-mail já saiu e a reivindicação fica presa: melhor nenhum reenvio que um segundo e-mail.
+  // #34/AC-4: se esta gravação falhar, o e-mail já saiu e a reivindicação só vence depois de LEASE_MS: um envio posterior pode mandar um segundo e-mail, risco aceito e documentado em supabase/persistence-supplier-reply.md (#35).
   // #35: se a reivindicação foi perdida no meio, o carimbo é do outro envio: este e-mail saiu, mas não grava nem se declara enviado.
   if ((await deps.requests.recordFollowUpSent(id, claim, stamp)) === 'lost') return lostClaim(id, 'follow-up-stamp');
   return { kind: 'ok', request: { ...request, followUp: { ...request.followUp, sent: stamp, failure: null } } };
