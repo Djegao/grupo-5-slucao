@@ -10,7 +10,7 @@ import { useSupplierRequest } from "./useSupplierRequest";
 // #16 O caminho pela tela inteira está em SupplierRequestSection.test.tsx.
 
 const KEY = "35261100000000000000550010000080001000080001";
-const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80", body: "Texto" };
+const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80", body: "Texto", template: "Texto {{valor}}" };
 const draft: SupplierRequestView = { status: "draft", email };
 
 const port = (over: Partial<SupplierRequestPort> = {}): SupplierRequestPort => ({
@@ -19,7 +19,7 @@ const port = (over: Partial<SupplierRequestPort> = {}): SupplierRequestPort => (
   resend: vi.fn(),
   discard: vi.fn(),
   redo: vi.fn(),
-  saveText: vi.fn(),
+  saveTemplate: vi.fn(),
   ...over,
 });
 
@@ -59,7 +59,7 @@ describe("#3 gancho useSupplierRequest", () => {
     await waitFor(() => expect(result.current.request?.status).toBe("draft"));
     act(() => result.current.onEdit());
     expect(result.current.request?.status).toBe("editing");
-    expect(result.current.draftText).toBe("Texto");
+    expect(result.current.draftText).toBe("Texto {{valor}}"); // #17 o molde, não o corpo renderizado
     act(() => result.current.onCancelEdit());
     expect(result.current.request?.status).toBe("draft");
   });
