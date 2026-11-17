@@ -165,7 +165,7 @@ describe("#20 SupplierRequests: gaveta", () => {
     renderScreen();
     chooseLate();
     fireEvent.click(rowOf("59738"));
-    const block = screen.getByRole("region", { name: "Pedido ao fornecedor" });
+    const block = screen.getByRole("region", { name: "Conversa e leitura do pedido" });
     fireEvent.click(within(block).getByRole("button", { name: "Cobrar" }));
     expect(screen.getByText("Rascunho da cobrança")).toBeTruthy();
   });
@@ -285,7 +285,7 @@ describe("#20 SupplierRequests: cobrar", () => {
     fireEvent.click(chip(/^Aguardando/));
     // #5/AC-4 Fecha a gaveta antes: `openRow` no id que já está aberto devolve o estado como está, e não reabriria nada.
     fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
-    expect(screen.queryByRole("region", { name: "Pedido ao fornecedor" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Conversa e leitura do pedido" })).toBeNull();
     fireEvent.click(rowOf("59738"));
     expect(screen.getByText("Aguardando (cobrado)")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
@@ -302,9 +302,89 @@ describe("#20 SupplierRequests: cobrar", () => {
     fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
     fireEvent.click(rowOf("59738"));
 
-    const block = screen.getByRole("region", { name: "Pedido ao fornecedor" });
+    const block = screen.getByRole("region", { name: "Conversa e leitura do pedido" });
     expect(within(block).queryByText(/Próximo passo:/)).toBeNull();
     expect(within(block).queryByRole("button", { name: "Cobrar" })).toBeNull();
     expect(within(rowOf("59738")).queryByRole("button", { name: "Cobrar" })).toBeNull();
+  });
+});
+
+// #21 A tela ligada ao contrato: contagens e filtro do servidor, gaveta que espera o pedido, rascunho que pode faltar e texto que não se edita.
+describe("#21 SupplierRequests: contagens e filtro do servidor, gaveta lida da API", () => {
+  const SERVER_COUNTS = { waiting: 7, fulfilled: 3, needsYou: 5, late: 9 };
+
+  it("#5/AC-2: com contagens do servidor, os chips mostram as dele e a tela não conta as linhas", () => {
+    renderScreen({ counts: SERVER_COUNTS });
+    expect(chip(/^Aguardando/).textContent).toMatch(/7/);
+    expect(chip(/^Atendidos/).textContent).toMatch(/3/);
+    expect(chip(/^Precisam de você/).textContent).toMatch(/5/);
+    expect(chip(/^Atrasados/).textContent).toMatch(/9/);
+  });
+
+  it("#5/AC-2: trocar o chip, ou 'Ver todos', avisa a rota, que pede ao servidor as linhas do filtro", () => {
+    const onFilterChange = vi.fn();
+    renderScreen({ counts: SERVER_COUNTS, onFilterChange });
+    chooseLate();
+    expect(onFilterChange).toHaveBeenLastCalledWith("late");
+    fireEvent.click(chip(/^Atendidos/));
+    fireEvent.click(screen.getByRole("button", { name: "Ver todos" }));
+    expect(onFilterChange).toHaveBeenLastCalledWith("all");
+  });
+
+  it("#5/AC-4: depois de cobrar, as contagens do servidor se acertam só por essa cobrança: Atrasados 9 vira 8 e Aguardando 7 vira 8", async () => {
+    renderScreen({ counts: SERVER_COUNTS });
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar cobrança" }));
+    await screen.findByText(/Cobrança enviada por você/);
+    expect(chip(/^Atrasados/).textContent).toMatch(/8/);
+    expect(chip(/^Aguardando/).textContent).toMatch(/8/);
+  });
+
+  it("#21: a gaveta avisa qual linha abriu e, ao fechar, nenhuma", () => {
+    const onDrawerChange = vi.fn();
+    renderScreen({ onDrawerChange });
+    expect(onDrawerChange).toHaveBeenLastCalledWith(null);
+    chooseLate();
+    fireEvent.click(rowOf("59738"));
+    expect(onDrawerChange).toHaveBeenLastCalledWith("sr-1");
+    fireEvent.click(screen.getByRole("button", { name: /fechar|close/i }));
+    expect(onDrawerChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("#21: enquanto o pedido da gaveta não chegou, a gaveta diz que carrega e não desenha a conversa", () => {
+    renderScreen({ drawerState: "loading" });
+    chooseLate();
+    fireEvent.click(rowOf("59738"));
+    expect(screen.getByText("Carregando o pedido ao fornecedor…")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Conversa e leitura do pedido" })).toBeNull();
+  });
+
+  it("#21: a leitura que falhou mostra só a mensagem fechada e 'Tentar de novo', que chama a rota", () => {
+    const onDrawerRetry = vi.fn();
+    renderScreen({ drawerState: "error", drawerError: "Não consegui falar com o servidor agora.", onDrawerRetry });
+    chooseLate();
+    fireEvent.click(rowOf("59738"));
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Não consegui falar com o servidor agora.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Tentar de novo" }));
+    expect(onDrawerRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("#21: sem rascunho (o servidor o traz nulo), 'Cobrar' diz que o rascunho não está disponível e nada se envia", () => {
+    const { send } = renderScreen({ draftOf: () => null });
+    chooseLate();
+    clickCobrar("59738");
+    expect(screen.getByText("O rascunho da cobrança não está disponível agora.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("#21: com `editableDraft` falso, o rascunho não tem 'Editar': o texto que o servidor guarda é o que sai", () => {
+    renderScreen({ editableDraft: false });
+    chooseLate();
+    clickCobrar("59738");
+    expect(screen.getByRole("button", { name: "Enviar cobrança" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
   });
 });

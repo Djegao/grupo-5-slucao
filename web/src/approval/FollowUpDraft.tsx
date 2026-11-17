@@ -24,7 +24,8 @@ interface FollowUpDraftBaseProps {
   draft: FollowUpDraftView;
   /** #19 Só o texto do e-mail se libera para edição; para, assunto, prazo e anexo ficam travados. */
   editing: boolean;
-  onEdit: () => void;
+  /** #21 Sem `onEdit`, o texto não se edita e o botão "Editar" não existe: o envio da cobrança não leva texto (o servidor manda o rascunho que guarda, #36). */
+  onEdit?: () => void;
   onBodyChange: (body: string) => void;
   onSend: () => void;
   onDiscard: () => void;
@@ -105,7 +106,7 @@ export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
             {t.send}
           </Button>
         )}
-        {editing ? null : (
+        {editing || onEdit === undefined ? null : (
           <Button variant="outline" size="base" onClick={onEdit} disabled={busy}>
             {t.edit}
           </Button>

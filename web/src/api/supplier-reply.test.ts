@@ -1,0 +1,106 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "./client";
+import type { ReadingListDto, SentRequestDetailDto } from "./contract";
+import { FOLLOW_UP_SEND_TIMEOUT_MS, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
+
+// #21 O fio da lista "Pedidos ao fornecedor" (#5): o filtro vai na consulta, as contagens são do servidor, e o erro vira motivo fechado.
+
+const KEY = "35261100000000000000550010000200461000200461";
+const BASE = `/api/supplier-requests/${KEY}`;
+
+const LIST: ReadingListDto = {
+  filter: "overdue",
+  requests: [],
+  counts: { awaiting: 1, answered: 0, needs_you: 0, overdue: 2 },
+};
+
+const SENT = {
+  status: "sent",
+  invoiceAccessKey: KEY,
+  requestType: "return_note",
+  returnNote: { number: "ND-7", supplier: "F07", reference: "59738", lines: [], total: { text: "R$ 263,62" } },
+  email: { to: "financeiro@f07.example", dueOn: "2026-11-14", subject: "Assunto", body: "Texto", template: "Texto" },
+  asks: [],
+  sentBy: "analista@barte.com",
+  sentAt: "2026-11-07T12:40:00.000Z",
+  reading: null,
+  followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá", asks: [] }, sentBy: null, sentAt: null, failure: null },
+} satisfies SentRequestDetailDto;
+
+let calls: { method: string; path: string; body: unknown }[] = [];
+
+function serve(response: () => Response): void {
+  calls = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      calls.push({ method: init.method ?? "GET", path: String(input), body: init.body ? JSON.parse(String(init.body)) : undefined });
+      return response();
+    }),
+  );
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("#21 fio da lista dos pedidos ao fornecedor", () => {
+  it("#5/AC-2: list pede o filtro pela consulta e devolve as linhas e as contagens do servidor", async () => {
+    serve(() => Response.json(LIST));
+    expect(await supplierReplyApi.list("overdue", new AbortController().signal)).toEqual(LIST);
+    expect(calls).toEqual([{ method: "GET", path: "/api/supplier-requests?status=overdue", body: undefined }]);
+  });
+
+  it("#5/AC-3: detail lê o pedido pela chave de acesso e devolve o pedido enviado", async () => {
+    serve(() => Response.json({ request: SENT }));
+    expect(await supplierReplyApi.detail(KEY, new AbortController().signal)).toEqual(SENT);
+    expect(calls).toEqual([{ method: "GET", path: BASE, body: undefined }]);
+  });
+
+  it("#5/AC-3: sem pedido, ou com um pedido que não está enviado, a carga da gaveta falha", async () => {
+    for (const request of [null, { status: "draft" }, { status: "writing" }]) {
+      serve(() => Response.json({ request }));
+      await expect(supplierReplyApi.detail(KEY, new AbortController().signal)).rejects.toBeInstanceOf(ApiError);
+    }
+  });
+
+  it("#5/AC-4: sendFollowUp é um POST com corpo vazio no .../send e devolve o pedido como ficou", async () => {
+    const after = { ...SENT, followUp: { ...SENT.followUp, sent: true, sentBy: "analista@barte.com", sentAt: "2026-11-15T13:12:00.000Z" } };
+    serve(() => Response.json({ request: after }));
+    expect(await supplierReplyApi.sendFollowUp(KEY)).toEqual(after);
+    expect(calls).toEqual([{ method: "POST", path: `${BASE}/send`, body: {} }]);
+  });
+
+  it("#21: o envio da cobrança tem prazo próprio e termina como falha de rede (status 0) quando ele estoura", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_path: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      ),
+    );
+    const sending = supplierReplyApi.sendFollowUp(KEY);
+    const outcome = sending.catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(FOLLOW_UP_SEND_TIMEOUT_MS + 1);
+    const reason = await outcome;
+    expect(reason).toBeInstanceOf(ApiError);
+    expect((reason as ApiError).status).toBe(0);
+  });
+
+  it("#21: o motivo do erro sai só do status; o corpo e a mensagem da API não entram", () => {
+    const body = "texto cru da dependência";
+    expect(supplierReplyReason(new ApiError(401, null, body))).toBe("unauthorized");
+    expect(supplierReplyReason(new ApiError(403, "forbidden", body))).toBe("unauthorized");
+    expect(supplierReplyReason(new ApiError(404, "not_found", body))).toBe("not_found");
+    expect(supplierReplyReason(new ApiError(409, "conflict", body))).toBe("conflict");
+    expect(supplierReplyReason(new ApiError(422, "invalid", body))).toBe("conflict");
+    expect(supplierReplyReason(new ApiError(502, "supabase_unavailable", body))).toBe("unavailable");
+    expect(supplierReplyReason(new ApiError(0, null, body))).toBe("unavailable");
+    expect(supplierReplyReason(new ApiError(500, "internal_error", body))).toBe("unknown");
+    expect(supplierReplyReason(new TypeError(body))).toBe("unknown");
+  });
+});

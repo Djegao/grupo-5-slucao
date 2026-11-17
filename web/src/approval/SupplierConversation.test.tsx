@@ -45,9 +45,9 @@ const injected: SupplierConversationView = {
 };
 
 describe("#19 SupplierConversation", () => {
-  it("#5/AC-3: mostra o pedido enviado, a resposta do fornecedor e a leitura do agente, numa região com o nome do bloco", () => {
+  it("#5/AC-3: mostra o pedido enviado, a resposta do fornecedor e a leitura do agente, numa região de nome próprio (distinto do bloco da #3)", () => {
     render(<SupplierConversation conversation={fulfilled} onNextStep={vi.fn()} />);
-    expect(screen.getByRole("region", { name: "Pedido ao fornecedor" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Conversa e leitura do pedido" })).toBeTruthy();
     expect(screen.getByText("Atendeu, falta confirmar")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Pedido enviado" })).toBeTruthy();
     expect(screen.getByText(/ND 7/)).toBeTruthy();
@@ -127,5 +127,17 @@ describe("#19 SupplierConversation", () => {
     expect(screen.queryByRole("button", { name: "Aprovar tudo" })).toBeNull();
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText(/<button>Aprovar tudo<\/button>/)).toBeTruthy();
+  });
+
+  it("#21: resposta lida sem o texto (o contrato não o traz): não diz 'nenhuma resposta' de quem respondeu", () => {
+    render(<SupplierConversation conversation={{ ...fulfilled, reply: null }} onNextStep={vi.fn()} />);
+    expect(screen.queryByText(/Nenhuma resposta até/)).toBeNull();
+    expect(screen.getByText(/O fornecedor respondeu\. O texto da resposta não é mostrado aqui/)).toBeTruthy();
+  });
+
+  it("#21: pedido sem leitura (resumo vazio): não desenha 'Resumo' vazio", () => {
+    render(<SupplierConversation conversation={{ ...noReply, reading: { replyOutcome: "no_reply", summary: "", nextStep: null } }} onNextStep={vi.fn()} />);
+    expect(screen.queryByText(/Resumo:/)).toBeNull();
+    expect(screen.getByText(/Nenhuma resposta até 15\/11/)).toBeTruthy();
   });
 });

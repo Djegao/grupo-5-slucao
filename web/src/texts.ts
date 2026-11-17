@@ -331,6 +331,20 @@ export const texts = {
     rowLabel: (invoice: string, supplier: string) => `Nota ${invoice}, ${supplier}`,
     tableEmpty: "Nenhum pedido.",
     follow: "Cobrar",
+    /** #21 O tipo do pedido (requestType do contrato), na coluna Solicitação. */
+    requestTypes: { return_note: "Nota de devolução" },
+    /** #21 A gaveta enquanto lê o pedido; o motivo do erro é um dos fechados de api/supplier-reply.ts, nunca o texto da API. */
+    drawer: {
+      loading: "Carregando o pedido ao fornecedor…",
+      errors: {
+        unauthorized: "Sua sessão não permite ver este pedido. Entre de novo.",
+        not_found: "Este pedido não foi encontrado.",
+        conflict: "Este pedido mudou. Feche a gaveta e abra de novo.",
+        unavailable: "Não consegui falar com o servidor agora.",
+        unknown: "Não consegui carregar o pedido ao fornecedor.",
+      },
+      retry: "Tentar de novo",
+    },
     /** #19 O texto da coluna Status, uma variante por situação (mapa Q2). */
     status: {
       waiting: "Aguardando",
@@ -359,6 +373,10 @@ export const texts = {
     /** #19 O bloco da conversa na gaveta. */
     conversation: {
       title: "Pedido ao fornecedor",
+      /** #21 O nome da região da conversa: distinto do bloco da #3, que também se chama "Pedido ao fornecedor". */
+      regionLabel: "Conversa e leitura do pedido",
+      /** #21 A resposta já foi lida, mas o contrato (#36) não traz o texto dela: a tela não afirma que ninguém respondeu. */
+      replyNotShown: "O fornecedor respondeu. O texto da resposta não é mostrado aqui; a leitura do agente está abaixo.",
       blockStatus: {
         waiting: "Aguardando",
         waitingCharged: "Aguardando (cobrado)",
@@ -405,6 +423,10 @@ export const texts = {
       subject: "Assunto",
       body: "Texto",
       attachment: "Anexo",
+      /** #21 A cobrança sai sem anexo (o servidor manda `attachments: []`, #36). */
+      noAttachment: "Nenhum",
+      /** #21 O contrato traz o rascunho nulo quando ele já não confere com o catálogo (#36). */
+      unavailable: "O rascunho da cobrança não está disponível agora.",
       edit: "Editar",
       send: "Enviar cobrança",
       discard: "Descartar rascunho",

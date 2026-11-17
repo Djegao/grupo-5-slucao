@@ -28,13 +28,14 @@ export interface SupplierConversationProps {
 /**
  * #19 A conversa do bloco "Pedido ao fornecedor" (história #5): pedido enviado, resposta do fornecedor e leitura do agente.
  * #19 Cabe dentro do bloco da #3, abaixo da decisão registrada; o pedido e o e-mail em si são da #3.
+ * #21 A região se chama "Conversa e leitura do pedido", para não repetir o nome do bloco da #3 na mesma gaveta; o título visível segue o wireframe.
  * #19 O texto do fornecedor é dado: sai como texto, nunca como marcação, e não muda decisão, título nem valor.
  */
 export function SupplierConversation({ conversation, onNextStep }: SupplierConversationProps): ReactElement {
   const { status, sent, reply, asOf, reading } = conversation;
   const nextStep = reading.nextStep;
   return (
-    <section aria-label={t.title} style={{ display: "grid", gap: "var(--spacing-md)" }}>
+    <section aria-label={t.regionLabel} style={{ display: "grid", gap: "var(--spacing-md)" }}>
       <h3 style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", margin: 0 }}>
         <Text as="span" variant="label-lg">
           {t.title}
@@ -69,7 +70,8 @@ export function SupplierConversation({ conversation, onNextStep }: SupplierConve
           </>
         ) : (
           <Text as="p" variant="body-base">
-            {t.noReply(shortDate(asOf))}
+            {/* #21 Lida, mas sem o texto (o contrato não o traz): não se diz "nenhuma resposta" de quem respondeu. */}
+            {reading.replyOutcome === "no_reply" ? t.noReply(shortDate(asOf)) : t.replyNotShown}
           </Text>
         )}
         {reading.injectionExcerpt ? (
@@ -106,9 +108,11 @@ export function SupplierConversation({ conversation, onNextStep }: SupplierConve
             ) : null}
           </>
         )}
-        <Text as="p" variant="body-base">
-          {t.summary(reading.summary)}
-        </Text>
+        {reading.summary === "" ? null : (
+          <Text as="p" variant="body-base">
+            {t.summary(reading.summary)}
+          </Text>
+        )}
         {nextStep ? (
           <>
             <Text as="p" variant="body-base">

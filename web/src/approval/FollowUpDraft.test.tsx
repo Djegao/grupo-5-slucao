@@ -89,4 +89,12 @@ describe("#19 FollowUpDraft", () => {
     expect(alert.textContent).toContain("A cobrança não saiu. Tente de novo em um minuto.");
     expect(alert.textContent).not.toMatch(/smtp|550|stack|undefined|\[object/i);
   });
+
+  it("#21: sem `onEdit` o texto não se edita: o botão 'Editar' não existe, e enviar e descartar seguem", () => {
+    const handlers = { onBodyChange: vi.fn(), onSend: vi.fn(), onDiscard: vi.fn(), onRetry: vi.fn() };
+    render(<FollowUpDraft draft={draft} editing={false} {...handlers} phase="review" />);
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Enviar cobrança" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descartar rascunho" })).toBeTruthy();
+  });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyCharges,
   countByChip,
+  countsAfterCharges,
   INITIAL_STATE,
   screenReducer,
   visibleRows,
@@ -183,5 +184,26 @@ describe("#20 a linha depois da cobrança", () => {
 
   it("#5/AC-2: sem cobrança feita a lista volta como veio", () => {
     expect(applyCharges(rows, {})).toBe(rows);
+  });
+});
+
+describe("#21 contagens do servidor e cobranças da sessão", () => {
+  const server = { waiting: 1, fulfilled: 0, needsYou: 1, late: 2 };
+  const late = [row("a", "late", "2026-11-12"), row("b", "late", "2026-11-14")];
+
+  it("#5/AC-2: sem cobrança, as contagens são as do servidor, sem recontar as linhas", () => {
+    expect(countsAfterCharges(server, late, {})).toEqual(server);
+    expect(countsAfterCharges(server, [], {})).toEqual(server);
+  });
+
+  it("#5/AC-2: a linha cobrada sai de Atrasados e entra em Aguardando (Q7); a outra segue como o servidor contou", () => {
+    const charged = { a: { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
+    expect(countsAfterCharges(server, late, charged)).toEqual({ waiting: 2, fulfilled: 0, needsYou: 1, late: 1 });
+  });
+
+  it("#5/AC-2: a linha cobrada que já estava em Aguardando não muda nada, e a contagem nunca fica negativa", () => {
+    const charged = { w: { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
+    expect(countsAfterCharges(server, [row("w", "waiting", "2026-11-20")], charged)).toEqual(server);
+    expect(countsAfterCharges({ ...server, late: 0 }, late, { a: charged.w })).toEqual({ waiting: 2, fulfilled: 0, needsYou: 1, late: 0 });
   });
 });

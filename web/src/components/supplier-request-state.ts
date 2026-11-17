@@ -21,6 +21,25 @@ export function countByChip(rows: SupplierRequestRow[]): Record<SupplierFilter, 
   return counts;
 }
 
+/**
+ * #21 As contagens do servidor (#36), acertadas só pelo que esta sessão cobrou: a linha cobrada saiu do chip em que o servidor a contou e foi
+ * para Aguardando (Q7). Não recontam as linhas: o resto segue como o servidor contou. `rows` são as linhas como vieram, antes de `applyCharges`.
+ */
+export function countsAfterCharges(
+  counts: Record<SupplierFilter, number>,
+  rows: SupplierRequestRow[],
+  charged: Record<string, ChargedRequest>,
+): Record<SupplierFilter, number> {
+  const adjusted = { ...counts };
+  for (const row of rows) {
+    const from = CHIP_OF_STATUS[row.status];
+    if (!(row.id in charged) || from === "waiting") continue;
+    adjusted[from] = Math.max(0, adjusted[from] - 1);
+    adjusted.waiting += 1;
+  }
+  return adjusted;
+}
+
 /** #5/AC-1 As linhas do chip (todas em `all`), por prazo crescente (Q8); prazos iguais ficam na ordem recebida. */
 export function visibleRows(rows: SupplierRequestRow[], filter: SupplierFilterValue): SupplierRequestRow[] {
   const chosen = filter === "all" ? rows : rows.filter((row) => CHIP_OF_STATUS[row.status] === filter);

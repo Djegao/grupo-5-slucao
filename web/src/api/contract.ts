@@ -223,3 +223,65 @@ export type SupplierRequestDto =
 export interface SupplierRequestResponseDto {
   request: SupplierRequestDto | null;
 }
+
+/**
+ * #21 A leitura da resposta do fornecedor (#4) e a lista dos pedidos (#5), como `api/src/http/supplier-requests.ts` (#36) as
+ * entrega. Os valores fechados são os do cabeçalho daquele arquivo; o texto de um erro da API nunca entra aqui.
+ */
+export type ReplyFilterDto = "awaiting" | "answered" | "needs_you" | "overdue"; // ADR-002
+export type ReplyOutcomeDto = "fulfilled" | "partially_fulfilled" | "refused" | "needs_information" | "no_reply"; // ADR-002
+export type NextStepDto = "close" | "confirm_document" | "answer_supplier" | "follow_up"; // ADR-002
+
+export interface ReadingDto {
+  replyOutcome: ReplyOutcomeDto;
+  fulfilledAsks: string[];
+  supplierDocument: string | null;
+  summary: string;
+  nextStep: NextStepDto;
+  /** #21 O trecho da resposta com ordem escondida, citado: dado, nunca instrução. */
+  injectionFlag: string | null;
+}
+
+export interface ReadingRowDto {
+  id: number;
+  invoiceAccessKey: string;
+  invoiceNumber: string;
+  supplierId: string;
+  supplierName: string | null;
+  requestType: Extract<RequestType, "return_note">;
+  /** #21 O total da nota de devolução em centavos inteiros; a tela formata. */
+  totalCents: Cents;
+  /** #21 AAAA-MM-DD. */
+  dueOn: string;
+  status: Extract<RequestStatus, "sent">;
+  reading: ReadingDto | null;
+  followUp: { drafted: boolean; sent: boolean };
+}
+
+export interface ReadingListDto {
+  filter: ReplyFilterDto;
+  requests: ReadingRowDto[];
+  /** #21 Os quatro filtros, contados pelo servidor sobre todos os pedidos enviados. */
+  counts: Record<ReplyFilterDto, number>;
+}
+
+export interface FollowUpDetailDto {
+  drafted: boolean;
+  sent: boolean;
+  draft: { subject: string; body: string; template: string; asks: string[] } | null;
+  sentBy: string | null;
+  sentAt: string | null;
+  /** #21 O código curto da última falha do envio; nunca o texto do provedor. */
+  failure: string | null;
+}
+
+/** #21 O pedido `sent` do `GET /api/supplier-requests/{accessKey}`: a visão da #13 mais a leitura e a cobrança (#36). */
+export type SentRequestDetailDto = Extract<SupplierRequestDto, { status: "sent" }> & {
+  reading: ReadingDto | null;
+  followUp: FollowUpDetailDto;
+};
+
+/** #21 O que o `GET` e o `POST .../send` respondem: o pedido enviado, ou outro estado da #13 que esta tela não lê. */
+export interface SupplierRequestDetailResponseDto {
+  request: SentRequestDetailDto | Exclude<SupplierRequestDto, { status: "sent" }> | null;
+}
