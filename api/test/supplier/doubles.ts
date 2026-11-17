@@ -136,6 +136,8 @@ export const fakeRequests = (): FakeRequests => {
       );
     },
     get: async (id) => rows.find((r) => r.request.id === id) ?? null,
+    findLatest: async (key, type) => [...rows].reverse().find((r) => r.request.invoiceAccessKey === key && r.request.requestType === type) ?? null,
+    listByStatus: async (status, limit) => [...rows].reverse().filter((r) => r.request.status === status).slice(0, limit),
     create: async (input: NewRequest): Promise<CreateResult> => {
       store.created.push(input);
       const opens = input.outcome.kind === 'draft';

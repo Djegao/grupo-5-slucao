@@ -1,6 +1,7 @@
 import type {
   InvoiceView,
   IssuedReturnNote,
+  RequestStatus,
   RequestTextRejection,
   RequestType,
   ReturnNoteDraft,
@@ -15,6 +16,14 @@ import type { ReturnNoteQueue } from '../returns/return-notes.js';
 /** #11: o relógio do caso de uso; o domínio não lê a hora (ADR-005). */
 export type Clock = { now(): Date };
 
+/** #13: quem fez e quando, como a linha do pedido guarda (ADR-005); a raiz não os conhece. Nulos enquanto o ato não houve. */
+export type RequestAudit = {
+  readonly sentBy: string | null;
+  readonly sentAt: string | null;
+  readonly discardedBy: string | null;
+  readonly discardedAt: string | null;
+};
+
 /** #11: o pedido como a persistência o guarda: a raiz, a devolução da fila e o e-mail do fornecedor. */
 export type RequestRecord = {
   readonly request: SupplierRequest;
@@ -22,6 +31,8 @@ export type RequestRecord = {
   readonly queueId: number;
   /** #11/AC-10 (#2): o e-mail de teste do fornecedor, onde o pedido é entregue. */
   readonly to: string;
+  /** #13: o carimbo de quem enviou e descartou, para a API mostrar; o adaptador do Supabase o preenche, os dublês podem omitir. */
+  readonly audit?: RequestAudit;
 };
 
 /** #11/AC-2: o que o Claude escreveu foi aceito (rascunho) ou recusado (nasce descartado com o motivo). */
@@ -80,6 +91,10 @@ export interface SupplierRequestStore {
   /** #11/AC-6: o pedido aberto (draft, sent ou send_failed) da nota de origem e do tipo, se houver. */
   findOpen(invoiceAccessKey: string, requestType: RequestType): Promise<RequestRecord | null>;
   get(id: number): Promise<RequestRecord | null>;
+  /** #13: o pedido mais recente da nota de origem e do tipo, aberto ou não (a API mostra o descartado quando não há aberto). */
+  findLatest(invoiceAccessKey: string, requestType: RequestType): Promise<RequestRecord | null>;
+  /** #13: os pedidos em um estado, do mais novo ao mais antigo, até `limit` (a lista da tela). */
+  listByStatus(status: RequestStatus, limit: number): Promise<readonly RequestRecord[]>;
   create(request: NewRequest): Promise<CreateResult>;
   /** #12/AC-4: grava o estado atual da raiz, com quem e quando; `stale` quando a linha mudou desde a leitura. */
   save(request: SupplierRequest, change: RequestChange): Promise<SaveResult>;
