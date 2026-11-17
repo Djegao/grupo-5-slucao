@@ -2,7 +2,7 @@
  * #3 O bloco "Pedido ao fornecedor" da gaveta da proposta decidida, um estado do wireframe por vez
  * (artifacts/wireframe-pedido-ao-fornecedor/index.html). Só apresentação: o estado e o que a pessoa
  * lê entram por props, as ações saem por callbacks. Buscar, guardar estado e ligar na gaveta são da #16 e da #17.
- * Os tipos da visão são provisórios: o formato do fio vem da #2 e se fixa na #17.
+ * Os tipos da visão são o que o bloco aceita: o `SupplierRequestDto` do fio (web/src/api/contract.ts, #17) cabe neles.
  */
 import type { JSX, ReactNode } from "react";
 import { Alert, Button, Text } from "barte-design-system";
@@ -11,7 +11,7 @@ import { texts } from "../texts";
 
 const t = texts.supplierRequest;
 
-/** (#17) Um valor em reais já formatado, como a API o entrega. */
+/** #17 Um valor em reais já formatado, como a API o entrega. */
 export interface SupplierRequestMoney {
   text: string;
 }
@@ -25,8 +25,9 @@ export interface SupplierRequestNoteLine {
 
 /** #3 A nota de devolução. Ausente nos pedidos só de e-mail (cancelamento, pedido, cadastro). */
 export interface SupplierRequestNote {
-  number: string;
-  /** (#17) Quem recebe e a nota de referência, quando a API os traz. */
+  /** #17 O ND-n emitido; nulo antes da emissão. */
+  number: string | null;
+  /** #17 O código do fornecedor e a nota de referência, como a API os traz. */
   supplier?: string;
   reference?: string;
   lines: readonly SupplierRequestNoteLine[];
@@ -35,10 +36,13 @@ export interface SupplierRequestNote {
 
 export interface SupplierRequestEmail {
   to: string;
-  /** (#17) Dia no formato AAAA-MM-DD. */
+  /** #17 Dia no formato AAAA-MM-DD. */
   dueOn: string;
   subject: string;
+  /** #17 O texto renderizado, o que a pessoa lê. */
   body: string;
+  /** #17/AC-6 O molde com os `{{chave}}`: a edição abre com ele, e o PATCH o reenvia. */
+  template: string;
 }
 
 export interface SupplierRequestAttachment {
@@ -57,9 +61,9 @@ export type SupplierRequestView =
   | { status: "writing" }
   | ({ status: "draft" } & WithContent)
   | ({ status: "editing" } & WithContent)
-  | ({ status: "sent"; sentBy: string; sentAt: string } & WithContent)
+  | ({ status: "sent"; sentBy: string | null; sentAt: string | null } & WithContent)
   | ({ status: "send_failed"; failure: string } & WithContent)
-  | { status: "discarded"; discardedAt: string; discardedBy?: string }
+  | { status: "discarded"; discardedAt: string | null; discardedBy?: string | null }
   | { status: "failed"; failure: string };
 
 /** #3 A ação em andamento: trava os botões e troca o texto do principal. */
@@ -92,8 +96,9 @@ export interface SupplierRequestBlockProps {
 /** #3 "2026-11-18" vira "18/11", sem passar por fuso. */
 const dayMonth = (day: string): string => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
-/** #3 "2026-11-15T13:40:00Z" vira "10h40" na hora de quem olha. */
-function clock(instant: string): string {
+/** #3 "2026-11-15T13:40:00Z" vira "10h40" na hora de quem olha; sem carimbo (#17), "--h--". */
+function clock(instant: string | null): string {
+  if (instant === null) return t.noTime;
   const at = new Date(instant);
   return `${String(at.getHours()).padStart(2, "0")}h${String(at.getMinutes()).padStart(2, "0")}`;
 }
@@ -141,7 +146,14 @@ function State(props: SupplierRequestBlockProps & { request: SupplierRequestView
   }
 }
 
-const actor = (who: string | undefined, viewer: string): string => (who === undefined || who === viewer ? t.byYou : t.by(who));
+/** #17 Sem quem agiu (nulo), a frase não diz por quem; o resto segue "por você" ou "por fulano". */
+const actor = (who: string | null | undefined, viewer: string): string => {
+  if (who === null) return t.byUnknown;
+  return who === undefined || who === viewer ? t.byYou : t.by(who);
+};
+
+/** #17 O texto fixo de um código da API; um código que a tela não conhece vira a frase genérica, nunca o código. */
+const reasonOf = (reasons: Readonly<Record<string, string>>, code: string, other: string): string => (Object.hasOwn(reasons, code) ? (reasons[code] ?? other) : other);
 
 function Draft(props: SupplierRequestBlockProps & { request: Extract<SupplierRequestView, { status: "draft" | "editing" }> }): JSX.Element {
   const { request, pending, draftText } = props;
@@ -151,7 +163,7 @@ function Draft(props: SupplierRequestBlockProps & { request: Extract<SupplierReq
   return (
     <>
       {request.returnNote ? <NoteView note={request.returnNote} locked={editing} /> : null}
-      <EmailView email={request.email} locked={editing} text={editing ? (draftText ?? request.email.body) : undefined} onText={props.onDraftTextChange} />
+      <EmailView email={request.email} locked={editing} text={editing ? (draftText ?? request.email.template) : undefined} onText={props.onDraftTextChange} />
       {request.attachment && !editing ? <Text variant="body-xs">{t.attachment(request.attachment.name)}</Text> : null}
       <div style={{ display: "flex", gap: "var(--spacing-md)" }}>
         {editing ? (
@@ -209,6 +221,7 @@ function EmailView({ email, locked, text, onText }: { email: SupplierRequestEmai
         <>
           <textarea aria-label={t.email.bodyLabel} value={text} rows={6} onChange={(e) => onText(e.target.value)} style={{ width: "100%" }} />
           <Text as="p" variant="body-xs">{t.email.checkedOnSave}</Text>
+          <Text as="p" variant="body-xs">{t.email.keepMarkers}</Text>
         </>
       )}
     </div>
@@ -229,7 +242,7 @@ function AttachmentLink({ attachment }: { attachment: SupplierRequestAttachment 
 function Sent({ request, viewer }: { request: Extract<SupplierRequestView, { status: "sent" }>; viewer: string }): JSX.Element {
   const by = actor(request.sentBy, viewer);
   const until = dayMonth(request.email.dueOn);
-  const line = request.returnNote
+  const line = request.returnNote?.number
     ? t.sentWithNote(request.returnNote.number, by, clock(request.sentAt), until)
     : t.sentEmailOnly(by, clock(request.sentAt), until);
   return (
@@ -251,7 +264,8 @@ function PrimaryAction({ label, onClick, pending }: { label: ReactNode; onClick:
 
 function SendFailed(props: SupplierRequestBlockProps & { request: Extract<SupplierRequestView, { status: "send_failed" }> }): JSX.Element {
   const { request, pending } = props;
-  const message = request.returnNote ? t.sendFailedWithNote(request.returnNote.number, request.failure) : t.sendFailedEmailOnly(request.failure);
+  const reason = reasonOf(t.sendFailureReasons, request.failure, t.sendFailureOther);
+  const message = request.returnNote?.number ? t.sendFailedWithNote(request.returnNote.number, reason) : t.sendFailedEmailOnly(reason);
   return (
     <>
       <Alert variant="error" title={message} showCloseButton={false} />
@@ -275,7 +289,7 @@ function Failed(props: Pick<SupplierRequestBlockProps, "pending" | "onRedo"> & {
   const { request, pending } = props;
   return (
     <>
-      <Alert variant="error" title={t.notPrepared(request.failure)} showCloseButton={false} />
+      <Alert variant="error" title={t.notPrepared(reasonOf(t.notPreparedReasons, request.failure, t.notPreparedOther))} showCloseButton={false} />
       <PrimaryAction label={pending === "redo" ? t.pending.redo : t.actions.redo} onClick={props.onRedo} pending={pending !== undefined} />
     </>
   );

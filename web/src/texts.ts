@@ -579,6 +579,8 @@ export const texts = {
       lockedFields: "Para, prazo e anexo: travados",
       bodyLabel: "Texto do e-mail",
       checkedOnSave: "Os números do texto são conferidos com o banco ao salvar.",
+      /** #17/AC-6 Os números do e-mail são marcadores {{...}}: o servidor reconfere o texto com eles. */
+      keepMarkers: "Mantenha os marcadores {{...}}: eles são os números do pedido, que ficam travados.",
     },
     attachment: (name: string) => `${name} (anexa ao enviar)`,
     actions: {
@@ -603,10 +605,25 @@ export const texts = {
       `Nota de devolução ${number} emitida e enviada ${by} às ${time} · aguardando resposta até ${until}`,
     sentEmailOnly: (by: string, time: string, until: string) => `E-mail enviado ${by} às ${time} · aguardando resposta até ${until}`,
     byYou: "por você",
+    /** #17 A API pode entregar o pedido sem quem enviou ou sem a hora (carimbo ausente). */
+    byUnknown: "por outra pessoa",
+    noTime: "--h--",
     by: (who: string) => `por ${who}`,
     seeSent: "Ver o que foi enviado",
     sendFailedWithNote: (number: string, reason: string) => `A nota ${number} foi emitida, mas o e-mail não saiu: ${reason}.`,
     sendFailedEmailOnly: (reason: string) => `O e-mail não saiu: ${reason}.`,
+    /** #17 O `failure` do envio é um código curto da porta; a tela diz a frase, nunca o código. */
+    sendFailureReasons: {
+      resend_unavailable: "o serviço de e-mail está indisponível",
+      send_failed: "o serviço de e-mail recusou o envio",
+    },
+    sendFailureOther: "o envio não foi concluído",
+    /** #17/AC-8 O motivo da recusa do texto do Claude, por código da API. */
+    notPreparedReasons: {
+      number_mismatch: "o texto citou um número fora do catálogo",
+      invalid_shape: "o texto não veio na forma pedida",
+    },
+    notPreparedOther: "o texto não pôde ser aceito",
     discarded: (by: string, time: string) => `Pedido descartado ${by} às ${time}`,
     notPrepared: (reason: string) => `Não foi possível preparar o pedido: ${reason}.`,
     loadFailed: { title: "Não foi possível carregar o pedido", retry: "Tentar de novo", loading: "Carregando…" },

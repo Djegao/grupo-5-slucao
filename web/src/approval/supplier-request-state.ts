@@ -4,23 +4,18 @@
  * desenha são useSupplierRequest e SupplierRequestBlock (#16).
  */
 import { ApiError } from "../api/client";
+import type { SupplierRequestPort } from "../api/supplier-request";
 import { texts } from "../texts";
 import type { SupplierRequestPending, SupplierRequestView } from "./SupplierRequestBlock";
 
-/** (#17) As chamadas que o estado precisa; cada ação devolve o pedido como ficou. Os caminhos e o formato do fio são da #17. */
-export interface SupplierRequestPort {
-  load: (accessKey: string, signal: AbortSignal) => Promise<SupplierRequestView | null>;
-  send: (accessKey: string) => Promise<SupplierRequestView>;
-  resend: (accessKey: string) => Promise<SupplierRequestView>;
-  discard: (accessKey: string) => Promise<SupplierRequestView>;
-  redo: (accessKey: string) => Promise<SupplierRequestView>;
-  saveText: (accessKey: string, text: string) => Promise<SupplierRequestView>;
-}
+/** #17 A porta é da camada de contrato (web/src/api/supplier-request.ts); o estado só a usa. */
+export type { SupplierRequestPort };
 
 export interface SupplierRequestState {
   /** #3/AC-1 O pedido guardado; nulo, o bloco não existe. A edição é à parte: o `editing` do bloco sai de `editing`. */
   request: SupplierRequestView | null;
   editing: boolean;
+  /** #17/AC-6 O molde em edição, com os `{{chave}}` dos números travados: é o que o PATCH reenvia. */
   draftText: string;
   pending?: SupplierRequestPending;
   /** #3 A mensagem por status; nunca o texto do erro nem o corpo da resposta. */
@@ -82,7 +77,7 @@ export function supplierRequestReducer(state: SupplierRequestState, event: Suppl
       return { ...state, pending: undefined, error: event.error };
     case "editStarted":
       return state.request?.status === "draft" && !state.pending
-        ? { ...state, editing: true, draftText: state.request.email.body, error: undefined }
+        ? { ...state, editing: true, draftText: state.request.email.template, error: undefined }
         : state;
     case "editCancelled":
       return { ...state, editing: false, error: undefined };

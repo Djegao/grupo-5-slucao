@@ -6,8 +6,8 @@ import { texts } from "../src/texts";
 
 // #3 O bloco "Pedido ao fornecedor" na gaveta da proposta decidida, como no wireframe
 // artifacts/wireframe-pedido-ao-fornecedor/index.html. Esqueleto de ponta a ponta (#14), vermelho até a #17:
-// agora a gaveta inteira roda contra a API falsa, nos caminhos e na forma que api/src/http/supplier-requests.ts
-// fixa (rotas pela chave de acesso da nota, PATCH com `template`, anexo em return-note.json, `failure` em código).
+// #17 agora a gaveta inteira roda contra a API falsa, nos caminhos e na forma que api/src/http/supplier-requests.ts
+// #17 fixa (rotas pela chave de acesso da nota, PATCH com `template`, anexo em return-note.json, `failure` em código).
 
 const KEY = "35261100000000000000550010000200461000200461";
 const BASE = `/api/supplier-requests/${KEY}`;
