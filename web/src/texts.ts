@@ -596,6 +596,7 @@ export const texts = {
       registry: "Cadastro",
       receipt: "Recebimento",
       history: "Histórico",
+      return_note: "Nota de devolução",
     },
   },
 

@@ -61,6 +61,25 @@ describe("#38/AC-1 o dossiê pronto mostra divergência, evidência e histórico
   });
 });
 
+describe("#54/AC-4 a evidência de nota de devolução tem rótulo na tela (decisão do dono)", () => {
+  it("#54/AC-4 mostra \"Nota de devolução\" para a evidência cuja fonte é return_note, e não o código cru", () => {
+    const withReturnNote: DossierField = {
+      ...READY,
+      divergences: [
+        {
+          classification: "E3",
+          exceptionName: "Quantidade menor",
+          whatDiverges: "Faltam 2 caixas do item da ordem.",
+          evidence: [{ key: "nota_dev", label: "Devolução anterior", value: "2 caixas", source: "return_note" }],
+        },
+      ],
+    };
+    render(<Dossier dossier={withReturnNote} />);
+    expect(screen.getByText("Nota de devolução")).toBeTruthy();
+    expect(screen.queryByText("return_note")).toBeNull();
+  });
+});
+
 describe("#38/AC-4 sem dossiê, a gaveta avisa e a decisão segue pela conferência", () => {
   it("#38/AC-4 dossiê indisponível mostra o aviso que a API mandou", () => {
     render(
