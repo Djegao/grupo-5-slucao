@@ -189,8 +189,8 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     const row = (await screen.findByText("NF 59738")).closest("tr")!;
     fireEvent.click(row);
 
-    // #5 A gaveta do kit é achada pelo título, como em approval.test.tsx, não por role="dialog".
-    expect(await screen.findByRole("heading", { name: /Proposta da NF/ })).toBeTruthy();
+    // #5 A gaveta do barte-design-system mostra o título como texto dentro de role="dialog": acha-se pelo nome do diálogo, não por um heading (#54).
+    expect(await screen.findByRole("dialog", { name: /Proposta da NF/ })).toBeTruthy();
     // #21 Dentro da região desta tela: a gaveta da nota (#3) também escreve "Pedido ao fornecedor".
     const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
     expect(within(region).getAllByText("Pedido ao fornecedor")).toHaveLength(1);
@@ -206,7 +206,8 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     const row = (await screen.findByText("NF 59738")).closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Cobrar" }));
 
-    expect(await screen.findByRole("heading", { name: /Proposta da NF/ })).toBeTruthy();
+    // #54 A gaveta se acha pelo nome do diálogo (o título é texto dentro de role="dialog", não um heading).
+    expect(await screen.findByRole("dialog", { name: /Proposta da NF/ })).toBeTruthy();
     // #21 O pedido da gaveta vem do servidor, depois do título: o bloco e o rascunho esperam por ele.
     const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
     expect(within(region).getAllByText("Pedido ao fornecedor")).toHaveLength(1);

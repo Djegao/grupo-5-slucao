@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { texts } from "../texts";
 import { SupplierRequestBlock, type SupplierRequestBlockProps, type SupplierRequestView } from "./SupplierRequestBlock";

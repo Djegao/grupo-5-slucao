@@ -198,7 +198,8 @@ describe("#3 pedido ao fornecedor: editar só o texto", () => {
     await screen.findByRole("button", { name: t.actions.edit });
     click(t.actions.edit);
     const box = screen.getByRole("textbox", { name: t.email.bodyLabel }) as HTMLTextAreaElement;
-    expect(box.value).toBe(email.body);
+    // #17 A edição abre com o texto com os marcadores {{…}} (Q3 emendada do wireframe), não com o texto já preenchido.
+    expect(box.value).toBe(email.template);
     expect(button(t.actions.save)).toBeTruthy();
     expect(button(t.actions.cancelEdit)).toBeTruthy();
     expect(button(t.actions.discard).disabled).toBe(true);

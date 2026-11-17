@@ -41,7 +41,8 @@ describe("#17 cliente da API: prazo e PATCH", () => {
     vi.stubGlobal("fetch", stalledFetch());
     const controller = new AbortController();
     const outcome = apiGet("/api/supplier-requests/x", { signal: controller.signal }).catch((e: unknown) => e);
-    controller.abort();
+    // #17 O motivo vai explícito, do mesmo DOMException do ambiente: o jsdom e o Node têm um DOMException cada, e o motivo que o AbortController do Node cria sozinho não é o `DOMException` global do jsdom (no navegador há um só).
+    controller.abort(new DOMException("cancelado por quem chamou", "AbortError"));
     const error = await outcome;
     expect(error).toBeInstanceOf(DOMException);
     expect((error as DOMException).name).toBe("AbortError");
