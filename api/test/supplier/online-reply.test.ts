@@ -20,14 +20,21 @@ const SQL_ONLINE = REST_ONLINE && Boolean(TOKEN && PROJECT);
 
 const rest = new SupabaseRest({ url: URL_ ?? '', secretKey: KEY ?? '' });
 
-/** #35 A migração desta camada está aplicada no banco das credenciais? A coluna `read_status_by` é a última que ela trouxe. */
+/** #35 Só a falta da relação ou da coluna quer dizer "migração não aplicada": 42703 e 42P01 do PostgreSQL, PGRST204 e PGRST205 do PostgREST. */
+const MISSING = /42703|42P01|PGRST204|PGRST205/;
+
+/**
+ * #35 A migração desta camada está aplicada no banco das credenciais? `read_status_by` e `follow_up_claim` são as colunas mais novas
+ * #35 que ela trouxe. Qualquer outro erro (chave errada ou vencida, permissão, rede) é lançado: o teste falha em vez de pular.
+ */
 async function migrationApplied(): Promise<boolean> {
   if (!REST_ONLINE) return false;
   try {
     await rest.select('inbox_supplier_messages', { select: 'read_status_by', limit: 1 });
+    await rest.select('outbox_supplier_emails', { select: 'follow_up_claim', limit: 1 });
     return true;
   } catch (error) {
-    if (error instanceof SupabaseRestError && /42703|42P01|PGRST/.test(error.detail)) return false;
+    if (error instanceof SupabaseRestError && MISSING.test(error.detail)) return false;
     throw error;
   }
 }
@@ -91,9 +98,11 @@ describe.skipIf(!SQL_ONLINE || !APPLIED)('#35 catálogo e plano, no Supabase rea
 });
 
 describe.skipIf(!REST_ONLINE || !APPLIED)('#35 a versão velha na cobrança, no Supabase real', () => {
-  it('um PATCH da cobrança com a versão velha atinge 0 linhas e nada grava (PER-4)', async () => {
+  it('um PATCH da cobrança com a versão velha atinge 0 linhas e nada grava (PER-4)', async (ctx) => {
     const [first] = await rest.select('outbox_supplier_emails', { select: 'id', limit: 1 });
-    const id = typeof first === 'object' && first !== null && 'id' in first && typeof first.id === 'number' ? first.id : 0;
+    const id = typeof first === 'object' && first !== null && 'id' in first && typeof first.id === 'number' ? first.id : null;
+    // #35 Sem nenhuma linha na tabela, o PATCH não atingiria nada de qualquer jeito: a asserção passaria sem provar a guarda.
+    if (id === null) ctx.skip('outbox_supplier_emails está vazia: não há linha para provar a guarda da versão velha');
     const updated = await rest.update('outbox_supplier_emails', { id: `eq.${id}`, version: 'eq.-1' }, { follow_up_failure: null });
     expect(updated).toHaveLength(0);
   });

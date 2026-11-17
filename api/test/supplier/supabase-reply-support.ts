@@ -58,6 +58,7 @@ export const sentRow = (id: number, over: Record<string, unknown> = {}): Record<
   follow_up_draft: null,
   follow_up_rejection: null,
   follow_up_claimed_at: null,
+  follow_up_claim: null,
   follow_up_sent_by: null,
   follow_up_sent_at: null,
   follow_up_channel: null,

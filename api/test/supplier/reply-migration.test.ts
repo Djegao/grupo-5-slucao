@@ -94,6 +94,7 @@ describe('#35/AC-3 outbox_supplier_emails ganha as colunas da cobrança (sem tab
       'follow_up_draft jsonb',
       'follow_up_rejection text',
       'follow_up_claimed_at timestamptz',
+      'follow_up_claim uuid',
       'follow_up_sent_by text',
       'follow_up_sent_at timestamptz',
       'follow_up_channel text',
@@ -112,9 +113,11 @@ describe('#35/AC-3 outbox_supplier_emails ganha as colunas da cobrança (sem tab
   it('a coerência: rascunho ou recusa, reivindicação exige rascunho, envio mantém a reivindicação e limpa a falha', () => { // ADR-002
     expect(t).toContain('follow_up_draft is null or follow_up_rejection is null');
     expect(t).toContain('follow_up_claimed_at is null or follow_up_draft is not null');
+    expect(t).toContain('(follow_up_claim is null) = (follow_up_claimed_at is null)'); // #35 a ficha da reivindicação anda junto com o prazo
     expect(t).toContain('follow_up_sent_at is null or follow_up_claimed_at is not null');
     expect(t).toContain('follow_up_sent_at is null or follow_up_failure is null');
     expect(t).toMatch(/status = 'sent' or \(follow_up_draft is null and follow_up_rejection is null/);
+    expect(t).toContain('follow_up_claimed_at is null and follow_up_claim is null and follow_up_sent_at is null'); // #35 só pedido enviado tem ficha
   });
   it('nenhuma tabela nova representa o pedido', () => { // ADR-002
     expect(flat).not.toMatch(/create table public\.(supplier_requests|supplier_request)\b/);

@@ -83,7 +83,7 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
     await createReplyUseCases(deps).sendFollowUp(7, 'ana');
     expect(store.calls).toEqual([
       { op: 'claimFollowUpSend', args: [7, 'ana'] },
-      { op: 'recordFollowUpFailure', args: [7, 'mailbox_full', 'ana'] },
+      { op: 'recordFollowUpFailure', args: [7, 'claim-1', 'mailbox_full', 'ana'] },
     ]);
   });
 
@@ -109,9 +109,43 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
   it('a falha do envio solta a reivindicação: a pessoa tenta de novo e o e-mail sai (#34/AC-4)', async () => {
     const failing = parts([drafted()], [], fakeMailer({ ok: false, reason: 'mailbox_full' }));
     await createReplyUseCases(failing.deps).sendFollowUp(7, 'ana');
-    expect(failing.store.claimed.has(7)).toBe(false);
+    expect(failing.store.claims.has(7)).toBe(false);
     const retry = createReplyUseCases({ ...failing.deps, mailer: fakeMailer() });
     expect(await retry.sendFollowUp(7, 'ana')).toMatchObject({ kind: 'ok' });
+  });
+
+  it('o carimbo leva a ficha da reivindicação que o caso de uso ganhou (#35 REL-3)', async () => {
+    const { deps, store } = parts([drafted()]);
+    await createReplyUseCases(deps).sendFollowUp(7, 'ana');
+    expect(store.calls.at(-1)).toMatchObject({ op: 'recordFollowUpSent', args: [7, 'claim-1', expect.objectContaining({ by: 'ana' })] });
+  });
+
+  it('quem perdeu a reivindicação durante o envio e falhou não solta a de outro: volta conflito e nada é gravado (#35 REL-3)', async () => {
+    const { deps, store } = parts([drafted()], [], fakeMailer({ ok: false, reason: 'mailbox_full' }));
+    const retaken = { send: (m: Parameters<typeof deps.mailer.send>[0]) => { store.claims.set(7, 'claim-de-beto'); return deps.mailer.send(m); } };
+    const out = await createReplyUseCases({ ...deps, mailer: retaken }).sendFollowUp(7, 'ana');
+    expect(out).toEqual({ kind: 'conflict', reason: 'send_in_progress' });
+    expect(store.claims.get(7)).toBe('claim-de-beto');
+    expect(store.rows.get(7)?.followUp.failure).toBeNull();
+  });
+
+  it('quem perdeu a reivindicação durante o envio e enviou não grava o carimbo: volta conflito e o log leva só campos nomeados (#35 REL-3)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { deps, store } = parts([drafted()]);
+      const retaken = { send: (m: Parameters<typeof deps.mailer.send>[0]) => { store.claims.set(7, 'claim-de-beto'); return deps.mailer.send(m); } };
+      const out = await createReplyUseCases({ ...deps, mailer: retaken }).sendFollowUp(7, 'ana');
+      expect(out).toEqual({ kind: 'conflict', reason: 'send_in_progress' });
+      expect(store.rows.get(7)?.followUp.sent).toBeNull();
+      expect(store.claims.get(7)).toBe('claim-de-beto');
+      expect(log).toHaveBeenCalledWith('#35 a reivindicação da cobrança foi perdida antes de gravar o resultado', {
+        operation: 'follow-up-stamp',
+        requestId: 7,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain('claim-');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('não envia a cobrança que já saiu', async () => {

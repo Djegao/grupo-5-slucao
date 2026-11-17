@@ -10,12 +10,21 @@ import { INBOX, OUTBOX, READINGS, inboxRow, readingRow, replyHarness, sentRow } 
 
 const TASK = 'supplier-follow-up-draft';
 const ANA = 'ana@jachegou.example';
+const CLAIM = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+const FIRST = '11111111-1111-4111-8111-111111111111';
 const STAMP = { by: ANA, at: new Date('2026-11-20T16:00:00Z'), channel: 'mock', providerMessageId: 'mock-9' } as const;
 
 const setup = (outbox: Record<string, unknown>[], extra: Record<string, Record<string, unknown>[]> = {}, now: Date = NOW) => {
   const h = replyHarness({ [OUTBOX]: outbox, ...extra });
   return { ...h, store: supabaseReplyRequestStore(h.rest, { now: () => now }) };
 };
+
+/** #35: reivindica e devolve a ficha; falha o teste se a reivindicação não for ganha. */
+async function won(store: ReturnType<typeof supabaseReplyRequestStore>, id = 1, by = ANA): Promise<string> {
+  const claim = await store.claimFollowUpSend(id, by);
+  if (claim === null) throw new Error('a reivindicação devia ter sido ganha');
+  return claim;
+}
 
 const outboxRow = (fake: ReturnType<typeof replyHarness>['fake'], id = 1) => fake.rows(OUTBOX).find((r) => r.id === id) as Record<string, unknown>;
 const lastEntry = (row: Record<string, unknown>) => (row.history as Record<string, unknown>[]).at(-1) as Record<string, unknown>;
@@ -231,29 +240,40 @@ describe('#35/AC-3 o rascunho e a recusa da cobrança: uma gravação guardada, 
 describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômica', () => {
   const drafted = () => setup([sentRow(1, { follow_up_draft: GOOD_FOLLOW_UP })]);
 
-  it('duas reivindicações ao mesmo tempo, na mesma versão: uma ganha e a outra volta false', async () => {
+  it('duas reivindicações ao mesmo tempo, na mesma versão: uma ganha, com a ficha, e a outra volta null', async () => {
     const { fake, store } = drafted();
     const results = await Promise.all([store.claimFollowUpSend(1, ANA), store.claimFollowUpSend(1, 'beto@jachegou.example')]);
-    expect(results.sort()).toEqual([false, true]);
+    expect(results.filter((r) => r === null)).toHaveLength(1);
+    expect(results.filter((r) => r !== null)).toEqual([CLAIM]);
     expect(outboxRow(fake)).toMatchObject({ follow_up_claimed_at: NOW.toISOString(), version: 4 });
+    expect(outboxRow(fake).follow_up_claim).toEqual(CLAIM);
     expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_claimed', follow_up: { claimed: true } });
   });
 
-  it('#35 a reivindicação tem prazo (o da #12): dentro dele volta false; vencida, é retomada', async () => {
-    const claimed = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString() };
+  it('#35 a ficha da reivindicação vai para a coluna e nunca para o histórico nem para a leitura do pedido', async () => {
+    const { fake, store } = drafted();
+    const claim = await won(store);
+    expect(outboxRow(fake).follow_up_claim).toBe(claim);
+    expect(JSON.stringify(outboxRow(fake).history)).not.toContain(claim);
+    expect(JSON.stringify(await store.get(1))).not.toContain(claim);
+  });
+
+  it('#35 a reivindicação tem prazo (o da #12): dentro dele volta null; vencida, é retomada com outra ficha', async () => {
+    const claimed = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString(), follow_up_claim: FIRST };
     const inside = setup([sentRow(1, claimed)], {}, new Date(NOW.getTime() + LEASE_MS - 1000));
-    expect(await inside.store.claimFollowUpSend(1, ANA)).toBe(false);
-    expect(outboxRow(inside.fake)).toMatchObject({ follow_up_claimed_at: NOW.toISOString(), version: 3 });
+    expect(await inside.store.claimFollowUpSend(1, ANA)).toBeNull();
+    expect(outboxRow(inside.fake)).toMatchObject({ follow_up_claimed_at: NOW.toISOString(), follow_up_claim: FIRST, version: 3 });
     const later = new Date(NOW.getTime() + LEASE_MS + 1000);
     const expired = setup([sentRow(1, claimed)], {}, later);
-    expect(await expired.store.claimFollowUpSend(1, ANA)).toBe(true);
+    expect(await expired.store.claimFollowUpSend(1, ANA)).toEqual(CLAIM);
     expect(outboxRow(expired.fake)).toMatchObject({ follow_up_claimed_at: later.toISOString(), version: 4 });
+    expect(outboxRow(expired.fake).follow_up_claim).not.toBe(FIRST);
   });
 
   it('#35 a reivindicação vencida de um envio que já saiu não é retomada: o carimbo impede o segundo e-mail', async () => {
-    const sent = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString(), follow_up_sent_by: ANA, follow_up_sent_at: NOW.toISOString(), follow_up_channel: 'mock', follow_up_provider_message_id: 'mock-9' };
+    const sent = { follow_up_draft: GOOD_FOLLOW_UP, follow_up_claimed_at: NOW.toISOString(), follow_up_claim: FIRST, follow_up_sent_by: ANA, follow_up_sent_at: NOW.toISOString(), follow_up_channel: 'mock', follow_up_provider_message_id: 'mock-9' };
     const { store } = setup([sentRow(1, sent)], {}, new Date(NOW.getTime() + 10 * LEASE_MS));
-    expect(await store.claimFollowUpSend(1, ANA)).toBe(false);
+    expect(await store.claimFollowUpSend(1, ANA)).toBeNull();
   });
 
   it('o histórico leva quem reivindicou', async () => {
@@ -262,29 +282,28 @@ describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômi
     expect(lastEntry(outboxRow(fake)).by).toBe(ANA);
   });
 
-  it('sem rascunho, ou de pedido que não está enviado, volta false sem gravar', async () => {
+  it('sem rascunho, ou de pedido que não está enviado, volta null sem gravar', async () => {
     const { fake, store } = setup([sentRow(1), sentRow(2, { follow_up_draft: GOOD_FOLLOW_UP, status: 'discarded', discard_reason: 'x', sent_by: null, sent_at: null, channel: null, provider_message_id: null })]);
-    expect(await store.claimFollowUpSend(1, ANA)).toBe(false);
-    expect(await store.claimFollowUpSend(2, ANA)).toBe(false);
-    expect(await store.claimFollowUpSend(99, ANA)).toBe(false);
+    expect(await store.claimFollowUpSend(1, ANA)).toBeNull();
+    expect(await store.claimFollowUpSend(2, ANA)).toBeNull();
+    expect(await store.claimFollowUpSend(99, ANA)).toBeNull();
     expect(fake.requests.filter((r) => r.method !== 'GET')).toHaveLength(2);
   });
 
-  it('a falha solta a reivindicação e guarda o motivo curto: nova reivindicação é true', async () => {
+  it('a falha de quem detém a reivindicação a solta, com a ficha, e guarda o motivo curto: nova reivindicação ganha', async () => {
     const { fake, store } = drafted();
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
-    expect(outboxRow(fake)).toMatchObject({ follow_up_claimed_at: null, follow_up_failure: 'mailbox_full' });
+    const claim = await won(store);
+    expect(await store.recordFollowUpFailure(1, claim, 'mailbox_full', ANA)).toBe('recorded');
+    expect(outboxRow(fake)).toMatchObject({ follow_up_claimed_at: null, follow_up_claim: null, follow_up_failure: 'mailbox_full' });
     expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_failed', by: ANA, follow_up: { claimed: false, failure: 'mailbox_full' } });
-    expect(await store.claimFollowUpSend(1, ANA)).toBe(true);
+    expect(await store.claimFollowUpSend(1, ANA)).toEqual(CLAIM);
   });
 
-  it('o envio guarda o carimbo, limpa a falha e mantém a reivindicação: depois dele, nova reivindicação é false', async () => {
+  it('o envio de quem detém a reivindicação guarda o carimbo, limpa a falha e mantém a reivindicação', async () => {
     const { fake, store } = drafted();
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpSent(1, STAMP);
+    await store.recordFollowUpFailure(1, await won(store), 'mailbox_full', ANA);
+    const claim = await won(store);
+    expect(await store.recordFollowUpSent(1, claim, STAMP)).toBe('recorded');
     expect(outboxRow(fake)).toMatchObject({
       follow_up_sent_by: ANA,
       follow_up_sent_at: STAMP.at.toISOString(),
@@ -292,23 +311,56 @@ describe('#35/AC-4 a reivindicação do envio: uma transição guardada e atômi
       follow_up_provider_message_id: 'mock-9',
       follow_up_failure: null,
       follow_up_claimed_at: NOW.toISOString(),
+      follow_up_claim: claim,
     });
     expect(lastEntry(outboxRow(fake))).toMatchObject({ action: 'follow_up_sent', by: ANA, at: STAMP.at.toISOString(), follow_up: { sent: true, claimed: true } });
-    expect(await store.claimFollowUpSend(1, ANA)).toBe(false);
+    expect(await store.claimFollowUpSend(1, ANA)).toBeNull();
     expect((await store.get(1))?.followUp.sent).toEqual(STAMP);
   });
 
-  it('falha ou envio sem reivindicação de pé lança: nada é gravado', async () => {
+  it('falha ou envio sem reivindicação de pé, ou com a ficha de outra, voltam lost: nada é gravado', async () => {
     const { fake, store } = drafted();
-    await expect(store.recordFollowUpFailure(1, 'mailbox_full', ANA)).rejects.toBeInstanceOf(SupplierStoreError);
-    await expect(store.recordFollowUpSent(1, STAMP)).rejects.toBeInstanceOf(SupplierStoreError);
+    expect(await store.recordFollowUpFailure(1, FIRST, 'mailbox_full', ANA)).toBe('lost');
+    expect(await store.recordFollowUpSent(1, FIRST, STAMP)).toBe('lost');
     expect(outboxRow(fake).version).toBe(3);
+    await won(store);
+    const version = outboxRow(fake).version;
+    expect(await store.recordFollowUpFailure(1, FIRST, 'mailbox_full', ANA)).toBe('lost');
+    expect(await store.recordFollowUpSent(1, FIRST, STAMP)).toBe('lost');
+    expect(outboxRow(fake)).toMatchObject({ version, follow_up_failure: null, follow_up_sent_at: null });
+    expect(outboxRow(fake).follow_up_claim).toEqual(CLAIM);
+  });
+
+  it('pedido inexistente: falha e envio lançam, como as outras gravações', async () => {
+    const { store } = drafted();
+    await expect(store.recordFollowUpFailure(99, FIRST, 'mailbox_full', ANA)).rejects.toBeInstanceOf(SupplierStoreError);
+    await expect(store.recordFollowUpSent(99, FIRST, STAMP)).rejects.toBeInstanceOf(SupplierStoreError);
+  });
+
+  it('claim, a reivindicação vence, segunda reivindicação: a falha e o carimbo do primeiro detentor são recusados (#35 REL-3)', async () => {
+    const first = setup([sentRow(1, { follow_up_draft: GOOD_FOLLOW_UP })]);
+    const claimA = await won(first.store);
+    const later = new Date(NOW.getTime() + LEASE_MS + 1000);
+    const second = supabaseReplyRequestStore(first.rest, { now: () => later });
+    const claimB = await won(second);
+    expect(claimB).not.toBe(claimA);
+
+    // A estagnou e volta: a falha dele não solta a reivindicação de B, e o carimbo dele não vale.
+    expect(await first.store.recordFollowUpFailure(1, claimA, 'mailbox_full', ANA)).toBe('lost');
+    expect(outboxRow(first.fake)).toMatchObject({ follow_up_claim: claimB, follow_up_claimed_at: later.toISOString(), follow_up_failure: null });
+    expect(await second.claimFollowUpSend(1, 'beto@jachegou.example')).toBeNull(); // ninguém mais reivindica
+    expect(await first.store.recordFollowUpSent(1, claimA, STAMP)).toBe('lost');
+    expect(outboxRow(first.fake)).toMatchObject({ follow_up_sent_at: null, follow_up_claim: claimB });
+
+    // B, o detentor, grava o carimbo.
+    expect(await second.recordFollowUpSent(1, claimB, { ...STAMP, by: 'beto@jachegou.example' })).toBe('recorded');
+    expect(outboxRow(first.fake)).toMatchObject({ follow_up_sent_by: 'beto@jachegou.example', follow_up_claim: claimB });
   });
 
   it('o motivo da falha fora do formato curto é recusado sem gravar (o texto do provedor não cabe)', async () => {
     const { fake, store } = drafted();
-    await store.claimFollowUpSend(1, ANA);
-    await expect(store.recordFollowUpFailure(1, 'smtp 550 caixa cheia token=sk-segredo', ANA)).rejects.toBeInstanceOf(SupplierStoreError);
+    const claim = await won(store);
+    await expect(store.recordFollowUpFailure(1, claim, 'smtp 550 caixa cheia token=sk-segredo', ANA)).rejects.toBeInstanceOf(SupplierStoreError);
     expect(outboxRow(fake).follow_up_failure).toBeNull();
   });
 });
@@ -323,10 +375,8 @@ describe('#4/AC-6 e #35/AC-2 nada alcança a proposta, o título nem o valor em 
     await store.recordReading(2, noReply(), null);
     await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
     await store.recordFollowUpRejection(2, 'invalid_shape: body');
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpSent(1, STAMP);
+    await store.recordFollowUpFailure(1, await won(store), 'mailbox_full', ANA);
+    await store.recordFollowUpSent(1, await won(store), STAMP);
     await inbox.listPending();
     await inbox.markRead(5);
 
@@ -342,10 +392,8 @@ describe('#4/AC-6 e #35/AC-2 nada alcança a proposta, o título nem o valor em 
   it('um PATCH no pedido leva só colunas follow_up_*, version, history e updated_at', async () => {
     const { fake, store } = setup([sentRow(1)]);
     await store.saveFollowUpDraft(1, GOOD_FOLLOW_UP);
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpFailure(1, 'mailbox_full', ANA);
-    await store.claimFollowUpSend(1, ANA);
-    await store.recordFollowUpSent(1, STAMP);
+    await store.recordFollowUpFailure(1, await won(store), 'mailbox_full', ANA);
+    await store.recordFollowUpSent(1, await won(store), STAMP);
     const patches = fake.requests.filter((r) => r.method === 'PATCH');
     expect(patches).toHaveLength(5);
     for (const patch of patches) {

@@ -1,8 +1,8 @@
-import { arrayOf, isInteger, isString, isUnknown, parseRows, shaped, type Shape } from '../connectors/guards.js';
+import { arrayOf, isInteger, isString, isUnknown, nullable, parseRows, shaped, type Shape } from '../connectors/guards.js';
 import { SupabaseRestError, type Filters, type SupabaseRest } from '../connectors/supabase-rest.js';
 import type { SupplierReading, SupplierRequestText } from '../domain/index.js';
 import { SUPPLIER_FOLLOW_UP_TASK } from './follow-up-task.js';
-import type { Clock, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
+import type { ClaimWrite, Clock, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
 import { guarded, pgCode, refused } from './supabase-reply-call.js';
 import { LEASE_MS } from './supabase-store.js';
 import { READINGS_TABLE, readingToRow } from './supabase-reply-reading.js';
@@ -35,8 +35,10 @@ const SENT = { status: 'eq.sent' } as const;
 const NO_TEXT = { ...SENT, follow_up_draft: 'is.null', follow_up_rejection: 'is.null' } as const;
 /**
  * #35: a reivindicação do envio tem o prazo da #12 (`LEASE_MS`, o do `send_claim`): sem reivindicação, ou com uma mais velha que o
- * #35: prazo, o envio pode ser reivindicado de novo. Risco aceito: se o processo que a perdeu chegou a enviar e morreu antes de
- * #35: gravar o carimbo, o segundo e-mail sai. Com o carimbo gravado (`follow_up_sent_at`) a reivindicação nunca vence.
+ * #35: prazo, o envio pode ser reivindicado de novo, com outra ficha (`follow_up_claim`, o `send_claim` da #12). A falha e o carimbo
+ * #35: filtram pela ficha de quem os grava (`held`): quem perdeu a reivindicação no prazo recebe 0 linhas e não toca a linha. Risco
+ * #35: aceito: se quem a perdeu chegou a enviar e morreu antes de gravar o carimbo, o segundo e-mail sai. Com o carimbo gravado
+ * #35: (`follow_up_sent_at`) a reivindicação nunca vence.
  */
 const claimable = (at: Date): Filters => ({
   ...SENT,
@@ -44,12 +46,14 @@ const claimable = (at: Date): Filters => ({
   follow_up_sent_at: 'is.null',
   or: `(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.${new Date(at.getTime() - LEASE_MS).toISOString()})`,
 });
-const CLAIMED = { ...SENT, follow_up_claimed_at: 'not.is.null', follow_up_sent_at: 'is.null' } as const;
+/** #35: a guarda da falha e do carimbo: o envio ainda não carimbado e a reivindicação é a deste detentor, pela ficha. */
+const held = (claim: FollowUpClaim): Filters => ({ ...SENT, follow_up_claim: `eq.${claim}`, follow_up_sent_at: 'is.null' });
 
-type WriteRow = FollowUpColumns & { id: number; version: number; history: unknown[] };
+type WriteRow = FollowUpColumns & { id: number; version: number; history: unknown[]; follow_up_claim: string | null };
 
 const isWriteRow = shaped<WriteRow>({
   ...followUpShape,
+  follow_up_claim: nullable(isString),
   id: isInteger,
   version: isInteger,
   history: arrayOf(isUnknown),
@@ -64,7 +68,7 @@ type FollowUpChange = {
   readonly by: string;
   readonly at: Date;
   readonly guard: Filters;
-  readonly columns: Partial<FollowUpColumns>;
+  readonly columns: Partial<FollowUpColumns> & { follow_up_claim?: string | null };
 };
 
 export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): ReplyRequestStore {
@@ -91,9 +95,9 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
     });
   }
 
-  /** #35: a linha lida para montar a gravação da cobrança: a versão, o histórico e as colunas da cobrança. */
+  /** #35: a linha lida para montar a gravação da cobrança: a versão, o histórico, as colunas da cobrança e a ficha da reivindicação. */
   async function readForWrite(id: number): Promise<WriteRow | null> {
-    const select = `id,version,history,${FOLLOW_UP_COLUMNS}`;
+    const select = `id,version,history,follow_up_claim,${FOLLOW_UP_COLUMNS}`;
     const rows = await guarded(() => rest.select(OUTBOX_TABLE, { select, filters: { id: `eq.${id}` }, limit: 1 }));
     return parseRows(rows, isWriteRow, OUTBOX_TABLE)[0] ?? null;
   }
@@ -123,9 +127,19 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
     throw refused(operation, OUTBOX_TABLE);
   }
 
-  /** #35: falha e envio da cobrança: com a reivindicação de pé, ninguém mais grava a linha, então 0 linhas é dado fora do esperado. */
-  async function settle(id: number, change: FollowUpChange): Promise<void> {
-    if ((await writeFollowUp(id, change)) !== 'ok') throw refused(change.action, OUTBOX_TABLE);
+  /**
+   * #35: falha e envio da cobrança, de quem diz deter a reivindicação `claim`. Lê a linha: se a ficha não é a dele, volta `lost` sem
+   * #35: gravar. O `PATCH` filtra pela ficha também; com 0 linhas relê: a ficha deixou de ser dele no meio (`lost`), ou o dado fora
+   * #35: do esperado (a versão andou com a reivindicação dele de pé), que lança.
+   */
+  async function settle(id: number, claim: FollowUpClaim, change: FollowUpChange): Promise<ClaimWrite> {
+    const row = await readForWrite(id);
+    if (row === null) throw refused(change.action, OUTBOX_TABLE);
+    if (row.follow_up_claim !== claim) return 'lost';
+    const written = await writeFollowUp(id, { ...change, guard: held(claim) });
+    if (written === 'ok') return 'recorded';
+    if (written === 'refused' && (await readForWrite(id))?.follow_up_claim !== claim) return 'lost';
+    throw refused(change.action, OUTBOX_TABLE);
   }
 
   /** #35 QR5: existe leitura que vence a recém-gravada? Só informa a saída da tarefa; qual vale é a projeção. */
@@ -184,29 +198,31 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
 
     async claimFollowUpSend(id, by) {
       const at = clock.now();
-      const change: FollowUpChange = { action: 'follow_up_claimed', by, at, guard: claimable(at), columns: { follow_up_claimed_at: at.toISOString() } };
-      return (await writeFollowUp(id, change)) === 'ok';
+      const claim = crypto.randomUUID();
+      const columns = { follow_up_claimed_at: at.toISOString(), follow_up_claim: claim };
+      const change: FollowUpChange = { action: 'follow_up_claimed', by, at, guard: claimable(at), columns };
+      return (await writeFollowUp(id, change)) === 'ok' ? claim : null;
     },
 
-    recordFollowUpFailure(id, reason, by) {
+    recordFollowUpFailure(id, claim, reason, by) {
       // #34/AC-4: o motivo curto da própria porta; o texto do provedor não cabe no formato e não é gravado.
       if (!SHORT_REASON.test(reason)) return Promise.reject(refused('record_follow_up_failure', OUTBOX_TABLE));
-      return settle(id, {
+      return settle(id, claim, {
         action: 'follow_up_failed',
         by,
         at: clock.now(),
-        guard: CLAIMED,
-        columns: { follow_up_claimed_at: null, follow_up_failure: reason },
+        guard: {},
+        columns: { follow_up_claimed_at: null, follow_up_claim: null, follow_up_failure: reason },
       });
     },
 
-    recordFollowUpSent: (id, stamp: FollowUpStamp) =>
-      settle(id, {
+    recordFollowUpSent: (id, claim, stamp: FollowUpStamp) =>
+      settle(id, claim, {
         action: 'follow_up_sent',
         by: stamp.by,
         at: stamp.at,
-        guard: CLAIMED,
-        // #35: a reivindicação fica de pé depois do envio: é ela que impede o segundo e-mail.
+        guard: {},
+        // #35: a reivindicação fica de pé depois do envio, com a ficha: é ela que impede o segundo e-mail.
         columns: {
           follow_up_sent_by: stamp.by,
           follow_up_sent_at: stamp.at.toISOString(),

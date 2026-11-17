@@ -93,6 +93,8 @@ alter table public.outbox_supplier_emails
   add column follow_up_draft jsonb,
   add column follow_up_rejection text,
   add column follow_up_claimed_at timestamptz,
+  -- #35 A ficha da reivindicação (uuid, como o send_claim da #12): a falha e o carimbo filtram por ela, e quem perdeu a reivindicação não grava.
+  add column follow_up_claim uuid,
   add column follow_up_sent_by text,
   add column follow_up_sent_at timestamptz,
   add column follow_up_channel text,
@@ -111,13 +113,17 @@ alter table public.outbox_supplier_emails
   ),
   add constraint outbox_supplier_emails_follow_up_text_check check (follow_up_draft is null or follow_up_rejection is null),
   add constraint outbox_supplier_emails_follow_up_claim_check check (follow_up_claimed_at is null or follow_up_draft is not null),
+  -- #35 A ficha anda junto com o prazo: as duas colunas são nulas ou as duas têm valor, como send_claim e send_claimed_at na #12.
+  add constraint outbox_supplier_emails_follow_up_claim_token_check check ((follow_up_claim is null) = (follow_up_claimed_at is null)),
   -- #35 A reivindicação tem o prazo da #12 (LEASE_MS, 5 minutos), aplicado pelo adaptador no filtro do PATCH: a vencida pode ser
-  -- #35 retomada. Risco aceito: se quem a perdeu chegou a enviar e morreu antes do carimbo, sai um segundo e-mail.
+  -- #35 retomada, com outra ficha. A falha e o carimbo filtram pela ficha de quem os grava, então quem perdeu a reivindicação recebe
+  -- #35 0 linhas e não solta nem carimba a de outro. Risco aceito: se quem a perdeu chegou a enviar e morreu antes do carimbo, sai um
+  -- #35 segundo e-mail; o carimbo dele é recusado.
   -- #4/AC-4 O envio mantém a reivindicação (impede o segundo e-mail) e limpa a falha.
   add constraint outbox_supplier_emails_follow_up_kept_claim_check check (follow_up_sent_at is null or follow_up_claimed_at is not null),
   add constraint outbox_supplier_emails_follow_up_cleared_failure_check check (follow_up_sent_at is null or follow_up_failure is null),
   -- #4/AC-3 Só pedido enviado tem cobrança.
   add constraint outbox_supplier_emails_follow_up_status_check check (
     status = 'sent'
-    or (follow_up_draft is null and follow_up_rejection is null and follow_up_claimed_at is null and follow_up_sent_at is null and follow_up_failure is null)
+    or (follow_up_draft is null and follow_up_rejection is null and follow_up_claimed_at is null and follow_up_claim is null and follow_up_sent_at is null and follow_up_failure is null)
   );
