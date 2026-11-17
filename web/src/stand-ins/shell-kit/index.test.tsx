@@ -11,14 +11,14 @@ const CONTEXT: ShellContext = {
       key: "pagar",
       label: "Contas a pagar",
       items: [
-        { key: "fila", label: "Fila de aprovação", href: "/pagar/fila", icon: "list-checks" },
+        { key: "fila", label: "Fila de aprovação", href: "/pagar/fila", icon: "list-checks" }, // ADR-004
         { key: "hoje", label: "Lista do dia", href: "/pagar/hoje" },
       ],
     },
   ],
   account_menu: [],
   administration: [],
-  home: "/pagar/fila",
+  home: "/pagar/fila", // ADR-004
   theme: "dark",
   account: null,
   sidebar: "expanded",
@@ -28,14 +28,14 @@ describe("#53/AC-2 ShellFrame, o substituto da moldura do Shell", () => {
   it("#53/AC-2: mostra a marca como link para a página inicial, a pessoa, e a tela numa área principal", () => {
     render(<ShellFrame context={CONTEXT} zone="pagar"><p>Tela</p></ShellFrame>);
     const brand = screen.getByRole("link", { name: /Já Chegou/ });
-    expect(brand.getAttribute("href")).toBe("/pagar/fila");
+    expect(brand.getAttribute("href")).toBe("/pagar/fila"); // ADR-004
     expect(brand.textContent).toContain("Contas a pagar");
     expect(screen.getByText("Aluna da Já Chegou")).toBeTruthy();
     expect(within(screen.getByRole("main")).getByText("Tela")).toBeTruthy();
   });
 
   it("#53/AC-2: o menu é uma navegação com nome, um link por item, e marca a página atual", () => {
-    window.history.replaceState(null, "", "/pagar/fila/35261100");
+    window.history.replaceState(null, "", "/pagar/fila/35261100"); // ADR-004
     render(<ShellFrame context={CONTEXT} zone="pagar" />);
     const nav = screen.getByRole("navigation", { name: "Menu" });
     expect(within(nav).getByText("Contas a pagar")).toBeTruthy();

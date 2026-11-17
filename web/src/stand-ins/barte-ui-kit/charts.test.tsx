@@ -46,7 +46,7 @@ describe("#53/AC-2 charts, os gráficos sem biblioteca", () => {
       />,
     );
     const chart = screen.getByRole("img", { name: "Evitado por dia" });
-    expect(within(chart as unknown as HTMLElement).getByText("01")).toBeTruthy();
+    expect(within(chart).getByText("01")).toBeTruthy();
     expect(chart.querySelectorAll("polyline")).toHaveLength(2);
     expect(screen.getByText("Evitado")).toBeTruthy();
     expect(screen.getByText("Previsto")).toBeTruthy();
