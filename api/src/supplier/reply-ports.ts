@@ -1,4 +1,5 @@
 import type {
+  DocumentConfirmation,
   RequestFilter,
   RequestStatus,
   RequestType,
@@ -72,6 +73,8 @@ export type ReplyRequest = {
   readonly dueOn: string;
   readonly status: RequestStatus;
   readonly reading: SupplierReading | null;
+  /** #63/AC-3: a confirmação do documento citado na leitura atual: o documento, quem e quando; null enquanto a pessoa não confirmou. */
+  readonly documentConfirmation: DocumentConfirmation | null;
   readonly followUp: FollowUpState;
 };
 
@@ -92,6 +95,9 @@ export type ClaimAttempt =
 
 /** #58/AC-5: o resultado de editar o rascunho; só `recorded` gravou. */
 export type EditWrite = 'recorded' | 'already_sent' | 'send_in_progress' | 'stale';
+
+/** #63/AC-4: o resultado de confirmar o documento; só `recorded` gravou. `stale`: a linha andou por outra gravação entre a leitura e o PATCH. */
+export type ConfirmWrite = 'recorded' | 'already_confirmed' | 'stale';
 
 /** #35: `lost` quer dizer que a reivindicação já não é de quem gravou (venceu e outro a retomou, ou foi solta): nada foi gravado. */
 export type ClaimWrite = 'recorded' | 'lost';
@@ -125,6 +131,12 @@ export interface ReplyRequestStore {
    * no meio. Pedido ou rascunho que não existem lançam, como as outras gravações.
    */
   editFollowUpDraft(id: number, text: SupplierRequestText, by: string): Promise<EditWrite>;
+  /**
+   * #63/AC-1, AC-4: grava a confirmação do documento (quem e quando, ADR-005) como uma entrada do histórico da linha do pedido, num `PATCH`
+   * guardado pela versão lida: duas chamadas ao mesmo tempo gravam uma só, e a outra volta `already_confirmed`. Não toca a leitura, a cobrança,
+   * a proposta, o título nem o valor em risco (#63/AC-5). Pedido que não existe lança, como as outras gravações.
+   */
+  confirmDocument(id: number, confirmation: DocumentConfirmation): Promise<ConfirmWrite>;
   /**
    * #34/AC-4: reivindica o envio da cobrança antes do e-mail sair. Devolve a ficha da reivindicação (#35, o `send_claim` da #12)
    * para quem ganhou (`won`), e `taken` se já há envio reivindicado dentro do prazo ou carimbado. #58/AC-5: `draft` é o texto que o envio leu

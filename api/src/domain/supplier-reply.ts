@@ -188,16 +188,52 @@ export function followUpDue(request: RequestDeadline, reading: SupplierReading |
 export type RequestFilter = 'awaiting' | 'answered' | 'needs_you' | 'overdue';
 
 /**
- * #33/AC-5: todo pedido enviado cai em um filtro só (o que não foi enviado, em nenhum). A ordem decide:
- * sem leitura, o prazo separa `awaiting` de `overdue`; `no_reply` é `overdue`; `fulfilled` com `close`
- * é `answered`; todo o resto (inclusive `confirm_document`) precisa de uma pessoa.
+ * #63/AC-1 (ADR-005): a confirmação do documento que o fornecedor citou: o documento, quem confirmou (o e-mail do Access) e quando.
+ * É um fato à parte da leitura: confirmar não muda a leitura, a decisão, o título nem o valor em risco (#63/AC-5).
  */
-export function filterOf(request: RequestDeadline, reading: SupplierReading | null, today: string): RequestFilter | null {
+export type DocumentConfirmation = { readonly document: string; readonly by: string; readonly at: Date };
+
+/** #63/AC-4: por que um pedido não se confirma: não está em `confirm_document`, ou o documento já foi confirmado. */
+export type ConfirmRefusal = 'not_confirm_document' | 'already_confirmed';
+
+/** #63/AC-1: a leitura que pede a confirmação: atendeu (`fulfilled`), citou um documento e o próximo passo é `confirm_document`. */
+const awaitsConfirmation = (reading: SupplierReading | null): reading is SupplierReading & { readonly supplierDocument: string } =>
+  reading !== null && reading.replyOutcome === 'fulfilled' && reading.nextStep === 'confirm_document' && reading.supplierDocument !== null;
+
+/**
+ * #63/AC-3: a confirmação que vale para a leitura atual: a mais recente do documento que ela cita (as gravadas chegam em ordem). Uma leitura nova com
+ * outro documento deixa a confirmação velha para trás e pede outra; com o mesmo documento, a confirmação continua valendo. Sem a leitura que pede
+ * confirmação (outro desfecho, outro próximo passo, sem documento), não há confirmação.
+ */
+export function confirmationOf(reading: SupplierReading | null, stored: readonly DocumentConfirmation[]): DocumentConfirmation | null {
+  if (!awaitsConfirmation(reading)) return null;
+  const ofDocument = stored.filter((c) => c.document === reading.supplierDocument);
+  return ofDocument.at(-1) ?? null;
+}
+
+/** #63/AC-4: o pedido enviado cuja leitura pede a confirmação e ainda não foi confirmada não tem recusa (null); senão, o motivo. */
+export function confirmRefusal(request: RequestDeadline, reading: SupplierReading | null, stored: readonly DocumentConfirmation[]): ConfirmRefusal | null {
+  if (request.status !== 'sent' || !awaitsConfirmation(reading)) return 'not_confirm_document';
+  return confirmationOf(reading, stored) === null ? null : 'already_confirmed';
+}
+
+/**
+ * #33/AC-5: todo pedido enviado cai em um filtro só (o que não foi enviado, em nenhum). A ordem decide:
+ * sem leitura, o prazo separa `awaiting` de `overdue`; `no_reply` é `overdue`; `fulfilled` com `close` é `answered`;
+ * #63/AC-2: `fulfilled` com `confirm_document` cujo documento a pessoa já confirmou também é `answered`; todo o resto
+ * (inclusive o `confirm_document` ainda sem confirmação) precisa de uma pessoa.
+ */
+export function filterOf(
+  request: RequestDeadline,
+  reading: SupplierReading | null,
+  today: string,
+  confirmations: readonly DocumentConfirmation[] = [],
+): RequestFilter | null {
   if (request.status !== 'sent') return null;
   if (reading === null) return isPastDue(request.dueOn, today) ? 'overdue' : 'awaiting';
   if (reading.replyOutcome === 'no_reply') return 'overdue';
   if (reading.replyOutcome === 'fulfilled' && reading.nextStep === 'close') return 'answered';
-  return 'needs_you';
+  return confirmationOf(reading, confirmations) === null ? 'needs_you' : 'answered';
 }
 
 /** #58/AC-2: o que a regra precisa do pedido para montar a cobrança: o que pedimos (forma com {{chave}}) e o que o fornecedor já atendeu. */

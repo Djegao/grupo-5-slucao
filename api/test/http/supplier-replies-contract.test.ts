@@ -86,8 +86,9 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
   it('#36/AC-2: o pedido enviado mantém os campos da #13 e ganha reading e followUp; sem resposta, reading é nulo e a cobrança é vazia', async () => {
     const w = await sentWorld();
     const request = await viewOf(w);
-    expect(Object.keys(request).sort()).toEqual([...VIEW_KEYS_13, 'followUp', 'reading'].sort());
+    expect(Object.keys(request).sort()).toEqual([...VIEW_KEYS_13, 'documentConfirmation', 'followUp', 'reading'].sort()); // #63/AC-3
     expect(request.reading).toBeNull();
+    expect(request.documentConfirmation).toBeNull(); // #63/AC-3
     expect(request.followUp).toEqual({ drafted: false, sent: false, draft: null, dueOn: null, sentBy: null, sentAt: null, failure: null });
     expect(request).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'nota-devolucao-ND-1.pdf' } }); // #57/AC-5
   });
@@ -126,6 +127,20 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
     expect(request.status).toBe('draft');
     expect(Object.keys(request)).not.toContain('reading');
     expect(Object.keys(request)).not.toContain('followUp');
+    expect(Object.keys(request)).not.toContain('documentConfirmation'); // #63/AC-3: só o pedido enviado a traz
+  });
+
+  it('#63/AC-3: o contrato da confirmação: POST .../confirm-document responde 200 com a visão sent e documentConfirmation { document, by, at }, só essas chaves', async () => {
+    const w = await sentWorld();
+    w.receive('Emitimos a NF-D 881 para a devolução.');
+    await w.runAllTasks(replyAsk());
+    const reply = await w.call('POST', w.path('/confirm-document'), { body: {} });
+    expect(reply.status).toBe(200);
+    expect(Object.keys(reply.body)).toEqual(['request']);
+    const { documentConfirmation, status } = reply.body.request as Json;
+    expect(status).toBe('sent');
+    expect(Object.keys(documentConfirmation).sort()).toEqual(['at', 'by', 'document']);
+    expect(documentConfirmation).toEqual({ document: '881', by: 'ana@jachegou.test', at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) });
   });
 
   it('#36/AC-2: a falha do banco na leitura é 502 com o correlationId, sem o texto da dependência', async () => {

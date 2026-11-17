@@ -1,4 +1,4 @@
-import { filterOf, followUpDraftFor, followUpDue, overdueReading, owesFollowUp, validateRequestText, type RequestFilter, type SupplierReading, type TextField } from '../domain/index.js';
+import { confirmRefusal, filterOf, followUpDraftFor, followUpDue, overdueReading, owesFollowUp, validateRequestText, type DocumentConfirmation, type RequestFilter, type SupplierReading, type TextField } from '../domain/index.js';
 import { followUpCatalogOf, todayIso } from './reply-catalog.js';
 import type { FollowUpMail, FollowUpMailResult, FollowUpStamp, ReplyDeps, ReplyList, ReplyListRow, ReplyRequest } from './reply-ports.js';
 
@@ -23,6 +23,12 @@ export type EditFollowUpResult =
   | { readonly kind: 'conflict'; readonly reason: 'no_draft' | 'already_sent' | 'send_in_progress' | 'stale' }
   | { readonly kind: 'invalid'; readonly reason: 'number_mismatch' | 'invalid_shape'; readonly field: TextField };
 
+/** #63/AC-1, AC-4: o que a confirmação do documento devolve; a camada da API mapeia para HTTP. */
+export type ConfirmDocumentResult =
+  | { readonly kind: 'ok'; readonly request: ReplyRequest }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'conflict'; readonly reason: 'not_confirm_document' | 'already_confirmed' | 'stale' };
+
 export type SweepResult = {
   /** #34/AC-3: os pedidos que a varredura marcou no_reply agora. */
   readonly marked: readonly number[];
@@ -44,6 +50,11 @@ export type ReplyUseCases = {
   editFollowUp(id: number, template: string, by: string): Promise<EditFollowUpResult>;
   /** #34/AC-4: envia a cobrança rascunhada; só uma pessoa chama, e fica gravado quem e quando. */
   sendFollowUp(id: number, by: string): Promise<SendFollowUpResult>;
+  /**
+   * #63/AC-1: confirma o documento citado na leitura do pedido em `confirm_document`; só uma pessoa chama, e fica gravado quem e quando (ADR-005).
+   * #63/AC-5: só grava a confirmação: não envia nada ao fornecedor e não muda a leitura, a decisão, o título nem o valor em risco.
+   */
+  confirmDocument(id: number, by: string): Promise<ConfirmDocumentResult>;
   /** #34/AC-5: os pedidos de um filtro, com a leitura, e as contagens de todos os filtros. */
   listRequests(filter: RequestFilter, today: string): Promise<ReplyList>;
 };
@@ -162,6 +173,23 @@ async function editFollowUp(deps: ReplyDeps, id: number, template: string, by: s
   return { kind: 'ok', request: { ...request, followUp: { ...request.followUp, draft: checked.text } } };
 }
 
+/** #63/AC-2: a confirmação do pedido, no formato lista que a regra do domínio recebe. */
+const confirmationsOf = (r: ReplyRequest): readonly DocumentConfirmation[] => (r.documentConfirmation === null ? [] : [r.documentConfirmation]);
+
+/** #63/AC-1, AC-4: o pedido enviado cuja leitura pede a confirmação; o armazém grava guardado pela versão, e a recusa de corrida volta como conflito. */
+async function confirmDocument(deps: ReplyDeps, id: number, by: string): Promise<ConfirmDocumentResult> {
+  const request = await deps.requests.get(id);
+  if (request === null) return { kind: 'not_found' };
+  const refusal = confirmRefusal(request, request.reading, confirmationsOf(request));
+  if (refusal !== null) return { kind: 'conflict', reason: refusal };
+  const document = request.reading?.supplierDocument;
+  if (document === null || document === undefined) return { kind: 'conflict', reason: 'not_confirm_document' }; // #63/AC-4: o que `confirmRefusal` já recusou; fecha o tipo
+  const confirmation = { document, by, at: deps.clock.now() };
+  const written = await deps.requests.confirmDocument(id, confirmation);
+  if (written !== 'recorded') return { kind: 'conflict', reason: written };
+  return { kind: 'ok', request: { ...request, documentConfirmation: confirmation } };
+}
+
 const rowOf = (r: ReplyRequest): ReplyListRow => ({
   id: r.id,
   invoiceAccessKey: r.invoiceAccessKey,
@@ -181,7 +209,7 @@ async function listRequests(deps: ReplyDeps, filter: RequestFilter, today: strin
   const counts: Record<RequestFilter, number> = { awaiting: 0, answered: 0, needs_you: 0, overdue: 0 };
   const rows: ReplyListRow[] = [];
   for (const request of await deps.requests.listSent()) {
-    const placed = filterOf(request, request.reading, today);
+    const placed = filterOf(request, request.reading, today, confirmationsOf(request)); // #63/AC-2: o confirmado cai em `answered`
     if (placed === null) continue;
     counts[placed] += 1;
     if (placed === filter) rows.push(rowOf(request));
@@ -194,5 +222,6 @@ export const createReplyUseCases = (deps: ReplyDeps): ReplyUseCases => ({
   sweepOverdue: (limit) => sweepOverdue(deps, limit),
   editFollowUp: (id, template, by) => editFollowUp(deps, id, template, by),
   sendFollowUp: (id, by) => sendFollowUp(deps, id, by),
+  confirmDocument: (id, by) => confirmDocument(deps, id, by),
   listRequests: (filter, today) => listRequests(deps, filter, today),
 });

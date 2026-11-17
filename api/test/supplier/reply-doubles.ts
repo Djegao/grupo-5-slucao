@@ -69,6 +69,7 @@ export const replyRequest = (id: number, overrides: Partial<ReplyRequest> = {}):
   dueOn: DUE,
   status: 'sent' as RequestStatus,
   reading: null,
+  documentConfirmation: null,
   followUp: emptyFollowUp,
   ...overrides,
 });
@@ -148,6 +149,16 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
       if (row?.followUp.sent != null) return 'already_sent';
       if (claims.has(id)) return 'send_in_progress';
       await patch(id, 'editFollowUpDraft', [id, text, by], (current) => ({ ...current, followUp: { ...current.followUp, draft: text } }));
+      return 'recorded';
+    },
+    // #63/AC-1, AC-4: grava a confirmação do documento; o documento já confirmado volta `already_confirmed` e nada é gravado.
+    confirmDocument: async (id, confirmation) => {
+      const row = map.get(id);
+      if (row?.documentConfirmation?.document === confirmation.document) {
+        calls.push({ op: 'confirmDocument', args: [id, confirmation] });
+        return 'already_confirmed';
+      }
+      await patch(id, 'confirmDocument', [id, confirmation], (current) => ({ ...current, documentConfirmation: confirmation }));
       return 'recorded';
     },
     // #35: a gravação da falha e a do carimbo só valem para quem ainda detém a ficha; a de quem a perdeu volta `lost` e não grava.

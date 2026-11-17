@@ -28,6 +28,16 @@
 // #58:           send_in_progress (o envio está reivindicado há menos que o prazo da reivindicação, LEASE_MS; vencida, a edição volta a valer e solta a reivindicação) |
 // #58:           no_draft (o pedido não é `sent` com a leitura que pede cobrança, ou não tem rascunho) | stale (a linha mudou no meio; repita).
 // #58:           404 not_found; 400, 401, 403, 415 e 502 como nas outras escritas. Editar nunca envia: só a rota send (POST) envia a cobrança.
+// #63:   POST  /api/supplier-requests/{accessKey}/confirm-document  {}   200 { request }   a pessoa confirma o documento que o fornecedor citou na resposta
+// #63:           (#4/AC-4): só do pedido `sent` cuja leitura é `fulfilled` com supplierDocument e nextStep `confirm_document`, ainda não confirmado. O corpo é
+// #63:           ignorado (vazio ou {}): `by` é o e-mail do Access, nunca o corpo. Grava o documento, quem e quando (ADR-005) e nada mais: não envia nada ao
+// #63:           fornecedor, não muda a leitura, a decisão, o título nem o valor em risco, e nenhuma varredura nem tarefa a chama (só esta rota). Confirmado,
+// #63:           o pedido sai de needs_you e cai em answered (a lista e as contagens). 200 traz a visão `sent` com documentConfirmation.
+// #63:           409 conflict { reason }: not_confirm_document (não é `sent`, sem leitura, ou a leitura não é o atendido com documento e confirm_document) |
+// #63:           already_confirmed (o documento da leitura atual já foi confirmado; a primeira confirmação fica) | stale (a linha andou por outra gravação
+// #63:           entre a leitura e a gravação: releia e repita). Duas chamadas ao mesmo tempo: uma 200 e a outra 409 already_confirmed.
+// #63:           404 not_found; 400 invalid_access_key | invalid_json; 403 forbidden sem e-mail; 405 com Allow: POST; 415; 502 supabase_unavailable { correlationId }.
+// #63:           Uma leitura nova com OUTRO documento deixa a confirmação velha para trás: o pedido volta a needs_you e pede outra; com o mesmo documento ela fica.
 // #13:   POST  /api/supplier-requests/{accessKey}/resend   {}       200 { request }   só de send_failed; nunca emite outra nota
 // #13:   POST  /api/supplier-requests/{accessKey}/discard  { reason?: string }   200 { request }   só de rascunho; reason aparado, até 500
 // #13:           caracteres, padrão 'discarded_by_user'
@@ -61,6 +71,9 @@
 // #36:                                          sentBy: string | null, sentAt: string | null, failure: string | null (código curto, nunca texto do provedor) }
 // #58: followUp ganha dueOn: string | null, o novo prazo da cobrança ('AAAA-MM-DD'), o que a regra gravou com o rascunho (#59: a tela o mostra sem calcular
 // #58: data); nulo sem rascunho, e no rascunho do Claude de antes da #58.
+// #63: a visão `sent` ganha, sem mudar nenhum campo anterior, documentConfirmation: { document: string, by: string (o e-mail do Access), at: string (ISO 8601, UTC) } | null,
+// #63:   a confirmação do documento citado na leitura atual (AC-3); null enquanto a pessoa não confirmou, e nunca ausente no pedido `sent`. Está na visão do GET
+// #63:   /{accessKey}, na lista ?status=sent e no corpo do 200 das escritas; a linha da lista de leitura (ReadingRow) não a traz: o filtro `answered` já a diz.
 // #36: "Cobrar" na tela abre followUp.draft para a pessoa revisar e enviar pelo POST .../send; o rascunho que já não confere com o catálogo vem null.
 // #58: a cobrança é montada pela regra, sem o Claude, na varredura do prazo do Cron (api/src/cron/supplier-sweep.ts): pede só o que o fornecedor ainda não
 // #58: atendeu, cita a nota de origem ({{nota.numero}}) e traz o novo prazo (3 dias úteis, {{cobranca.prazo}}); todo número é um marcador do catálogo.
@@ -86,6 +99,7 @@
 // #13:   404 not_found | 405 method_not_allowed, com Allow | 415 unsupported_media_type (escrita sem Content-Type JSON, como em admin.ts)
 // #13:   409 conflict { reason }: not_sendable | not_draft | not_send_failed | queue_not_pending | queue_entry_missing | issuance_missing |
 // #13:       send_in_progress | stale | open_request_exists
+// #63:       | not_confirm_document | already_confirmed (confirm-document)
 // #13:   422 invalid { reason, field? }: number_mismatch | invalid_shape | source_missing | text_invalid | note_not_buildable
 // #13:   502 supabase_unavailable { correlationId } | claude_unavailable { correlationId } (falha do Claude que não é de credencial)
 // #13:   503 supabase_not_configured | claude_unavailable (sem credencial do Claude, ou 401 e 429 dele; só no redo)
@@ -121,7 +135,7 @@ export interface SupplierRequestsDeps {
   ask?: (env: Env) => Ask | null;
 }
 
-const PATH = /^\/api\/supplier-requests(?:\/([^/]+)(?:\/(send|resend|discard|redo|follow-up|return-note\.json|return-note\.pdf))?)?$/;
+const PATH = /^\/api\/supplier-requests(?:\/([^/]+)(?:\/(send|resend|discard|redo|follow-up|confirm-document|return-note\.json|return-note\.pdf))?)?$/;
 const ACCESS_KEY = /^\d{44}$/;
 const REQUEST_TYPE = 'return_note';
 const MAX_REASON = 500;
@@ -133,7 +147,7 @@ const STATUSES: readonly RequestStatus[] = ['draft', 'sent', 'send_failed', 'dis
 /** #36: os filtros da lista de leitura (#4); não colidem com os estados do pedido da #13. */
 const FILTERS: readonly RequestFilter[] = ['awaiting', 'answered', 'needs_you', 'overdue']; // ADR-002
 
-const ACTIONS = ['send', 'resend', 'discard', 'redo', 'follow-up', 'return-note.json', 'return-note.pdf'] as const;
+const ACTIONS = ['send', 'resend', 'discard', 'redo', 'follow-up', 'confirm-document', 'return-note.json', 'return-note.pdf'] as const;
 type Action = (typeof ACTIONS)[number];
 const isAction = (value: string | undefined): value is Action => (ACTIONS as readonly (string | undefined)[]).includes(value);
 const isStatus = (value: string): value is RequestStatus => (STATUSES as readonly string[]).includes(value);
@@ -270,6 +284,17 @@ async function sendFollowUp(ctx: Ctx, id: number): Promise<Response> {
   return result.kind === 'ok' || result.kind === 'send_failed' ? shownAfter(ctx, id) : refusal(result); // ADR-002
 }
 
+/**
+ * #63/AC-1, AC-4, AC-6: a pessoa confirma o documento que o fornecedor citou na resposta; `by` vem do Access, nunca do corpo. Só grava a confirmação:
+ * nada é enviado ao fornecedor (#63/AC-5). Os resultados tipados viram HTTP como os das outras escritas.
+ */
+async function confirmDocument(ctx: Ctx): Promise<Response> {
+  const record = await currentOf(ctx);
+  if (record === null) return fail(404, 'not_found');
+  const result = await ctx.replyCases.confirmDocument(record.request.id, ctx.by);
+  return result.kind === 'ok' ? shownAfter(ctx, record.request.id) : refusal(result);
+}
+
 /** #13: o envio exige o estado de partida da rota (rascunho no `send`, falha no `resend`), e só depois chama o caso de uso. */
 async function send(ctx: Ctx, from: RequestStatus, reason: string): Promise<Response> {
   const record = await currentOf(ctx);
@@ -338,6 +363,8 @@ async function runAction(ctx: Ctx, action: Action | undefined, method: string): 
       return redo(ctx);
     case 'follow-up':
       return editFollowUp(ctx);
+    case 'confirm-document':
+      return confirmDocument(ctx);
     case 'return-note.json':
       return returnNoteJson(ctx);
     case 'return-note.pdf':

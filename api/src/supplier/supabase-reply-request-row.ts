@@ -1,6 +1,6 @@
-import { arrayOf, isInteger, isIsoDate, isString, isUnknown, nullable, oneOf, shaped, type Guard, type Shape } from '../connectors/guards.js';
+import { arrayOf, isInteger, isIsoDate, isRecord, isString, isUnknown, nullable, oneOf, shaped, type Guard, type Shape } from '../connectors/guards.js';
 import { SupabaseRestError } from '../connectors/supabase-rest.js';
-import type { RequestStatus, RequestType, SupplierRequestText } from '../domain/index.js';
+import { confirmationOf, type DocumentConfirmation, type RequestStatus, type RequestType, type SupplierRequestText } from '../domain/index.js';
 import type { FollowUpState, ReplyRequest } from './reply-ports.js';
 import { currentReading, isReadingRow, readingFromRow, READINGS_TABLE } from './supabase-reply-reading.js';
 import { noteFromJson } from './supabase-notes.js';
@@ -19,7 +19,7 @@ export const FOLLOW_UP_COLUMNS =
 
 /** #35 QR1/QR2: o pedido, o fornecedor pela chave estrangeira do pedido e as leituras pela chave estrangeira nomeada. */
 export const REQUEST_SELECT = [
-  'id,invoice_access_key,request_type,recipient,subject,asks,note,due_on,status,supplier_id',
+  'id,invoice_access_key,request_type,recipient,subject,asks,note,due_on,status,supplier_id,history', // #63/AC-3: o histórico leva as confirmações
   FOLLOW_UP_COLUMNS,
   'kit_fornecedores(razao_social)',
   `${READINGS_TABLE}!supplier_reply_readings_request_fkey(id,message_id,reply_outcome,fulfilled_asks,supplier_document,summary,next_step,injection_flag)`,
@@ -63,6 +63,7 @@ export type RequestRow = FollowUpColumns & {
   note: unknown;
   due_on: string;
   status: RequestStatus;
+  history: unknown[];
   kit_fornecedores: { razao_social: string } | null;
   supplier_reply_readings: unknown[];
 };
@@ -81,6 +82,7 @@ export const isRequestRow = shaped<RequestRow>({
   note: isUnknown,
   due_on: isIsoDate,
   status: oneOf<RequestStatus>('draft', 'sent', 'send_failed', 'discarded'), // ADR-002
+  history: arrayOf(isUnknown),
   kit_fornecedores: nullable(isSupplier),
   supplier_reply_readings: isReadings,
 } satisfies Shape<RequestRow>);
@@ -93,6 +95,24 @@ const instant = (value: string): Date => {
   const at = new Date(value);
   return Number.isNaN(at.getTime()) ? corrupt('carimbo da cobrança fora do formato') : at;
 };
+
+/** #63/AC-3: a ação da entrada do histórico que guarda a confirmação do documento (supabase/persistence-supplier-reply.md). */
+export const CONFIRMED_ACTION = 'document_confirmed';
+
+/**
+ * #63/AC-3 (ADR-005): as confirmações gravadas no histórico da linha, em ordem. A entrada fora do formato (sem documento, sem quem ou com
+ * carimbo que não é data) não é confirmação: é ignorada, nunca lançada, porque o histórico é de várias gravações e esta só lê a sua.
+ */
+export function confirmationsOf(history: readonly unknown[]): DocumentConfirmation[] {
+  const found: DocumentConfirmation[] = [];
+  for (const entry of history) {
+    if (!isRecord(entry) || entry.action !== CONFIRMED_ACTION) continue;
+    const { document, by, at } = entry;
+    if (!isString(document) || !isString(by) || !isString(at) || Number.isNaN(Date.parse(at))) continue;
+    found.push({ document, by, at: new Date(at) });
+  }
+  return found;
+}
 
 /** #35: o estado da cobrança nas colunas; o carimbo só existe com as quatro partes (a migração garante). */
 export function followUpOf(row: FollowUpColumns): FollowUpState {
@@ -110,6 +130,7 @@ export function followUpOf(row: FollowUpColumns): FollowUpState {
 
 /** #35: a linha lida e o número da nota de origem viram o pedido da leitura; a leitura atual vem da projeção do log. */
 export function toReplyRequest(row: RequestRow, invoiceNumber: string): ReplyRequest {
+  const reading = currentReading(row.supplier_reply_readings.map(readingFromRow))?.reading ?? null;
   return {
     id: row.id,
     invoiceAccessKey: row.invoice_access_key,
@@ -122,7 +143,8 @@ export function toReplyRequest(row: RequestRow, invoiceNumber: string): ReplyReq
     subject: row.subject,
     dueOn: row.due_on,
     status: row.status,
-    reading: currentReading(row.supplier_reply_readings.map(readingFromRow))?.reading ?? null,
+    reading,
+    documentConfirmation: confirmationOf(reading, confirmationsOf(row.history)),
     followUp: followUpOf(row),
   };
 }

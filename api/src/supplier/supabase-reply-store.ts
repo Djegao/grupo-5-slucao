@@ -1,16 +1,18 @@
 import { arrayOf, isInteger, isString, isUnknown, nullable, parseRows, shaped, type Shape } from '../connectors/guards.js';
 import { SupabaseRestError, type Filters, type SupabaseRest } from '../connectors/supabase-rest.js';
-import type { SupplierReading, SupplierRequestText } from '../domain/index.js';
-import type { ClaimAttempt, ClaimWrite, Clock, EditWrite, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
+import type { DocumentConfirmation, SupplierReading, SupplierRequestText } from '../domain/index.js';
+import type { ClaimAttempt, ClaimWrite, Clock, ConfirmWrite, EditWrite, FollowUpClaim, FollowUpStamp, ReadingRecorded, ReplyRequest, ReplyRequestStore } from './reply-ports.js';
 import { guarded, pgCode, refused } from './supabase-reply-call.js';
 import { LEASE_MS } from './supabase-store.js';
 import { READINGS_TABLE, readingToRow } from './supabase-reply-reading.js';
 import {
+  CONFIRMED_ACTION,
   FOLLOW_UP_COLUMNS,
   OUTBOX_TABLE,
   READINGS_ORDER,
   REQUEST_SELECT,
   followUpShape,
+  confirmationsOf,
   followUpSummary,
   isRequestRow,
   lastState,
@@ -77,13 +79,15 @@ const isId = shaped<{ id: number }>({ id: isInteger });
 
 /** #35: uma gravação da cobrança: o que muda, quem e quando, e a guarda atômica da transição. */
 type FollowUpChange = {
-  readonly action: 'follow_up_drafted' | 'follow_up_edited' | 'follow_up_claimed' | 'follow_up_failed' | 'follow_up_sent';
+  readonly action: 'follow_up_drafted' | 'follow_up_edited' | 'follow_up_claimed' | 'follow_up_failed' | 'follow_up_sent' | typeof CONFIRMED_ACTION;
   readonly by: string;
   readonly at: Date;
   readonly guard: Filters;
   readonly columns: Partial<FollowUpColumns> & { follow_up_claim?: string | null };
   /** #58/AC-5: o texto que quem grava leu e vai usar; se a linha lida já tem outro, nada é gravado (`stale`). */
   readonly expects?: SupplierRequestText;
+  /** #63/AC-1: campos a mais da entrada do histórico (o documento confirmado); nunca texto do rascunho nem da dependência. */
+  readonly entry?: Record<string, string>;
 };
 
 type Written = 'ok' | 'missing' | 'refused' | 'stale';
@@ -132,7 +136,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
     const after: FollowUpColumns = { ...row, ...change.columns };
     const version = row.version + 1;
     const at = change.at.toISOString();
-    const entry = { version, at, by: change.by, action: change.action, state: lastState(row.history), follow_up: followUpSummary(after) };
+    const entry = { version, at, by: change.by, action: change.action, state: lastState(row.history), follow_up: followUpSummary(after), ...change.entry };
     const body = { ...change.columns, version, updated_at: at, history: [...row.history, entry] };
     const updated = await guarded(() => rest.update(OUTBOX_TABLE, { id: `eq.${id}`, version: `eq.${row.version}`, ...change.guard }, body));
     return updated.length > 0 ? 'ok' : 'refused';
@@ -221,6 +225,24 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
       if (now === null || now.follow_up_draft === null) throw refused('edit_follow_up_draft', OUTBOX_TABLE);
       if (now.follow_up_sent_at !== null) return 'already_sent';
       return heldAt(now.follow_up_claimed_at, at) ? 'send_in_progress' : 'stale';
+    },
+
+    /**
+     * #63/AC-1, AC-4: lê a linha e grava a entrada `document_confirmed` num `PATCH` guardado pela versão lida e por `status=sent`, sem tocar coluna
+     * nenhuma (só version, history e updated_at, #63/AC-5). Com o documento já confirmado no histórico lido, volta sem gravar; com 0 linhas relê
+     * para dizer por quê: a outra chamada ganhou (`already_confirmed`) ou a linha andou por outra gravação (`stale`).
+     */
+    async confirmDocument(id: number, confirmation: DocumentConfirmation): Promise<ConfirmWrite> {
+      const confirmed = (history: readonly unknown[]): boolean => confirmationsOf(history).some((c) => c.document === confirmation.document);
+      const row = await readForWrite(id);
+      if (row === null) throw refused('confirm_document', OUTBOX_TABLE);
+      if (confirmed(row.history)) return 'already_confirmed';
+      const change: FollowUpChange = { action: CONFIRMED_ACTION, by: confirmation.by, at: confirmation.at, guard: SENT, columns: {}, entry: { document: confirmation.document } };
+      const written = await writeFollowUp(id, change);
+      if (written === 'ok') return 'recorded';
+      const now = await readForWrite(id);
+      if (written === 'missing' || now === null) throw refused('confirm_document', OUTBOX_TABLE);
+      return confirmed(now.history) ? 'already_confirmed' : 'stale';
     },
 
     async claimFollowUpSend(id, by, draft): Promise<ClaimAttempt> {
