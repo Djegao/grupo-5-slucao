@@ -246,14 +246,14 @@ describe("#209 AC-5: nota já decidida abre só para leitura", () => {
 describe("#3 pedido ao fornecedor na gaveta da proposta decidida", () => {
   const approval = { approver: "c", approverLevel: "coordenacao", dockAction: { kind: "receber" }, justification: "ok", decidedOn: "2026-11-15" };
   const decided = () => proposal({ kind: "receber" }, { state: "na_lista_do_dia", approval });
-  const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80 · devolução", body: "Texto do e-mail" };
+  const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80 · devolução", body: "Texto do e-mail", template: "Texto do e-mail" };
   const port = (load: SupplierRequestPort["load"]): SupplierRequestPort => ({
     load,
     send: vi.fn(),
     resend: vi.fn(),
     discard: vi.fn(),
     redo: vi.fn(),
-    saveText: vi.fn(),
+    saveTemplate: vi.fn(),
   });
 
   it("#3/AC-1: com pedido, o bloco vem logo depois da Decisão registrada", async () => {

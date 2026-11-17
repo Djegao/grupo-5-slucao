@@ -6,7 +6,7 @@ import { initialSupplierRequestState, MAX_POLL_FAILURES, supplierRequestError, s
 
 // #3 A conta pura do estado do bloco "Pedido ao fornecedor" (#16): sem rede e sem tela.
 
-const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução", body: "Texto original" };
+const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução", body: "Texto original", template: "Texto {{valor}} original" };
 const draft: SupplierRequestView = { status: "draft", email };
 const withRequest = (request: SupplierRequestView | null, extra: Partial<SupplierRequestState> = {}): SupplierRequestState => ({ ...initialSupplierRequestState, request, ...extra });
 
@@ -55,7 +55,8 @@ describe("#3 estado do pedido ao fornecedor: transições", () => {
   it("#3/AC-6: editar abre a edição com o texto do e-mail; os botões do rascunho viram os da edição", () => {
     const next = supplierRequestReducer(withRequest(draft), { type: "editStarted" });
     expect(viewOf(next)?.status).toBe("editing");
-    expect(next.draftText).toBe("Texto original");
+    // #17 A edição abre com o molde ({{chave}}), o que o PATCH reenvia; o corpo desenhado é o renderizado.
+    expect(next.draftText).toBe("Texto {{valor}} original");
   });
 
   it("#3/AC-6: só um rascunho se edita, e não durante uma ação", () => {
@@ -79,7 +80,7 @@ describe("#3 estado do pedido ao fornecedor: transições", () => {
   });
 
   it("#3/AC-6: salvar com sucesso fecha a edição e traz o texto novo", () => {
-    const saved: SupplierRequestView = { status: "draft", email: { ...email, body: "Texto novo" } };
+    const saved: SupplierRequestView = { status: "draft", email: { ...email, body: "Texto novo", template: "Texto novo" } };
     const next = supplierRequestReducer(withRequest(draft, { editing: true, pending: "save" }), { type: "done", request: saved });
     expect(next.editing).toBe(false);
     expect(viewOf(next)).toEqual(saved);

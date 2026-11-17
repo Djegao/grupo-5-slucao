@@ -10,7 +10,7 @@ import { useSupplierRequest } from "./useSupplierRequest";
 // #16 O caminho pela tela inteira está em SupplierRequestSection.test.tsx.
 
 const KEY = "35261100000000000000550010000080001000080001";
-const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80", body: "Texto" };
+const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 80", body: "Texto", template: "Texto {{valor}}" };
 const draft: SupplierRequestView = { status: "draft", email };
 
 const port = (over: Partial<SupplierRequestPort> = {}): SupplierRequestPort => ({
@@ -19,7 +19,7 @@ const port = (over: Partial<SupplierRequestPort> = {}): SupplierRequestPort => (
   resend: vi.fn(),
   discard: vi.fn(),
   redo: vi.fn(),
-  saveText: vi.fn(),
+  saveTemplate: vi.fn(),
   ...over,
 });
 
@@ -54,12 +54,46 @@ describe("#3 gancho useSupplierRequest", () => {
     expect(result.current.request?.status).toBe("draft");
   });
 
+  it("#3/AC-4: a ação que estoura o prazo (status 0) recarrega o pedido, e o que o servidor concluiu aparece com a mensagem fixa", async () => {
+    const sent: SupplierRequestView = { status: "sent", sentBy: "ana", sentAt: "2026-11-15T13:40:00Z", email };
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(draft).mockResolvedValue(sent);
+    const p = port({ load, send: vi.fn(async () => Promise.reject(new ApiError(0, null, "não consegui falar com a API"))) });
+    const { result } = renderHook(() => useSupplierRequest(p, KEY));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    act(() => result.current.onSend());
+    await waitFor(() => expect(result.current.request?.status).toBe("sent"));
+    expect(result.current.error).toBe(texts.supplierRequest.errors.timeout);
+    expect(result.current.pending).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("#3/AC-4: o status 0 com a releitura também falha mantém o estado de antes e a mensagem fixa", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValueOnce(draft).mockRejectedValue(new ApiError(0, null, "x"));
+    const p = port({ load, send: vi.fn(async () => Promise.reject(new ApiError(0, null, "x"))) });
+    const { result } = renderHook(() => useSupplierRequest(p, KEY));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    act(() => result.current.onSend());
+    await waitFor(() => expect(result.current.error).toBe(texts.supplierRequest.errors.timeout));
+    expect(result.current.request?.status).toBe("draft");
+    expect(result.current.loadFailed).toBe(false);
+  });
+
+  it("#3/AC-4: recusa com status que não é 0 não recarrega", async () => {
+    const load = vi.fn<SupplierRequestPort["load"]>().mockResolvedValue(draft);
+    const p = port({ load, send: vi.fn(async () => Promise.reject(new ApiError(409, null, "x"))) });
+    const { result } = renderHook(() => useSupplierRequest(p, KEY));
+    await waitFor(() => expect(result.current.request?.status).toBe("draft"));
+    act(() => result.current.onSend());
+    await waitFor(() => expect(result.current.error).toBe(texts.supplierRequest.errors.conflict));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it("#3/AC-6: onEdit entrega o estado editing e onCancelEdit devolve o rascunho", async () => {
     const { result } = renderHook(() => useSupplierRequest(port(), KEY));
     await waitFor(() => expect(result.current.request?.status).toBe("draft"));
     act(() => result.current.onEdit());
     expect(result.current.request?.status).toBe("editing");
-    expect(result.current.draftText).toBe("Texto");
+    expect(result.current.draftText).toBe("Texto {{valor}}"); // #17 o molde, não o corpo renderizado
     act(() => result.current.onCancelEdit());
     expect(result.current.request?.status).toBe("draft");
   });

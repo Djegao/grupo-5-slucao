@@ -17,6 +17,8 @@ import type {
   InvoiceState,
   PartialLine,
   ProposalState,
+  RequestStatus,
+  RequestType,
   TitleState,
   Unit,
 } from "@domain";
@@ -164,4 +166,60 @@ export interface DuplicateDto {
 export interface DuplicatesResponseDto {
   duplicates: DuplicateDto[];
   count: number;
+}
+
+/**
+ * #17 O pedido ao fornecedor como `api/src/http/supplier-requests.ts` o entrega (#13). A visão do fio mora na
+ * camada HTTP da API (`WireRequest`), que o `@domain` não exporta: aqui ela é espelhada à mão, e o que o domínio
+ * nomeia (`RequestType`, `RequestStatus`) vem por `import type`. O dinheiro já chega em texto pt-BR.
+ */
+export interface SupplierRequestMoneyDto {
+  text: string;
+}
+
+export interface SupplierRequestNoteDto {
+  /** #17 O ND-n emitido; nulo antes da emissão. */
+  number: string | null;
+  /** #17 O código do fornecedor (F02), não o nome. */
+  supplier: string;
+  /** #17 O número da nota de origem. */
+  reference: string;
+  lines: { description: string; quantity: string; unitPrice: SupplierRequestMoneyDto; total: SupplierRequestMoneyDto }[];
+  total: SupplierRequestMoneyDto;
+}
+
+interface SupplierRequestContentDto {
+  invoiceAccessKey: string;
+  requestType: RequestType;
+  returnNote: SupplierRequestNoteDto;
+  email: {
+    to: string;
+    /** #17 AAAA-MM-DD. */
+    dueOn: string;
+    subject: string;
+    /** #17 O texto renderizado, o que a pessoa lê. */
+    body: string;
+    /** #17 O molde com `{{chave}}`: é o que o PATCH reenvia, e o servidor reconfere os números nele. */
+    template: string;
+  };
+  asks: string[];
+  /** #17 Depois da emissão; o `url` é o `return-note.json` da própria API. */
+  attachment?: { name: string; url: string };
+}
+
+/** #17 Os motivos que a API dá quando o texto do Claude foi recusado (#2/AC-7). */
+export type SupplierRequestRefusal = "number_mismatch" | "invalid_shape";
+
+export type SupplierRequestDto =
+  | { status: "writing" }
+  | ({ status: Extract<RequestStatus, "draft"> } & SupplierRequestContentDto)
+  | ({ status: Extract<RequestStatus, "sent">; sentBy: string | null; sentAt: string | null } & SupplierRequestContentDto)
+  // #17 `failure` é um código curto da porta de envio, nunca o texto do provedor.
+  | ({ status: Extract<RequestStatus, "send_failed">; failure: string } & SupplierRequestContentDto)
+  | { status: Extract<RequestStatus, "discarded">; discardedAt: string | null; discardedBy: string | null }
+  | { status: "failed"; failure: SupplierRequestRefusal };
+
+/** Toda rota por chave de acesso responde `{ request }`; sem pedido, nulo. */
+export interface SupplierRequestResponseDto {
+  request: SupplierRequestDto | null;
 }

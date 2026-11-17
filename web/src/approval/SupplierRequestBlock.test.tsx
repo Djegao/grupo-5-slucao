@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { texts } from "../texts";
 import { SupplierRequestBlock, type SupplierRequestBlockProps, type SupplierRequestView } from "./SupplierRequestBlock";
 
 // #3 O bloco "Pedido ao fornecedor", um teste de renderização por estado do wireframe
@@ -19,7 +20,7 @@ const returnNote = {
   ],
   total: money(246_320),
 };
-const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução do item trocado", body: MAIL_TEXT };
+const email = { to: "fiscal@higienetotal.test", dueOn: "2026-11-18", subject: "NF 20046 · devolução do item trocado", body: MAIL_TEXT, template: "Na NF {{numero}} veio {{item}}." };
 const attachment = { name: "nota-devolucao-ND-0012.pdf", url: "/api/supplier-requests/sr-1/return-note.pdf" };
 
 const draft: SupplierRequestView = { status: "draft", returnNote, email, attachment };
@@ -125,6 +126,37 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
     expect(screen.getByText(/E-mail enviado por você às \d{2}h\d{2} · aguardando resposta até 18\/11/)).toBeTruthy();
   });
 
+  it("#3/AC-4: sem carimbo (sentBy e sentAt nulos) a linha não traz quem nem a hora", () => {
+    setup({ status: "sent", returnNote, email, attachment, sentBy: null, sentAt: null });
+    expect(screen.getByText("Nota de devolução ND-0012 emitida e enviada · aguardando resposta até 18/11")).toBeTruthy();
+    expect(block().textContent).not.toMatch(/null|Invalid|NaN|--h--|outra pessoa/); // #17
+  });
+
+  it("#3/AC-4: sem carimbo e sem nota, o e-mail enviado também fica sem quem e sem hora", () => {
+    setup({ status: "sent", ...mailOnly, sentBy: null, sentAt: null });
+    expect(screen.getByText("E-mail enviado · aguardando resposta até 18/11")).toBeTruthy();
+  });
+
+  it("#3/AC-4: só um dos dois carimbos nulos tira só a parte que falta", () => {
+    setup({ status: "sent", returnNote, email, sentBy: "bia@jachegou.test", sentAt: null });
+    expect(screen.getByText("Nota de devolução ND-0012 emitida e enviada por bia@jachegou.test · aguardando resposta até 18/11")).toBeTruthy();
+    cleanup();
+    setup({ status: "sent", returnNote, email, sentBy: null, sentAt: SENT_AT });
+    expect(screen.getByText(/^Nota de devolução ND-0012 emitida e enviada às \d{2}h\d{2} · aguardando resposta até 18\/11$/)).toBeTruthy();
+  });
+
+  it("#3/AC-5: um código de falha que a tela não conhece vira a frase genérica, nunca o código", () => {
+    setup({ status: "send_failed", returnNote, email, attachment, failure: "codigo_novo_do_provedor" });
+    expect(block().textContent).not.toContain("codigo_novo_do_provedor"); // #17
+    expect(screen.getByText(texts.supplierRequest.sendFailedWithNote("ND-0012", texts.supplierRequest.sendFailureOther))).toBeTruthy();
+  });
+
+  it("#3/AC-8: um código de recusa que a tela não conhece vira a frase genérica, nunca o código", () => {
+    setup({ status: "failed", failure: "codigo_novo" });
+    expect(block().textContent).not.toContain("codigo_novo"); // #17
+    expect(screen.getByText(texts.supplierRequest.notPrepared(texts.supplierRequest.notPreparedOther))).toBeTruthy();
+  });
+
   it("#3/AC-4: pendente desabilita todos os botões, troca só o texto do principal e marca o bloco como ocupado", () => {
     setup(draft, { pending: "send" });
     expect(button("Emitindo e enviando…").disabled).toBe(true);
@@ -141,8 +173,8 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
   });
 
   it("#3/AC-5: envio falho mostra o motivo e Tentar enviar de novo, sem Descartar nem Editar", () => {
-    const on = setup({ status: "send_failed", returnNote, email, attachment, failure: "caixa do fornecedor indisponível" });
-    expect(screen.getByText("A nota ND-0012 foi emitida, mas o e-mail não saiu: caixa do fornecedor indisponível.")).toBeTruthy();
+    const on = setup({ status: "send_failed", returnNote, email, attachment, failure: "resend_unavailable" });
+    expect(screen.getByText("A nota ND-0012 foi emitida, mas o e-mail não saiu: o serviço de e-mail está indisponível.")).toBeTruthy();
     expect(screen.getByRole("link", { name: /nota-devolucao-ND-0012\.pdf/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Descartar" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
@@ -156,15 +188,16 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
   });
 
   it("#3/AC-5: sem nota, o envio falho diz O e-mail não saiu", () => {
-    setup({ status: "send_failed", ...mailOnly, failure: "caixa cheia" });
-    expect(screen.getByText("O e-mail não saiu: caixa cheia.")).toBeTruthy();
+    setup({ status: "send_failed", ...mailOnly, failure: "send_failed" });
+    expect(screen.getByText("O e-mail não saiu: o serviço de e-mail recusou o envio.")).toBeTruthy();
   });
 
   it("#3/AC-6: editando, só o texto do e-mail é um campo; nota e demais campos ficam travados", () => {
-    const on = setup({ status: "editing", returnNote, email, attachment }, { draftText: MAIL_TEXT });
+    const on = setup({ status: "editing", returnNote, email, attachment }, { draftText: "Na NF {{numero}} veio {{item}}." });
     const boxes = screen.getAllByRole("textbox") as HTMLTextAreaElement[];
     expect(boxes).toHaveLength(1);
-    expect(boxes[0]?.value).toBe(MAIL_TEXT);
+    expect(boxes[0]?.value).toBe("Na NF {{numero}} veio {{item}}."); // #17 o molde, com os marcadores dos números travados
+    expect(screen.getByText(/Mantenha os marcadores/)).toBeTruthy();
     expect(screen.getByText("Para, prazo e anexo: travados")).toBeTruthy();
     expect(screen.getByText(/travada/)).toBeTruthy();
     expect(screen.getByText("Os números do texto são conferidos com o banco ao salvar.")).toBeTruthy();
@@ -192,13 +225,26 @@ describe("#3 bloco Pedido ao fornecedor: um estado por vez", () => {
     expect(on.onRedo).toHaveBeenCalledTimes(1);
   });
 
+  it("#3/AC-7: sem carimbo (discardedBy e discardedAt nulos) diz só Pedido descartado, e Refazer segue", () => {
+    const on = setup({ status: "discarded", discardedAt: null, discardedBy: null });
+    expect(screen.getByText("Pedido descartado")).toBeTruthy();
+    expect(block().textContent).not.toMatch(/null|Invalid|NaN|--h--|outra pessoa/); // #17
+    fireEvent.click(button("Refazer"));
+    expect(on.onRedo).toHaveBeenCalledTimes(1);
+  });
+
+  it("#3/AC-7: descartado por outra pessoa, sem hora, diz quem e não a hora", () => {
+    setup({ status: "discarded", discardedAt: null, discardedBy: "bia@jachegou.test" });
+    expect(screen.getByText("Pedido descartado por bia@jachegou.test")).toBeTruthy();
+  });
+
   it("#3/AC-7: refazendo desabilita o botão e mostra Refazendo…", () => {
     setup({ status: "discarded", discardedAt: "2026-11-15T13:41:00Z" }, { pending: "redo" });
     expect(button("Refazendo…").disabled).toBe(true);
   });
 
   it("#3/AC-8: sem rascunho por falha ou número fora do catálogo, mostra o motivo e Refazer, sem nota nem e-mail", () => {
-    const on = setup({ status: "failed", failure: "o texto citou um número fora do catálogo" });
+    const on = setup({ status: "failed", failure: "number_mismatch" });
     expect(screen.getByText("Não foi possível preparar o pedido: o texto citou um número fora do catálogo.")).toBeTruthy();
     expect(screen.queryByText("Total da devolução")).toBeNull();
     expect(screen.queryByRole("button", { name: "Emitir e enviar" })).toBeNull();

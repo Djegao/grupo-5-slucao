@@ -3,6 +3,7 @@
  * tempos em tempos enquanto o Claude escreve (AC-2) e traduz cada ação em pendente, feito ou recusado.
  */
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { ApiError } from "../api/client";
 import type { SupplierRequestBlockProps, SupplierRequestPending, SupplierRequestView } from "./SupplierRequestBlock";
 import {
   initialSupplierRequestState,
@@ -69,6 +70,15 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
     setAttempt((n) => n + 1);
   }, []);
 
+  const refresh = useCallback(async () => {
+    try {
+      const request = await portRef.current.load(accessKey, new AbortController().signal);
+      if (live.current) dispatch({ type: "loaded", request });
+    } catch {
+      // #3/AC-4 A releitura que também falha deixa o estado de antes e a mensagem fixa; quem segue vendo vai ter a consulta.
+    }
+  }, [accessKey]);
+
   const act = useCallback(async (pending: SupplierRequestPending, call: () => Promise<SupplierRequestView>) => {
     dispatch({ type: "started", pending });
     try {
@@ -76,8 +86,10 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
       if (live.current) dispatch({ type: "done", request });
     } catch (reason) {
       if (live.current) dispatch({ type: "failed", error: supplierRequestError(reason) });
+      // #3/AC-4 Prazo estourado (status 0): o servidor pode ter concluído, então a tela relê o pedido em vez de manter o de antes.
+      if (reason instanceof ApiError && reason.status === 0) await refresh();
     }
-  }, []);
+  }, [refresh]);
 
   return {
     request: viewOf(state),
@@ -91,7 +103,7 @@ export function useSupplierRequest(port: SupplierRequestPort, accessKey: string,
     onResend: () => void act("resend", () => portRef.current.resend(accessKey)),
     onDiscard: () => void act("discard", () => portRef.current.discard(accessKey)),
     onRedo: () => void act("redo", () => portRef.current.redo(accessKey)),
-    onSave: () => void act("save", () => portRef.current.saveText(accessKey, state.draftText)),
+    onSave: () => void act("save", () => portRef.current.saveTemplate(accessKey, state.draftText)),
     onEdit: () => dispatch({ type: "editStarted" }),
     onCancelEdit: () => dispatch({ type: "editCancelled" }),
     onDraftTextChange: (text) => dispatch({ type: "textChanged", text }),
