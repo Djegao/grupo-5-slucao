@@ -7,7 +7,7 @@ import {
   type SupplierRequestText,
 } from '../domain/index.js';
 import { draftRequest, todayIso, type DraftResult } from './draft.js';
-import { kitNoteAttachment } from './kit-note.js';
+import { kitNoteAttachment, kitNotePdfAttachment } from './kit-note.js';
 import type { MailMessage, MailResult, RequestRecord, SourceInvoice, SupplierDeps } from './ports.js';
 
 // #11: os casos de uso do pedido ao fornecedor (#2): emitir e enviar, editar o corpo, descartar e refazer.
@@ -158,7 +158,7 @@ async function prepareSend(deps: SupplierDeps, record: RequestRecord, rendered: 
     requestType: request.requestType,
     to: record.to,
     ...rendered,
-    attachments: [kitNoteAttachment(issued)],
+    attachments: [kitNoteAttachment(issued), kitNotePdfAttachment(issued)], // #57/AC-1 #57/AC-6: o PDF sai da nota emitida, então o reenvio leva o mesmo
     dueOn: request.dueOn,
     idempotencyKey: claim,
   };

@@ -7,6 +7,7 @@ import {
   type IssuedReturnNote,
   type ReturnNoteDraft,
 } from '../domain/index.js';
+import { noteFilename } from '../supplier/kit-note.js';
 import type { RequestRecord, SourceInvoice } from '../supplier/ports.js';
 import type { ReplyRequest } from '../supplier/reply-ports.js';
 import { followUpOf, readingOf, type WireFollowUp, type WireReading } from './supplier-reply-view.js';
@@ -50,8 +51,8 @@ const NO_FOLLOW_UP: WireFollowUp = { drafted: false, sent: false, draft: null, s
 /** #13: o dinheiro em reais, em texto pt-BR, feito no servidor a partir do valor da nota. */
 const money = (reais: number): WireMoney => ({ text: Money.fromReais(reais).toString() });
 
-/** #13: a URL do anexo é a da própria API, por chave de acesso da nota de origem. */
-export const noteUrl = (invoiceAccessKey: string): string => `/api/supplier-requests/${invoiceAccessKey}/return-note.json`;
+/** #13: a URL do anexo é a da própria API, por chave de acesso da nota de origem. #57/AC-5: o anexo da gaveta é o PDF. */
+export const noteUrl = (invoiceAccessKey: string): string => `/api/supplier-requests/${invoiceAccessKey}/return-note.pdf`;
 
 function noteOf(draft: ReturnNoteDraft, issued: IssuedReturnNote | null, reference: string): WireNote {
   return {
@@ -95,7 +96,7 @@ export function viewOf(record: RequestRecord, source: SourceInvoice | null, repl
     returnNote: noteOf(request.note, issued, source.invoice.number),
     email: { to: record.to, dueOn: request.dueOn, subject: text.rendered.subject, body: text.rendered.body, template: request.body },
     asks: text.rendered.asks,
-    ...(issued === null ? {} : { attachment: { name: `${issued.noteId}.json`, url: noteUrl(request.invoiceAccessKey) } }),
+    ...(issued === null ? {} : { attachment: { name: noteFilename(issued, 'pdf'), url: noteUrl(request.invoiceAccessKey) } }),
   };
   if (request.status === 'sent') { // ADR-002
     const sent = { sentBy: record.audit?.sentBy ?? null, sentAt: record.audit?.sentAt ?? null };

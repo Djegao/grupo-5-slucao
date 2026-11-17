@@ -22,6 +22,9 @@
 // #13:   POST  /api/supplier-requests/{accessKey}/redo     {}       200 { request }   só quando o mais recente está descartado e não há aberto;
 // #13:           faz o rascunho de novo pelo Claude
 // #13:   GET   /api/supplier-requests/{accessKey}/return-note.json  200 a nota emitida no formato do kit; 404 antes da emissão (é o `url` do anexo)
+// #57:   GET   /api/supplier-requests/{accessKey}/return-note.pdf  200 application/pdf, a mesma nota emitida desenhada em PDF (sem dependência, valores
+// #57:           iguais aos do JSON); 404 { error: 'not_found' } antes da emissão. O envio (POST .../send e .../resend) leva o e-mail com DOIS anexos:
+// #57:           `nota-devolucao-ND-n.json` (application/json) e `nota-devolucao-ND-n.pdf` (application/pdf); o reenvio leva os mesmos, sem emitir outra nota.
 // #13:   GET   /api/supplier-requests?status=draft|sent|send_failed|discarded   200 { requests: SupplierRequestView[] }
 // #13:           padrão draft; os 10 mais novos do estado; 400 { error: 'invalid_status' } fora dos quatro
 // #36:   GET   /api/supplier-requests?status=awaiting|answered|needs_you|overdue   200 { filter, requests: ReadingRow[], counts }
@@ -54,7 +57,7 @@
 // #13:                     reference (o número da nota de origem), lines: [{ description, quantity ("40 UN"), unitPrice: { text }, total: { text } }],
 // #13:                     total: { text } },
 // #13:       email: { to, dueOn ('AAAA-MM-DD'), subject (renderizado), body (renderizado), template (com {{chave}}; é o que o PATCH envia) },
-// #13:       asks: string[] (renderizado), attachment?: { name, url } (depois da emissão),
+// #13:       asks: string[] (renderizado), attachment?: { name, url } (depois da emissão; #57: o PDF, `nota-devolucao-ND-n.pdf` e o `return-note.pdf`),
 // #13:       sent: sentBy, sentAt (string | null só se a linha não tem o carimbo); send_failed: failure (código curto, nunca texto do provedor) }
 // #13:   | { status: 'discarded', discardedAt, discardedBy }      descartado por uma pessoa
 // #13:   | { status: 'failed', failure: 'number_mismatch' | 'invalid_shape' }   nasceu descartado pelo agente: o texto do Claude foi recusado (#2/AC-7)
@@ -76,7 +79,8 @@ import { SupabaseRestError, type SupabaseRest } from '../connectors/supabase-res
 import type { RequestFilter, RequestStatus } from '../domain/index.js';
 import type { Env } from '../env.js';
 import { mailerFromEnv } from '../supplier/mock-mailer.js';
-import { toKitNote } from '../supplier/kit-note.js';
+import { noteFilename, toKitNote } from '../supplier/kit-note.js';
+import { returnNotePdf } from '../supplier/return-note-pdf.js';
 import type { Clock, RequestRecord, SupplierDeps, SupplierMailer } from '../supplier/ports.js';
 import { SupplierStoreError } from '../supplier/supabase-store.js';
 import { supplierDeps } from '../supplier/supabase-deps.js';
@@ -100,7 +104,7 @@ export interface SupplierRequestsDeps {
   ask?: (env: Env) => Ask | null;
 }
 
-const PATH = /^\/api\/supplier-requests(?:\/([^/]+)(?:\/(send|resend|discard|redo|return-note\.json))?)?$/;
+const PATH = /^\/api\/supplier-requests(?:\/([^/]+)(?:\/(send|resend|discard|redo|return-note\.json|return-note\.pdf))?)?$/;
 const ACCESS_KEY = /^\d{44}$/;
 const REQUEST_TYPE = 'return_note';
 const MAX_REASON = 500;
@@ -112,7 +116,7 @@ const STATUSES: readonly RequestStatus[] = ['draft', 'sent', 'send_failed', 'dis
 /** #36: os filtros da lista de leitura (#4); não colidem com os estados do pedido da #13. */
 const FILTERS: readonly RequestFilter[] = ['awaiting', 'answered', 'needs_you', 'overdue']; // ADR-002
 
-const ACTIONS = ['send', 'resend', 'discard', 'redo', 'return-note.json'] as const;
+const ACTIONS = ['send', 'resend', 'discard', 'redo', 'return-note.json', 'return-note.pdf'] as const;
 type Action = (typeof ACTIONS)[number];
 const isAction = (value: string | undefined): value is Action => (ACTIONS as readonly (string | undefined)[]).includes(value);
 const isStatus = (value: string): value is RequestStatus => (STATUSES as readonly string[]).includes(value);
@@ -125,7 +129,7 @@ const fail = (status: number, error: string, extra: Record<string, unknown> = {}
 const allowed = (key: string | undefined, action: Action | undefined): readonly string[] => {
   if (key === undefined) return ['GET'];
   if (action === undefined) return ['GET', 'PATCH'];
-  return action === 'return-note.json' ? ['GET'] : ['POST'];
+  return action === 'return-note.json' || action === 'return-note.pdf' ? ['GET'] : ['POST'];
 };
 
 /** #13: o corpo de uma escrita; vazio vale {}, e o que não é um objeto JSON é nulo. */
@@ -278,6 +282,15 @@ async function returnNoteJson(ctx: Ctx): Promise<Response> {
   return issued === null ? fail(404, 'not_found') : Response.json(toKitNote(issued));
 }
 
+/** #57/AC-2: o PDF da mesma nota emitida; 404 antes da emissão, como o JSON. Só a nota sai, sem campo de erro nem de dependência. */
+async function returnNotePdfResponse(ctx: Ctx): Promise<Response> {
+  const issued = (await currentOf(ctx))?.request.issuedNote ?? null;
+  if (issued === null) return fail(404, 'not_found');
+  return new Response(returnNotePdf(toKitNote(issued)), {
+    headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${noteFilename(issued, 'pdf')}"`, 'Cache-Control': 'private, no-store' },
+  });
+}
+
 async function runAction(ctx: Ctx, action: Action | undefined, method: string): Promise<Response> {
   switch (action) {
     case undefined:
@@ -292,6 +305,8 @@ async function runAction(ctx: Ctx, action: Action | undefined, method: string): 
       return redo(ctx);
     case 'return-note.json':
       return returnNoteJson(ctx);
+    case 'return-note.pdf':
+      return returnNotePdfResponse(ctx);
   }
 }
 
