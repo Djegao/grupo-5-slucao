@@ -126,6 +126,6 @@ describe('#12 o registro dos modos de persistência', () => { // ADR-002
   it('declara as três tabelas desta camada, cada uma no seu modo', () => { // ADR-002
     expect(REGISTRY).toMatch(/issued_return_notes:\s*\n\s*mode: append-only/);
     expect(REGISTRY).toMatch(/outbox_supplier_emails:\s*\n\s*mode: upsert-with-history/);
-    expect(REGISTRY).toMatch(/kit_fornecedores:\s*\n\s*mode: ephemeral/);
+    expect(REGISTRY).toMatch(/kit_fornecedores:[^\n]*\n\s*mode: ephemeral/);
   });
 });

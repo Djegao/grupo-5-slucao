@@ -119,7 +119,7 @@ Nenhum. `strategies.tenancy.strategy: none`. Todas as tabelas seguem a convenç�
 
 | Condição | Atendida por | Não atendida, e por quê |
 |---|---|---|
-| PER-1 | as três tabelas desta camada estão no registro | as tabelas criadas antes da #12 não estão (em aberto) |
+| PER-1 | as três tabelas desta camada estão no registro | a #8 registrou `outbox_return_notes`, as tabelas do kit e as do domínio da conferência; as demais criadas antes da #12 seguem sem modo (em aberto) |
 | PER-2 | `issued_return_notes`: o adaptador só faz `select` e `insert`; o `revoke` recusa o resto | nenhum |
 | PER-3 | todo `PATCH` em `outbox_supplier_emails` acrescenta a entrada de histórico no mesmo `PATCH` | o `by` de editar só existe depois da mudança de porta acima |
 | PER-4 | `version` em todo `PATCH`, filtrado por `version=eq.<lida>`; 0 linhas é recusa | o teste de versão velha roda contra o `FakePostgrest`, que precisa aplicar o filtro; não há banco de verdade |
@@ -152,6 +152,6 @@ Nenhum. `strategies.tenancy.strategy: none`. Todas as tabelas seguem a convenç�
 - Prazo da trava do envio: 5 minutos assumidos; o tempo máximo do envio de e-mail (Resend) não está dito. Quem responde: o construtor da camada do e-mail.
 - Chave de idempotência no provedor de e-mail para fechar o resíduo depois da trava vencida. Quem responde: a camada do e-mail.
 - ADR a registrar: "a unidade de trabalho é uma requisição PostgREST; o histórico mora em `jsonb` na linha; o efeito em outra raiz é passo idempotente". Alternativas: funções no banco chamadas por RPC (uma transação por caso de uso), conexão direta ao Postgres. Quem aprova: o mantenedor.
-- Registrar as tabelas criadas antes da #12 (`invoices`, `outbox_return_notes` e as demais) com seus modos. `outbox_return_notes` é escrita por esta camada (a transição `pendente` → `emitida`) e hoje é atualizada no lugar, sem histórico nem versão. Quem decide: o mantenedor.
+- Registrar as tabelas criadas antes da #12 que a #8 não registrou (`titles`, `outbox_dock_actions`, `outbox_registry_corrections`, `outbox_store_actions`, `claude_suggestions`, `exceptions`, `automation_runs`) com seus modos. Fechado pelo registro da #8: `outbox_return_notes` (upsert-with-history, histórico `in-row-transition`, versão em `status`), que esta camada escreve na transição `pendente` → `emitida`. Quem decide: o dono de cada tabela.
 - Caminho de apagamento (LGPD) para `sent_by` e `discarded_by`, que identificam pessoas: não registrado no projeto. Quem decide: o mantenedor.
 - Nenhum teste lê plano nem catálogo (não há banco de verdade nos testes): IDX-1 e a conferência do `revoke` ficam sem detector.
