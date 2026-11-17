@@ -44,6 +44,7 @@ const DETAIL: SentRequestDetailDto = {
     sentBy: null,
     sentAt: null,
     failure: null,
+    dueOn: "2026-11-19",
   },
 };
 

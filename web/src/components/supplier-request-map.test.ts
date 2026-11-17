@@ -5,7 +5,6 @@ import {
   countsOf,
   draftOf,
   FILTER_OF_CHIP,
-  followUpDueOn,
   isEmptyList,
   momentOf,
   rereadOf,
@@ -59,7 +58,7 @@ function detail(over: Partial<SentRequestDetailDto> = {}): SentRequestDetailDto 
     sentBy: "analista@barte.com",
     sentAt: "2026-11-07T12:40:00.000Z",
     reading: null,
-    followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá", asks: [] }, sentBy: null, sentAt: null, failure: null },
+    followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá {{cobranca.prazo}}", asks: [] }, sentBy: null, sentAt: null, failure: null, dueOn: "2026-11-19" },
     ...over,
   };
 }
@@ -136,7 +135,7 @@ describe("#21 linhas e contagens do servidor", () => {
   });
 });
 
-describe("#21 datas e prazo da cobrança", () => {
+describe("#21 datas da cobrança", () => {
   it("#21: o dia de hoje é o de São Paulo, não o de UTC", () => {
     expect(todayInSaoPaulo(new Date("2026-11-16T01:30:00Z"))).toBe("2026-11-15");
     expect(todayInSaoPaulo(new Date("2026-11-16T12:00:00Z"))).toBe("2026-11-16");
@@ -146,13 +145,6 @@ describe("#21 datas e prazo da cobrança", () => {
     expect(momentOf("2026-11-07T12:40:00.000Z")).toEqual({ sentOn: "2026-11-07", sentTime: "09:40" });
     expect(momentOf(null)).toEqual({ sentOn: "—" });
     expect(momentOf("não é data")).toEqual({ sentOn: "—" });
-  });
-
-  it("#5/AC-4: o novo prazo da cobrança é 3 dias úteis depois de hoje, pulando o fim de semana", () => {
-    expect(followUpDueOn("2026-11-16")).toBe("2026-11-19");
-    expect(followUpDueOn("2026-11-18")).toBe("2026-11-23");
-    expect(followUpDueOn("2026-11-20")).toBe("2026-11-25");
-    expect(followUpDueOn("2026-11-14")).toBe("2026-11-18");
   });
 });
 
@@ -192,7 +184,7 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
   });
 
   it("#5/AC-4: o pedido já cobrado pelo servidor segue na situação dele (atrasado, 'Atrasado (cobrado)'; aguardando, 'Aguardando (cobrado)') e sem próximo passo", () => {
-    const charged = detail({ followUp: { drafted: true, sent: true, draft: null, sentBy: "a@b.c", sentAt: "2026-11-15T13:00:00.000Z", failure: null } });
+    const charged = detail({ followUp: { drafted: true, sent: true, draft: null, sentBy: "a@b.c", sentAt: "2026-11-15T13:00:00.000Z", failure: null, dueOn: null } });
     const late = conversationOf(lateRow, charged, today);
     expect(late.status).toBe("lateCharged");
     expect(late.reading.nextStep).toBeNull();
@@ -204,13 +196,13 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
   });
 
   it("#5/AC-4: o rascunho é o do servidor, para o e-mail do pedido, com o novo prazo e sem anexo; sem rascunho, nulo", () => {
-    expect(draftOf(detail(), today)).toEqual({ to: "financeiro@f07.example", dueOn: "2026-11-19", subject: "Cobrança", body: "Olá", attachmentName: "Nenhum" });
-    expect(draftOf(detail({ followUp: { ...detail().followUp, draft: null } }), today)).toBeNull();
+    expect(draftOf(detail())).toEqual({ to: "financeiro@f07.example", dueOn: "2026-11-19", subject: "Cobrança", body: "Olá", template: "Olá {{cobranca.prazo}}", attachmentName: "Nenhum" });
+    expect(draftOf(detail({ followUp: { ...detail().followUp, draft: null } }))).toBeNull();
   });
 
   it("#5/AC-4: pedido já cobrado (followUp.sent): não há rascunho a oferecer, mesmo que o servidor ainda guarde o texto", () => {
     const base = detail().followUp;
-    expect(draftOf(detail({ followUp: { ...base, sent: true, sentAt: "2026-11-15T13:00:00.000Z" } }), today)).toBeNull();
+    expect(draftOf(detail({ followUp: { ...base, sent: true, sentAt: "2026-11-15T13:00:00.000Z" } }))).toBeNull();
   });
 
   it("#5/AC-4: o resultado do envio é 'enviado' com o carimbo, ou um motivo fechado: o código do servidor não chega à tela", () => {
@@ -232,5 +224,26 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
     const notSent = detail({ reading: reading({ summary: "Leitura nova." }) });
     expect(rereadOf(notSent)).toBe(notSent);
     expect(rereadOf(detail({ followUp: { ...base, sent: true } }))).toBeNull();
+  });
+
+  it("#59: o novo prazo é o que o servidor gravou (followUp.dueOn), sem conta de dias úteis na tela; hoje não entra", () => {
+    const base = detail().followUp;
+    expect(draftOf(detail({ followUp: { ...base, dueOn: "2026-11-23" } }))?.dueOn).toBe("2026-11-23");
+    expect(draftOf).toHaveLength(1);
+  });
+
+  it("#59: sem prazo no servidor (dueOn nulo, rascunho de antes da #58), o rascunho vem com prazo nulo e a tela não mostra data", () => {
+    const base = detail().followUp;
+    expect(draftOf(detail({ followUp: { ...base, dueOn: null } }))?.dueOn).toBeNull();
+  });
+
+  it("#58: a resposta parcial e o pedido de informação com próximo passo cobrar têm rascunho e propõem cobrar; a linha não os exclui", () => {
+    for (const replyOutcome of ["partially_fulfilled", "needs_information"] as const) {
+      const read = reading({ replyOutcome, nextStep: "follow_up" });
+      const row = rowOf(dto({ reading: read }), "needs_you");
+      expect(row.status).toBe(replyOutcome === "partially_fulfilled" ? "partiallyFulfilled" : "needsInformation");
+      expect(conversationOf(row, detail({ reading: read }), "2026-11-16").reading.nextStep).toBe("follow_up");
+      expect(draftOf(detail({ reading: read }))).not.toBeNull();
+    }
   });
 });

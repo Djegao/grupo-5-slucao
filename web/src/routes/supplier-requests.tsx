@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 import type { SentRequestDetailDto } from "../api/contract";
-import { supplierReplyApi, type SupplierReplyApi, type SupplierReplyReason } from "../api/supplier-reply";
+import { saveFailureOf, supplierReplyApi, type SupplierReplyApi, type SupplierReplyReason } from "../api/supplier-reply";
 import { InvoiceDrawer } from "../approval/InvoiceDrawer";
 import { SupplierRequests, type DrawerShell } from "../components/SupplierRequests";
 import {
@@ -14,7 +14,7 @@ import {
   sendResultOf,
   todayInSaoPaulo,
 } from "../components/supplier-request-map";
-import { INITIAL_STATE, type SendResult } from "../components/supplier-request-state";
+import { INITIAL_STATE, type SaveResult, type SendResult } from "../components/supplier-request-state";
 import type { SupplierFilter, SupplierFilterValue, SupplierRequestRow } from "../components/supplier-request-view";
 import { useLoad } from "../components/useLoad";
 import { useRequestDetail } from "../components/useRequestDetail";
@@ -47,6 +47,23 @@ export async function loadList(filter: SupplierFilterValue, signal: AbortSignal,
 export async function sendOf(accessKey: string | null, api: Pick<SupplierReplyApi, "sendFollowUp"> = supplierReplyApi): Promise<SentRequestDetailDto> {
   if (accessKey === null) throw new Error("linha sem chave de acesso");
   return api.sendFollowUp(accessKey);
+}
+
+/** #59 O resultado de salvar a edição da cobrança: o resultado fechado e o pedido que o servidor devolveu (salvo, ou relido num conflito), para a gaveta mostrar o texto dele. */
+export interface SaveOutcome {
+  result: SaveResult;
+  reread: SentRequestDetailDto | null;
+}
+
+/** #59/AC-2 Salva o molde da linha de chave `accessKey` pelo PATCH; o erro vira o motivo fechado (422 `invalid`, 409 `conflict`) e o texto dele não sai daqui. */
+export async function saveOf(accessKey: string | null, template: string, api: Pick<SupplierReplyApi, "saveFollowUp"> = supplierReplyApi): Promise<SaveOutcome> {
+  if (accessKey === null) return { result: { ok: false, failure: "unknown" }, reread: null };
+  try {
+    const saved = await api.saveFollowUp(accessKey, template);
+    return saved.kind === "saved" ? { result: { ok: true }, reread: saved.detail } : { result: { ok: false, failure: "conflict" }, reread: saved.detail };
+  } catch (error) {
+    return { result: { ok: false, failure: saveFailureOf(error) }, reread: null };
+  }
 }
 
 const drawerError = (reason: SupplierReplyReason | null): string => texts.supplierRequests.drawer.errors[reason ?? "unknown"];
@@ -85,6 +102,12 @@ export default function SupplierRequestsRoute(_props: RouteProps): ReactElement 
     return sendResultOf(detail);
   };
 
+  const save = async (row: SupplierRequestRow, template: string): Promise<SaveResult> => {
+    const outcome = await saveOf(keyOf(row.id), template);
+    if (outcome.reread) setReread(outcome.reread);
+    return outcome.result;
+  };
+
   // #21 A gaveta da nota (#209), a mesma das outras grids: a proposta da #3 e o bloco "Pedido ao fornecedor" dela vêm dali, e o bloco desta tela entra acima.
   const shell: DrawerShell = ({ row, title, onClose, children }) => (
     <InvoiceDrawer key={row.id} invoiceAccessKey={keyOf(row.id) ?? ""} title={() => title} onClose={onClose}>
@@ -105,14 +128,15 @@ export default function SupplierRequestsRoute(_props: RouteProps): ReactElement 
       }}
       draftOf={(row) => {
         const detail = detailOf(row);
-        return detail ? draftOf(detail, today) : null;
+        return detail ? draftOf(detail) : null;
       }}
       send={send}
+      saveDraft={save}
       drawerState={open.state}
       drawerError={drawerError(open.reason)}
       onDrawerRetry={open.retry}
       onDrawerChange={changeOpen}
-      editableDraft={false}
+      editableDraft
       renderDrawer={shell}
     />
   );

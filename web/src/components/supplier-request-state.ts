@@ -1,6 +1,6 @@
 // #20 O estado puro da lista "Pedidos ao fornecedor" (história #5): chip ativo, contagens, ordem, gaveta e fluxo da cobrança.
 // #20 Sem API nem React: a lista de linhas e o resultado do envio entram como dados; a #21 liga os dois ao contrato.
-import type { FollowUpFailure, FollowUpPhaseState } from "../approval/FollowUpDraft";
+import type { FollowUpFailure, FollowUpPhaseState, SaveFailure } from "../approval/FollowUpDraft";
 import type { SupplierFilter, SupplierFilterValue, SupplierRequestRow, SupplierRowStatus } from "./supplier-request-view";
 
 /** #5/AC-2 O chip em que cada situação cai, como o wireframe aprovado decide (Q2): cada solicitação cai em um só chip. */
@@ -32,9 +32,12 @@ export function visibleRows(rows: SupplierRequestRow[], filter: SupplierFilterVa
 /** #5/AC-4 O que o envio devolve: quando saiu, ou o motivo fechado da falha; o texto de um erro de fora nunca entra (layer-exposure). */
 export type SendResult = { ok: true; sentOn: string; sentTime?: string; sentBy?: string | null } | { ok: false; failure: FollowUpFailure };
 
-/** #5/AC-4 Uma cobrança que saiu: o novo prazo da linha e quando foi enviada. */
+/** #59 O que o salvamento da edição devolve: salvo, ou o motivo fechado da recusa; o texto de um erro de fora nunca entra (layer-exposure). */
+export type SaveResult = { ok: true } | { ok: false; failure: SaveFailure };
+
+/** #5/AC-4 Uma cobrança que saiu: o novo prazo da linha (nulo se o servidor não o gravou) e quando foi enviada. */
 export interface ChargedRequest {
-  dueOn: string;
+  dueOn: string | null;
   sentOn: string;
   sentTime?: string;
 }
@@ -49,7 +52,12 @@ export function applyCharges(rows: SupplierRequestRow[], charged: Record<string,
 export interface FollowUpFlow {
   phase: FollowUpPhaseState;
   editing: boolean;
+  /** #59 O molde editado (com `{{chave}}`); `null` enquanto vale o do servidor. */
   body: string | null;
+  /** #59 O PATCH está em curso: salvar, cancelar e enviar ficam parados. */
+  saving?: boolean;
+  /** #59 O motivo fechado do último salvamento recusado; a edição segue aberta com o texto digitado. */
+  saveFailure?: SaveFailure;
 }
 
 /** #5/AC-3 A gaveta: o pedido aberto e o bloco em que abre; todo clique abre em "Pedido ao fornecedor", com ou sem rascunho. */
@@ -77,9 +85,13 @@ export type ScreenAction =
   | { type: "close" }
   | { type: "edit" }
   | { type: "changeBody"; body: string }
+  | { type: "cancelEdit" }
+  | { type: "saveStarted"; id: string }
+  | { type: "saveSucceeded"; id: string }
+  | { type: "saveFailed"; id: string; failure: SaveFailure }
   | { type: "discard" }
   | { type: "sendStarted"; id: string }
-  | { type: "sendSucceeded"; id: string; dueOn: string; sentOn: string; sentTime?: string; sentBy?: string | null }
+  | { type: "sendSucceeded"; id: string; dueOn: string | null; sentOn: string; sentTime?: string; sentBy?: string | null }
   | { type: "sendFailed"; id: string; failure: FollowUpFailure };
 
 /** #5/AC-4 O texto e o descarte só mudam em revisão ou depois de uma falha: enviando e enviado ficam como estão. */
@@ -118,10 +130,37 @@ function sendFailed(state: ScreenState, id: string, failure: FollowUpFailure): S
   return withFlow(released, { ...flow, phase: { phase: "failed", failure } });
 }
 
+/** #59 O fluxo do próprio pedido da gaveta, ou nulo. */
+const flowOf = (state: ScreenState, id: string): FollowUpFlow | null => (state.drawer?.requestId === id ? state.drawer.followUp : null);
+
+/** #59/AC-2 Salvar começa só na edição aberta e parada: o motivo da falha anterior se apaga e um segundo salvar não muda nada. */
+function saveStarted(state: ScreenState, id: string): ScreenState {
+  const flow = flowOf(state, id);
+  if (!isOpenForChange(flow) || !flow.editing || flow.saving) return state;
+  const { saveFailure: _previous, ...rest } = flow;
+  return withFlow(state, { ...rest, saving: true });
+}
+
+/** #59/AC-2 Salvo, a edição fecha e o texto do servidor volta a ser o rascunho; recusado, a edição segue aberta com o texto digitado e o motivo. */
+function saveSettled(state: ScreenState, id: string, failure: SaveFailure | null): ScreenState {
+  const flow = flowOf(state, id);
+  if (!flow || !flow.saving) return state;
+  const { saving: _saving, saveFailure: _previous, ...rest } = flow;
+  return withFlow(state, failure === null ? { ...rest, editing: false, body: null } : { ...rest, saveFailure: failure });
+}
+
+/** #59/AC-1 Cancelar fecha a edição e descarta o texto digitado; salvando, não cancela. */
+function cancelEdit(state: ScreenState, flow: FollowUpFlow | null): ScreenState {
+  if (!isOpenForChange(flow) || !flow.editing || flow.saving) return state;
+  const { saveFailure: _previous, ...rest } = flow;
+  return withFlow(state, { ...rest, editing: false, body: null });
+}
+
 /** #5/AC-4 O envio começa só no rascunho aberto do próprio pedido, e o id entra na lista de envios em curso (#20). */
 function sendStarted(state: ScreenState, id: string): ScreenState {
   const flow = state.drawer?.requestId === id ? state.drawer.followUp : null;
-  if (!isOpenForChange(flow)) return state;
+  // #59/AC-3 Enquanto se edita, o texto que o servidor guarda ainda não é o da tela: o envio espera salvar ou cancelar.
+  if (!isOpenForChange(flow) || flow.editing) return state;
   return { ...withFlow(state, { ...flow, phase: { phase: "sending" } }), sending: [...state.sending, id] };
 }
 
@@ -141,9 +180,17 @@ export function screenReducer(state: ScreenState, action: ScreenAction): ScreenS
     case "edit":
       return isOpenForChange(flow) && !flow.editing ? withFlow(state, { ...flow, editing: true }) : state;
     case "changeBody":
-      return isOpenForChange(flow) && flow.editing ? withFlow(state, { ...flow, body: action.body }) : state;
+      return isOpenForChange(flow) && flow.editing && !flow.saving ? withFlow(state, { ...flow, body: action.body }) : state;
+    case "cancelEdit":
+      return cancelEdit(state, flow);
+    case "saveStarted":
+      return saveStarted(state, action.id);
+    case "saveSucceeded":
+      return saveSettled(state, action.id, null);
+    case "saveFailed":
+      return saveSettled(state, action.id, action.failure);
     case "discard":
-      return state.drawer && flow && flow.phase.phase !== "sending" ? { ...state, drawer: { ...state.drawer, followUp: null } } : state;
+      return state.drawer && flow && flow.phase.phase !== "sending" && !flow.saving ? { ...state, drawer: { ...state.drawer, followUp: null } } : state;
     case "sendStarted":
       return sendStarted(state, action.id);
     case "sendSucceeded":

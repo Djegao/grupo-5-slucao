@@ -440,12 +440,24 @@ export const texts = {
       /** #21 O contrato traz o rascunho nulo quando ele já não confere com o catálogo (#36). */
       unavailable: "O rascunho da cobrança não está disponível agora.",
       edit: "Editar",
+      /** #59 A edição do texto: salvar, cancelar e a dica de manter os marcadores, como a edição do pedido (#17). */
+      save: "Salvar texto",
+      saving: "Salvando…",
+      cancelEdit: "Cancelar edição",
+      keepMarkers: "Mantenha os marcadores {{...}}: eles são os números do pedido, que ficam travados.",
+      /** #59 O motivo do salvamento recusado é um dos fechados; o texto do servidor nunca chega à tela (layer-exposure). */
+      saveFailed: {
+        invalid: "O texto não foi salvo: confira os marcadores {{...}} e os números. O texto anterior continua valendo.",
+        conflict: "A cobrança mudou e o texto não foi salvo. Veja o estado atual e tente de novo.",
+        unknown: "Não consegui salvar o texto agora. Tente de novo em um minuto.",
+      },
       send: "Enviar cobrança",
       discard: "Descartar rascunho",
       sending: "Enviando a cobrança…",
       /** #5/AC-4 `by` é "por você" ou "por fulano" (quem enviou, quando não é quem olha a tela). */
-      sent: (by: string, on: string, time: string | undefined, due: string) =>
-        `Cobrança enviada ${by} em ${on}${time ? ` às ${time}` : ""} · aguardando resposta até ${due}.`,
+      /** #59 `due` é nulo quando o servidor não gravou o novo prazo: a frase não promete data. */
+      sent: (by: string, on: string, time: string | undefined, due: string | null) =>
+        `Cobrança enviada ${by} em ${on}${time ? ` às ${time}` : ""}${due === null ? "" : ` · aguardando resposta até ${due}`}.`,
       retry: "Tentar enviar de novo",
       /** #19 O motivo do envio falho é um dos desenhados; o texto do servidor de e-mail nunca chega à tela (layer-exposure). */
       failed: {

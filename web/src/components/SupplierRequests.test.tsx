@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SupplierRequests, type SupplierRequestsProps } from "./SupplierRequests";
-import type { SendResult } from "./supplier-request-state";
+import type { SaveResult, SendResult } from "./supplier-request-state";
 import type { FollowUpDraftView, SupplierConversationView, SupplierRequestRow } from "./supplier-request-view";
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -32,6 +32,7 @@ function draftOf(row: SupplierRequestRow): FollowUpDraftView {
     dueOn: "2026-11-20",
     subject: `Cobrança: nota de devolução da nota ${row.invoiceNumber}`,
     body: "Olá, não recebemos retorno. Pode nos responder até 20/11?",
+    template: "Olá, não recebemos retorno. Pode nos responder até {{cobranca.prazo}}?",
     attachmentName: "pedido original (nota de devolução ND 6)",
   };
 }
@@ -184,22 +185,19 @@ describe("#20 SupplierRequests: gaveta", () => {
 });
 
 describe("#20 SupplierRequests: cobrar", () => {
-  it("#5/AC-4: cenário: escolhe Atrasados, vê dois, cobra, edita o texto, envia e vê a cobrança enviada; a linha segue em Atrasados como 'Atrasado (cobrado)' (#5/AC-2)", async () => {
+  it("#5/AC-4: cenário: escolhe Atrasados, vê dois, cobra, envia e vê a cobrança enviada; a linha segue em Atrasados como 'Atrasado (cobrado)' (#5/AC-2)", async () => {
     const pending = deferred<SendResult>();
     const { send } = renderScreen({ send: vi.fn<Send>(() => pending.promise) });
     chooseLate();
     expect(bodyRows()).toHaveLength(2);
     clickCobrar("59738");
 
-    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
-    fireEvent.change(screen.getByLabelText("Texto"), { target: { value: "Texto revisado pela analista." } });
     fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
 
     expect(screen.getByText("Enviando a cobrança…")).toBeTruthy();
     expect(send).toHaveBeenCalledTimes(1);
     const [sentRow, sentDraft] = send.mock.calls[0]!;
     expect(sentRow.id).toBe("sr-1");
-    expect(sentDraft.body).toBe("Texto revisado pela analista.");
     expect(sentDraft.subject).toBe("Cobrança: nota de devolução da nota 59738");
     expect(sentDraft.to).toBe("financeiro@f07-limpeza.example");
     expect(sentDraft.dueOn).toBe("2026-11-20");
@@ -215,7 +213,7 @@ describe("#20 SupplierRequests: cobrar", () => {
   });
 
   it("#5/AC-4: editar mexe só no texto: para, assunto, prazo e anexo não viram campo", () => {
-    renderScreen();
+    renderScreen({ saveDraft: async () => ({ ok: true }) });
     chooseLate();
     clickCobrar("59738");
     fireEvent.click(screen.getByRole("button", { name: "Editar" }));
@@ -432,5 +430,139 @@ describe("#21 SupplierRequests: cobrança já feita pelo servidor, quem enviou e
     const message = await screen.findByText("A cobrança não saiu. Tente de novo em um minuto.");
     expect(message.closest('[role="alert"]')).not.toBeNull();
     expect(screen.getByText("O rascunho da cobrança não está disponível agora.")).toBeTruthy();
+  });
+});
+
+// #59 Editar a cobrança: abre com os marcadores {{...}}, Salvar chama o PATCH, o 422 mantém a edição, e enviar espera a edição acabar.
+describe("#59 SupplierRequests: editar a cobrança", () => {
+  type Save = NonNullable<SupplierRequestsProps["saveDraft"]>;
+  const SAVED: SaveResult = { ok: true };
+
+  /** #59 O servidor guarda o texto: depois de um salvamento, o rascunho que a tela lê já é o novo. */
+  function renderEditable(saveResult: SaveResult | (() => Promise<SaveResult>) = SAVED) {
+    let template = "Olá, não recebemos retorno. Pode nos responder até {{cobranca.prazo}}?";
+    const saveDraft = vi.fn<Save>(async (_row, text) => {
+      const result = typeof saveResult === "function" ? await saveResult() : saveResult;
+      if (result.ok) template = text;
+      return result;
+    });
+    const screenProps = {
+      saveDraft,
+      draftOf: (row: SupplierRequestRow): FollowUpDraftView => ({ ...draftOf(row), template, body: template.replace("{{cobranca.prazo}}", "20/11") }),
+    };
+    return { saveDraft, ...renderScreen(screenProps) };
+  }
+
+  function openEditor() {
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+  }
+
+  it("#59/AC-1: cenário: Cobrar e Editar abre o texto com os marcadores {{...}} e a dica de mantê-los", () => {
+    renderEditable();
+    openEditor();
+    expect((screen.getByRole("textbox", { name: "Texto" }) as HTMLTextAreaElement).value).toBe("Olá, não recebemos retorno. Pode nos responder até {{cobranca.prazo}}?");
+    expect(screen.getByText(/Mantenha os marcadores \{\{\.\.\.\}\}/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Salvar texto" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancelar edição" })).toBeTruthy();
+  });
+
+  it("#59/AC-2: cenário: salva e envia, e a cobrança sai com o texto editado (o servidor guarda o salvo; o envio não leva texto)", async () => {
+    const { saveDraft, send } = renderEditable();
+    openEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Texto" }), { target: { value: "Pode responder até {{cobranca.prazo}}, por favor?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar texto" }));
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(saveDraft).toHaveBeenCalledTimes(1);
+    expect(saveDraft.mock.calls[0]![0].id).toBe("sr-1");
+    expect(saveDraft.mock.calls[0]![1]).toBe("Pode responder até {{cobranca.prazo}}, por favor?");
+    expect(screen.getByText("Pode responder até 20/11, por favor?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
+    await screen.findByText(/Cobrança enviada por você/);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1].body).toBe("Pode responder até 20/11, por favor?");
+  });
+
+  it("#59/AC-2: o 422 mantém a edição aberta com o texto digitado e a mensagem fixa", async () => {
+    renderEditable({ ok: false, failure: "invalid" });
+    openEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Texto" }), { target: { value: "Texto sem marcador, 263,62" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar texto" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("O texto não foi salvo: confira os marcadores {{...}} e os números.");
+    expect((screen.getByRole("textbox", { name: "Texto" }) as HTMLTextAreaElement).value).toBe("Texto sem marcador, 263,62");
+    expect((screen.getByRole("button", { name: "Enviar cobrança" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("#59/AC-2: um salvamento que falha sem motivo conhecido (rejeição) mostra só a mensagem fechada, nunca o texto do erro", async () => {
+    renderEditable(async () => {
+      throw new Error("pg: relation supplier_requests timeout 10.0.0.7");
+    });
+    openEditor();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar texto" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Não consegui salvar o texto agora. Tente de novo em um minuto.");
+    expect(document.body.textContent).not.toMatch(/pg:|relation|10\.0\.0\.7/);
+  });
+
+  it("#59/AC-2: com o salvamento em curso, um segundo clique em Salvar não chama o PATCH de novo", async () => {
+    const pending = deferred<SaveResult>();
+    const { saveDraft } = renderEditable(() => pending.promise);
+    openEditor();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar texto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvando…" }));
+    expect(saveDraft).toHaveBeenCalledTimes(1);
+    pending.resolve(SAVED);
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+  });
+
+  it("#59/AC-3: editando, 'Enviar cobrança' fica desligado e nada é enviado", () => {
+    const { send } = renderEditable();
+    openEditor();
+    const sendButton = screen.getByRole("button", { name: "Enviar cobrança" }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+    fireEvent.click(sendButton);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("#59/AC-1: 'Cancelar edição' fecha o campo sem salvar e o rascunho segue o do servidor", () => {
+    const { saveDraft } = renderEditable();
+    openEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Texto" }), { target: { value: "rascunho que se perde" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar edição" }));
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/Pode nos responder até 20\/11\?/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Enviar cobrança" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("#59/AC-4: depois de enviada, a cobrança não tem 'Editar'", async () => {
+    renderEditable();
+    chooseLate();
+    clickCobrar("59738");
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar cobrança" }));
+    await screen.findByText(/Cobrança enviada por você/);
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+  });
+
+  it("#59/AC-4: o pedido que o servidor já cobrou não abre rascunho nem 'Editar'", () => {
+    renderScreen({ rows: [{ ...late, alreadyCharged: true }], draftOf: () => null, saveDraft: vi.fn<Save>() });
+    chooseLate();
+    fireEvent.click(rowOf("59738"));
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+  });
+
+  it("#58: a resposta parcial com próximo passo cobrar abre o rascunho pela gaveta, com 'Editar'", () => {
+    const partial: SupplierRequestRow = { ...late, id: "sr-5", invoiceNumber: "70001", status: "partiallyFulfilled" };
+    renderScreen({
+      rows: [partial],
+      saveDraft: vi.fn<Save>(),
+      conversationOf: (row) => ({ ...conversationOf(row), status: "partiallyFulfilled", reading: { replyOutcome: "partially_fulfilled", summary: "Atendeu parte.", nextStep: "follow_up" } }),
+    });
+    fireEvent.click(chip(/^Precisam de você/));
+    fireEvent.click(rowOf("70001"));
+    fireEvent.click(screen.getByRole("button", { name: "Cobrar" }));
+    expect(screen.getByRole("heading", { name: "Rascunho da cobrança" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Editar" })).toBeTruthy();
   });
 });

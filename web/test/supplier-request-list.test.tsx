@@ -66,12 +66,13 @@ function sentView(row: ReadingRowDto): SentRequestDetailDto {
       draft: {
         subject: `Cobrança: nota de devolução da NF ${row.invoiceNumber}`,
         body: "Olá, não recebemos retorno. Pode nos responder até 20/11?",
-        template: "Olá, não recebemos retorno. Pode nos responder até 20/11?",
+        template: "Olá, não recebemos retorno. Pode nos responder até {{cobranca.prazo}}?",
         asks: [],
       },
       sentBy: row.followUp.sent ? "analista@barte.com" : null,
       sentAt: row.followUp.sent ? "2026-11-16T13:12:00.000Z" : null,
       failure: null,
+      dueOn: "2026-11-19",
     },
   };
 }
@@ -81,7 +82,9 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
   let requests: Fixture[] = SUPPLIER_REQUESTS;
   let failList = false;
   let failDetail = false;
-  let calls: { method: string; path: string }[] = [];
+  /** #59 O texto que a API falsa guarda (o molde com {{chave}}); o PATCH o troca, e o POST .../send envia o que está aqui. */
+  let savedTemplate: string | null = null;
+  let calls: { method: string; path: string; body?: unknown }[] = [];
   const counts = () => ({
     awaiting: requests.filter((r) => r.filter === "awaiting").length,
     answered: requests.filter((r) => r.filter === "answered").length,
@@ -90,7 +93,7 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
   });
   const respond = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
     const path = String(input);
-    calls.push({ method: init.method ?? "GET", path });
+    calls.push({ method: init.method ?? "GET", path, ...(init.body ? { body: JSON.parse(String(init.body)) as unknown } : {}) });
     if (path.startsWith("/api/propostas/")) return Response.json({ error: "not_found" }, { status: 404 });
     if (path.startsWith("/api/supplier-requests?status=")) {
       if (failList) throw new TypeError("network");
@@ -98,11 +101,19 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
       return Response.json({ filter, requests: requests.filter((r) => r.filter === filter).map((r) => r.row), counts: counts() });
     }
     if (path.startsWith("/api/supplier-requests/")) {
-      const key = path.slice("/api/supplier-requests/".length).replace("/send", "");
+      const key = path.slice("/api/supplier-requests/".length).replace("/send", "").replace("/follow-up", "");
       if (failDetail) return Response.json({ error: "internal_error", detail: "SQLSTATE 42P01 relation supplier_requests" }, { status: 500 });
       const found = requests.find((r) => r.row.invoiceAccessKey === key);
       if (!found) return Response.json({ error: "not_found" }, { status: 404 });
       const view = sentView(found.row);
+      if (savedTemplate !== null && view.followUp.draft) view.followUp.draft = { ...view.followUp.draft, template: savedTemplate, body: savedTemplate.replace("{{cobranca.prazo}}", "20/11") };
+      if (path.endsWith("/follow-up") && init.method === "PATCH") {
+        const { template } = JSON.parse(String(init.body)) as { template: string };
+        // #59 O servidor recusa o texto sem marcador (número solto) com um 422 que traz texto interno, que a tela não pode mostrar.
+        if (!template.includes("{{")) return Response.json({ error: "invalid", reason: "number_mismatch", field: "body", detail: "SQLSTATE 42P01 catalogo" }, { status: 422 });
+        savedTemplate = template;
+        return Response.json({ request: { ...view, followUp: { ...view.followUp, draft: { ...view.followUp.draft!, template, body: template.replace("{{cobranca.prazo}}", "20/11") } } } });
+      }
       if (path.endsWith("/send")) {
         return Response.json({ request: { ...view, followUp: { ...view.followUp, sent: true, sentBy: "analista@barte.com", sentAt: "2026-11-16T13:12:00.000Z" } } });
       }
@@ -114,6 +125,7 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     requests = SUPPLIER_REQUESTS;
     failList = false;
     failDetail = false;
+    savedTemplate = null;
     calls = [];
     vi.stubGlobal("fetch", vi.fn(respond));
   });
@@ -227,12 +239,55 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
 
     expect(await screen.findByText(/Cobrança enviada por você/)).toBeTruthy();
     const posts = calls.filter((call) => call.method === "POST");
-    expect(posts).toEqual([{ method: "POST", path: `/api/supplier-requests/${keyOf(1)}/send` }]);
+    expect(posts).toEqual([{ method: "POST", path: `/api/supplier-requests/${keyOf(1)}/send`, body: {} }]);
     const charged = (await screen.findByText("NF 59738")).closest("tr")!;
     expect(within(charged).getByText("Atrasado (cobrado)")).toBeTruthy();
     expect(within(charged).queryByRole("button", { name: "Cobrar" })).toBeNull();
     expect(screen.getByRole("radio", { name: /^Atrasados/ }).textContent).toMatch(/2/);
     expect(screen.getByRole("radio", { name: /^Aguardando/ }).textContent).toMatch(/1/);
+  });
+
+  it("#59/AC-1: cenário: Cobrar e Editar abre o texto com os marcadores {{...}} e a dica; salvar faz o PATCH e enviar manda a cobrança com o texto editado", async () => {
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
+    const row = (await screen.findByText("NF 59738")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Cobrar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+
+    const field = screen.getByRole("textbox", { name: "Texto" }) as HTMLTextAreaElement;
+    expect(field.value).toBe("Olá, não recebemos retorno. Pode nos responder até {{cobranca.prazo}}?");
+    expect(screen.getByText(/Mantenha os marcadores \{\{\.\.\.\}\}/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Enviar cobrança" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(field, { target: { value: "Pode responder até {{cobranca.prazo}}, por favor?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar texto" }));
+    expect(await screen.findByText("Pode responder até 20/11, por favor?")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Texto" })).toBeNull();
+    expect(calls.filter((call) => call.method === "PATCH")).toEqual([
+      { method: "PATCH", path: `/api/supplier-requests/${keyOf(1)}/follow-up`, body: { template: "Pode responder até {{cobranca.prazo}}, por favor?" } },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Enviar cobrança" }));
+    expect(await screen.findByText(/Cobrança enviada por você/)).toBeTruthy();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([{ method: "POST", path: `/api/supplier-requests/${keyOf(1)}/send`, body: {} }]);
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+  });
+
+  it("#59/AC-2: o 422 do PATCH mantém a edição aberta com a mensagem fixa, sem o texto do servidor, e o Enviar segue desligado", async () => {
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
+    const row = (await screen.findByText("NF 59738")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Cobrar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Texto" }), { target: { value: "Pague 263,62 já" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar texto" }));
+
+    const alert = await screen.findByText(/O texto não foi salvo: confira os marcadores/);
+    expect(alert).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Texto" }) as HTMLTextAreaElement).value).toBe("Pague 263,62 já");
+    expect((screen.getByRole("button", { name: "Enviar cobrança" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.textContent).not.toMatch(/SQLSTATE|catalogo|number_mismatch|invalid_shape/);
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
   });
 
   it("#5/AC-4: a linha que o servidor já cobrou (followUp.sent) segue em Atrasados como 'Atrasado (cobrado)', sem 'Cobrar', e a gaveta não oferece cobrar de novo", async () => {

@@ -16,7 +16,7 @@ const sent = (key: string): SentRequestDetailDto => ({
   sentBy: null,
   sentAt: null,
   reading: null,
-  followUp: { drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null },
+  followUp: { drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null, dueOn: null },
 });
 
 describe("#21 useRequestDetail", () => {

@@ -203,7 +203,7 @@ interface SupplierRequestContentDto {
     template: string;
   };
   asks: string[];
-  /** #17 Depois da emissão; o `url` é o `return-note.json` da própria API. */
+  /** #17 Depois da emissão; o `url` é o `return-note.pdf` da própria API (o anexo, #57), e o JSON segue em `return-note.json`. */
   attachment?: { name: string; url: string };
 }
 
@@ -273,6 +273,8 @@ export interface FollowUpDetailDto {
   sentAt: string | null;
   /** #21 O código curto da última falha do envio; nunca o texto do provedor. */
   failure: string | null;
+  /** #59 O novo prazo da cobrança (AAAA-MM-DD) que a regra gravou com o rascunho (#58); nulo sem rascunho ou no rascunho de antes da #58. */
+  dueOn: string | null;
 }
 
 /** #21 O pedido `sent` do `GET /api/supplier-requests/{accessKey}`: a visão da #13 mais a leitura e a cobrança (#36). */

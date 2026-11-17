@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import type { ReadingListDto, SentRequestDetailDto } from "./contract";
-import { FOLLOW_UP_SEND_TIMEOUT_MS, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
+import { FOLLOW_UP_SAVE_TIMEOUT_MS, FOLLOW_UP_SEND_TIMEOUT_MS, saveFailureOf, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
 
 // #21 O fio da lista "Pedidos ao fornecedor" (#5): o filtro vai na consulta, as contagens são do servidor, e o erro vira motivo fechado.
 
@@ -24,7 +24,7 @@ const SENT = {
   sentBy: "analista@barte.com",
   sentAt: "2026-11-07T12:40:00.000Z",
   reading: null,
-  followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá", asks: [] }, sentBy: null, sentAt: null, failure: null },
+  followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá", asks: [] }, sentBy: null, sentAt: null, failure: null, dueOn: "2026-11-19" },
 } satisfies SentRequestDetailDto;
 
 let calls: { method: string; path: string; body: unknown }[] = [];
@@ -124,5 +124,72 @@ describe("#21 fio da lista dos pedidos ao fornecedor", () => {
     expect(supplierReplyReason(new ApiError(0, null, body))).toBe("unavailable");
     expect(supplierReplyReason(new ApiError(500, "internal_error", body))).toBe("unknown");
     expect(supplierReplyReason(new TypeError(body))).toBe("unknown");
+  });
+});
+
+// #59 O PATCH da cobrança: troca só o texto (o molde com {{...}}); o 422 e o 409 viram motivo fechado, e a chamada tem prazo.
+describe("#59 fio da edição da cobrança", () => {
+  it("#59/AC-2: saveFollowUp é um PATCH em .../follow-up com o molde e devolve o pedido como ficou, com o rascunho novo", async () => {
+    const after = { ...SENT, followUp: { ...SENT.followUp, draft: { subject: "Cobrança", body: "Novo 20/11", template: "Novo {{cobranca.prazo}}", asks: [] } } };
+    serve(() => Response.json({ request: after }));
+    expect(await supplierReplyApi.saveFollowUp(KEY, "Novo {{cobranca.prazo}}")).toEqual({ kind: "saved", detail: after });
+    expect(calls).toEqual([{ method: "PATCH", path: `${BASE}/follow-up`, body: { template: "Novo {{cobranca.prazo}}" } }]);
+  });
+
+  it("#59/AC-2: o 422 (número solto, forma inválida) falha como ApiError 422, e o motivo fechado é 'invalid'", async () => {
+    serve(() => Response.json({ error: "invalid", reason: "number_mismatch", field: "body" }, { status: 422 }));
+    const reason = await supplierReplyApi.saveFollowUp(KEY, "263,62").catch((error: unknown) => error);
+    expect(reason).toBeInstanceOf(ApiError);
+    expect((reason as ApiError).status).toBe(422);
+    expect(saveFailureOf(reason)).toBe("invalid");
+  });
+
+  it("#59: um 409 (já enviado, envio em curso, sem rascunho, stale) relê o pedido e devolve como conflito", async () => {
+    const sent = { ...SENT, followUp: { ...SENT.followUp, sent: true, draft: null, sentAt: "2026-11-15T13:12:00.000Z" } };
+    calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        calls.push({ method: init.method ?? "GET", path: String(input), body: undefined });
+        return init.method === "PATCH" ? Response.json({ error: "conflict", reason: "already_sent" }, { status: 409 }) : Response.json({ request: sent });
+      }),
+    );
+    expect(await supplierReplyApi.saveFollowUp(KEY, "x {{cobranca.prazo}}")).toEqual({ kind: "conflict", detail: sent });
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`PATCH ${BASE}/follow-up`, `GET ${BASE}`]);
+  });
+
+  it("#59: o motivo do salvamento sai só do status: 422 'invalid', 409 'conflict', o resto 'unknown'; o texto do erro não entra", () => {
+    const body = "texto cru da dependência";
+    expect(saveFailureOf(new ApiError(422, "invalid", body))).toBe("invalid");
+    expect(saveFailureOf(new ApiError(409, "conflict", body))).toBe("conflict");
+    expect(saveFailureOf(new ApiError(500, "internal_error", body))).toBe("unknown");
+    expect(saveFailureOf(new ApiError(0, null, body))).toBe("unknown");
+    expect(saveFailureOf(new TypeError(body))).toBe("unknown");
+  });
+
+  it("#59: o salvamento tem prazo próprio e termina como falha de rede (status 0) quando ele estoura", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_path: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      ),
+    );
+    const outcome = supplierReplyApi.saveFollowUp(KEY, "x").catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(FOLLOW_UP_SAVE_TIMEOUT_MS + 1);
+    const reason = await outcome;
+    expect(reason).toBeInstanceOf(ApiError);
+    expect((reason as ApiError).status).toBe(0);
+  });
+
+  it("#59: o envio que o servidor recusa por texto trocado no meio (409 stale) relê o pedido, com o texto novo, e nada saiu", async () => {
+    const changed = { ...SENT, followUp: { ...SENT.followUp, draft: { subject: "Cobrança", body: "Texto novo", template: "Texto novo", asks: [] } } };
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) => (init.method === "POST" ? Response.json({ error: "conflict", reason: "stale" }, { status: 409 }) : Response.json({ request: changed }))));
+    const reread = await supplierReplyApi.sendFollowUp(KEY);
+    expect(reread.followUp.sent).toBe(false);
+    expect(reread.followUp.draft?.body).toBe("Texto novo");
   });
 });
