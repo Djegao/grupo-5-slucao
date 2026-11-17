@@ -70,4 +70,15 @@ describe('#36/AC-4 o teto efetivo de cada tarefa numa rodada do Cron é o menor 
     expect(byName.get(PROBABLE_ORDER_TASK)?.limit).toBe(1);
     expect(CRON_LIMIT).toBe(2);
   });
+
+  it('#36/AC-4: as duas tarefas da #4 vêm antes da ordem provável, para não passarem fome primeiro quando o Worker esgota as subrequests', () => {
+    const { rest } = harness();
+    expect(tasksFor(rest).map((t) => t.name)).toEqual([
+      'description-match',
+      'supplier-reply-reading',
+      'supplier-follow-up-draft',
+      PROBABLE_ORDER_TASK,
+      SUPPLIER_DRAFT_TASK,
+    ]);
+  });
 });
