@@ -115,8 +115,8 @@ describe('#11/AC-1 o dia do rascunho é o dia de São Paulo', () => { // ADR-002
   });
 });
 
-describe('#12/AC-4 o rascunho é do agente', () => {
-  it('grava o rascunho como feito pelo agente, no histórico do pedido', async () => {
+describe('#12/AC-4 o rascunho é do agente', () => { // ADR-002
+  it('grava o rascunho como feito pelo agente, no histórico do pedido', async () => { // ADR-002
     const w = world();
     await draftRequest(w.deps, 7, fakeAsk());
     expect(w.requests.created.map((c) => c.by)).toEqual(['agente']);

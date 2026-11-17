@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 // #12: asserções sobre o texto da migração e o registro dos modos: não há banco real nos testes (IDX-1 e o grant sem detector).
 
-const SQL = readFileSync(new URL('../../../supabase/migrations/20261116120000_supplier_request.sql', import.meta.url), 'utf8');
+const SQL = readFileSync(new URL('../../../supabase/migrations/20261116190000_supplier_request.sql', import.meta.url), 'utf8');
 const REGISTRY = readFileSync(new URL('../../../supabase/persistence-modes.yaml', import.meta.url), 'utf8');
 const flat = SQL.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
 const section = (table: string): string => {

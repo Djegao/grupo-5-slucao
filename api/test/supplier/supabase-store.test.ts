@@ -343,7 +343,7 @@ describe('#12/AC-4 a trava do envio concorrente', () => { // ADR-002
     const store = supabaseSupplierRequestStore(rest);
     const { request } = await created(store);
     const claim = await claimOf(store, request.id, NOW);
-    const reread = await store.get(request.id); // a trava não vem da leitura
+    const reread = await store.get(request.id); // #12: a trava não vem da leitura
     reread?.request.editBody('Pedimos o retorno até {{prazo}}.', catalog);
     expect(await store.save(reread!.request, { by: OTHER, at: at(1), action: 'edited' })).toBe('stale');
     expect(fake.rows(TABLE)[0]).toMatchObject({ send_claim: claim, version: 2 });
@@ -419,26 +419,29 @@ describe('#12/AC-4 a trava do envio concorrente', () => { // ADR-002
   });
 });
 
-describe('#12/AC-6 os pedidos abertos de um tipo, numa leitura só', () => { // ADR-002
-  it('listOpenKeys devolve as notas de origem com pedido aberto, sem o descartado, numa única requisição', async () => { // ADR-002
+describe('#12/AC-6 os pedidos abertos de um tipo, só das notas pedidas, numa leitura', () => { // ADR-002
+  it('listOpenKeys devolve só as chaves perguntadas com pedido aberto, sem o descartado, numa única requisição', async () => { // ADR-002
     const { fake, rest } = harness();
     const store = supabaseSupplierRequestStore(rest);
     const first = await created(store);
     await created(store, { invoiceAccessKey: 'outra-chave', queueId: 8 });
+    await created(store, { invoiceAccessKey: 'fora-da-pergunta', queueId: 9 });
     first.request.discard('x');
     await store.save(first.request, { by: BY, at: NOW, action: 'discarded' });
     const before = fake.requests.length;
-    const keys = await store.listOpenKeys('return_note');
+    const keys = await store.listOpenKeys('return_note', [first.request.invoiceAccessKey, 'outra-chave']);
     expect([...keys]).toEqual(['outra-chave']);
     expect(fake.requests.length - before).toBe(1);
     const url = decodeURIComponent(fake.requests.at(-1)?.url ?? '');
     expect(url).toContain('status=in.(draft,sent,send_failed)');
     expect(url).toContain('request_type=eq.return_note');
     expect(url).toContain('select=invoice_access_key');
+    expect(url).toContain(`invoice_access_key=in.("${first.request.invoiceAccessKey}","outra-chave")`);
   });
 
-  it('sem pedido aberto, o conjunto é vazio', async () => { // ADR-002
-    const { rest } = harness();
-    expect((await supabaseSupplierRequestStore(rest).listOpenKeys('return_note')).size).toBe(0);
+  it('sem chave perguntada, o conjunto é vazio e nenhuma requisição sai', async () => { // ADR-002
+    const { fake, rest } = harness();
+    expect((await supabaseSupplierRequestStore(rest).listOpenKeys('return_note', [])).size).toBe(0);
+    expect(fake.requests).toEqual([]);
   });
 });

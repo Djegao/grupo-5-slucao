@@ -19,7 +19,7 @@ export const SUPPLIER_DRAFT_TASK = 'supplier-request-draft';
 /** #11/AC-1: o nome da chave estável por devolução da fila. */
 export const draftKey = (queueId: number): string => `return_note:${queueId}`;
 
-/** #12: pedidos por rodada: com 2, a rodada inteira fica em 40 subrequests dos 50 (contas em api/src/claude/cron.ts). */
+/** #12: pedidos por rodada: com 2, a rodada inteira fica em 41 subrequests dos 50 (contas em api/src/claude/cron.ts). */
 export const SUPPLIER_DRAFT_LIMIT = 2;
 
 export const supplierRequestDraftTask = (deps: SupplierDeps): ClaudeTask<SupplierDraftInput, SupplierDraftOutput> => ({
@@ -28,10 +28,10 @@ export const supplierRequestDraftTask = (deps: SupplierDeps): ClaudeTask<Supplie
 
   /** #11/AC-1: cada devolução `pendente` da fila sem pedido `return_note` aberto na nota de origem. */
   async pending() {
-    // #12: duas leituras, qualquer que seja o número de devoluções: a fila e os pedidos abertos.
-    const [views, open] = await Promise.all([deps.queue.list('pendente', deps.clock.now()), deps.requests.listOpenKeys('return_note')]);
-    const requests = views
-      .map(queueEntryOf)
+    // #12: três leituras, qualquer que seja o número de devoluções: a fila (que lê as notas de origem em outra) e, em seguida, os pedidos abertos só dessas notas.
+    const entries = (await deps.queue.list('pendente', deps.clock.now())).map(queueEntryOf);
+    const open = await deps.requests.listOpenKeys('return_note', entries.map((e) => e.invoiceAccessKey));
+    const requests = entries
       .filter((e) => !open.has(e.invoiceAccessKey))
       .map(({ id, ...rest }) => ({ key: draftKey(id), input: { queueId: id, ...rest } }));
     return { requests, dropped: 0 };

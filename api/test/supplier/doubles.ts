@@ -107,6 +107,8 @@ export type FakeRequests = SupplierDeps['requests'] & {
   /** #12: quantas vezes cada leitura foi chamada, para conferir o custo do `pending()` da tarefa. */
   findOpenCalls: number;
   listOpenKeysCalls: number;
+  /** #12: as chaves que cada `listOpenKeys` recebeu, para conferir que só as pendentes foram perguntadas. */
+  listOpenKeysArgs: string[][];
 };
 
 export const fakeRequests = (): FakeRequests => {
@@ -121,13 +123,17 @@ export const fakeRequests = (): FakeRequests => {
     refuseClaim: false,
     findOpenCalls: 0,
     listOpenKeysCalls: 0,
+    listOpenKeysArgs: [],
     findOpen: async (key, type) => {
       store.findOpenCalls += 1;
       return rows.find((r) => r.request.invoiceAccessKey === key && r.request.requestType === type && r.request.isOpen) ?? null;
     },
-    listOpenKeys: async (type) => {
+    listOpenKeys: async (type, keys) => {
       store.listOpenKeysCalls += 1;
-      return new Set(rows.filter((r) => r.request.requestType === type && r.request.isOpen).map((r) => r.request.invoiceAccessKey));
+      store.listOpenKeysArgs.push([...keys]);
+      return new Set(
+        rows.filter((r) => r.request.requestType === type && r.request.isOpen && keys.includes(r.request.invoiceAccessKey)).map((r) => r.request.invoiceAccessKey),
+      );
     },
     get: async (id) => rows.find((r) => r.request.id === id) ?? null,
     create: async (input: NewRequest): Promise<CreateResult> => {

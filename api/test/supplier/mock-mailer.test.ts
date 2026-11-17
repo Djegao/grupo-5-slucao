@@ -19,23 +19,23 @@ const message: MailMessage = {
   idempotencyKey: 'claim-abc',
 };
 
-describe('#12/AC-5 sem a chave do Resend, o envio usa a caixa de saída mock', () => {
-  it('o mock responde ok, pelo canal mock, com um identificador que vem da chave da trava', async () => {
+describe('#12/AC-5 sem a chave do Resend, o envio usa a caixa de saída mock', () => { // ADR-002
+  it('o mock responde ok, pelo canal mock, com um identificador que vem da chave da trava', async () => { // ADR-002
     expect(await mockMailer().send(message)).toEqual({ ok: true, channel: 'mock', providerMessageId: 'mock-claim-abc' });
   });
 
-  it('sem a variável do Resend, ou com ela em branco, o seletor devolve o mock, sem erro', async () => {
+  it('sem a variável do Resend, ou com ela em branco, o seletor devolve o mock, sem erro', async () => { // ADR-002
     for (const env of [{}, { RESEND_API_KEY: '' }, { RESEND_API_KEY: '   ' }]) {
       expect(await mailerFromEnv(env).send(message)).toMatchObject({ ok: true, channel: 'mock' });
     }
   });
 
-  it('com a chave e o adaptador do Resend, usa o adaptador', async () => {
+  it('com a chave e o adaptador do Resend, usa o adaptador', async () => { // ADR-002
     const resend: SupplierMailer = { send: async () => ({ ok: true, channel: 'resend', providerMessageId: 'msg-1' }) };
     expect(await mailerFromEnv({ RESEND_API_KEY: 're_chave_de_teste' }, resend).send(message)).toMatchObject({ channel: 'resend' });
   });
 
-  it('com a chave e sem adaptador do Resend, falha fechado com um motivo próprio, sem a chave', async () => {
+  it('com a chave e sem adaptador do Resend, falha fechado com um motivo próprio, sem a chave', async () => { // ADR-002
     const result = await mailerFromEnv({ RESEND_API_KEY: 're_chave_de_teste' }).send(message);
     expect(result).toEqual({ ok: false, reason: 'resend_unavailable' });
     expect(JSON.stringify(result)).not.toContain('re_chave_de_teste');

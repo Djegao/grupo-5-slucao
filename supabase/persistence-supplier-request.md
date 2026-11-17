@@ -1,13 +1,13 @@
 # Desenho da persistência: pedido ao fornecedor (#12)
 
-Issue: #12 (história #2). Banco: PostgreSQL 17 no Supabase (`supabase/config.toml`, `major_version = 17`), acessado só por PostgREST com a chave secreta. Registro: `supabase/persistence-modes.yaml`. Migração desta camada: `supabase/migrations/20261116120000_supplier_request.sql` (posterior à última, `20261116100000`).
+Issue: #12 (história #2). Banco: PostgreSQL 17 no Supabase (`supabase/config.toml`, `major_version = 17`), acessado só por PostgREST com a chave secreta. Registro: `supabase/persistence-modes.yaml`. Migração desta camada: `supabase/migrations/20261116190000_supplier_request.sql` (posterior à última, `20261116100000`).
 
 ## Entradas
 
 | Entrada | Valor | Fonte |
 |---|---|---|
 | Raízes | `SupplierRequest` (pedido ao fornecedor); `IssuedReturnNote` (a nota emitida pelo mock, valor imutável); a entrada da fila `outbox_return_notes` (existente, #140) | `api/src/domain/supplier-request.ts`, `return-note-document.ts`, `api/src/returns/return-notes.ts` |
-| Consultas | Q1 `findOpen(invoice_access_key, request_type)` entre `draft`, `sent`, `send_failed`; Q1b `listOpenKeys(request_type)`: as notas de origem com pedido aberto do tipo, numa leitura só (o `pending()` da tarefa do Cron, em vez de um `findOpen` por devolução; mesmo predicado do índice parcial); Q2 `get(id)`; Q3 `issue(queueId)`: a nota já emitida da devolução; Q4 `SourceInvoices.find`: `invoices` por `access_key` e `kit_fornecedores` por `fornecedor_id`; Q5 o pedido por id na trava e nas gravações | `api/src/supplier/ports.ts`, `draft.ts`, `use-cases.ts` |
+| Consultas | Q1 `findOpen(invoice_access_key, request_type)` entre `draft`, `sent`, `send_failed`; Q1b `listOpenKeys(request_type, invoice_access_keys)`: das notas de origem pendentes na fila, as com pedido aberto do tipo, numa leitura só limitada por `invoice_access_key=in.(<chaves pendentes>)` e feita depois da leitura da fila (o `pending()` da tarefa do Cron, em vez de um `findOpen` por devolução; sem chave pendente, nenhuma leitura; mesmo predicado do índice parcial, então o payload não cresce com os pedidos enviados do histórico); Q2 `get(id)`; Q3 `issue(queueId)`: a nota já emitida da devolução; Q4 `SourceInvoices.find`: `invoices` por `access_key` e `kit_fornecedores` por `fornecedor_id`; Q5 o pedido por id na trava e nas gravações | `api/src/supplier/ports.ts`, `draft.ts`, `use-cases.ts` |
 | Inquilino | nenhum | brief da #12 |
 | Números assumidos | pedidos por dia: não informado; entradas de histórico por pedido: poucas dezenas (rascunho, edições, emissão, tentativas de envio), assumido; prazo da trava do envio: 5 minutos, assumido (não informado o tempo máximo do envio de e-mail) | |
 
@@ -55,7 +55,7 @@ O PostgreSQL guarda `jsonb` indexável ([jsonb Indexing](https://www.postgresql.
 | Índice | Tabela | Colunas | Serve | Sai sem travar escrita por |
 |---|---|---|---|---|
 | `outbox_supplier_emails_pkey` | `outbox_supplier_emails` | `(id)` | Q2, Q5 e todo `PATCH` por id | tabela nova: n/a |
-| `outbox_supplier_emails_open_key` (único, parcial) | `outbox_supplier_emails` | `(invoice_access_key, request_type) where status in ('draft', 'sent', 'send_failed')` | AC-3 e Q1: o filtro do `findOpen` repete o predicado (`status=in.(draft,sent,send_failed)`), para o planejador poder usar o índice parcial ([Partial Indexes](https://www.postgresql.org/docs/current/indexes-partial.html)) | tabela nova: n/a |
+| `outbox_supplier_emails_open_key` (único, parcial) | `outbox_supplier_emails` | `(invoice_access_key, request_type) where status in ('draft', 'sent', 'send_failed')` | AC-3, Q1 e Q1b: o filtro do `findOpen` e o do `listOpenKeys` repetem o predicado (`status=in.(draft,sent,send_failed)`), e o `listOpenKeys` ainda filtra `invoice_access_key` (a primeira coluna do índice), para o planejador poder usar o índice parcial ([Partial Indexes](https://www.postgresql.org/docs/current/indexes-partial.html)) | tabela nova: n/a |
 | `issued_return_notes_pkey` | `issued_return_notes` | `(id)` | a FK do pedido e a leitura da nota pelo número | tabela nova: n/a |
 | `issued_return_notes_queue_id_key` (único) | `issued_return_notes` | `(queue_id)` | AC-2 e Q3: `issue` lê e grava por `queue_id`, e o `on_conflict=queue_id` do insert usa esta restrição | tabela nova: n/a |
 | `kit_fornecedores_pkey` (existente) | `kit_fornecedores` | `(fornecedor_id)` | Q4: o e-mail do fornecedor da nota | já existe |
@@ -75,7 +75,7 @@ Toda gravação é uma requisição PostgREST, uma transação, uma tabela. Nenh
 | Editar o corpo | o `PATCH` do `save` | `SupplierRequest` | corpo, `version + 1`, entrada de histórico | 0 linhas: versão velha ou trava de envio ativa: conflito | nenhum |
 | Descartar | o `PATCH` do `save` com `discarded` | `SupplierRequest` | estado, motivo, `discarded_by/at`, `version + 1`, histórico | idem | nenhum |
 | Enviar: trava | `PATCH` da trava (abaixo) | `SupplierRequest` | `send_claim`, `send_claimed_at`, `version + 1`, histórico `send_claimed` | 0 linhas: outro envio em curso ou versão velha: conflito, sem emitir nem enviar | nenhum |
-| Enviar: emitir | `POST` em `issued_return_notes` | `IssuedReturnNote` | uma linha, `on_conflict=queue_id`, `ignore-duplicates`; vazio: lê por `queue_id` e devolve a mesma | erro sobe; reenviar refaz | idempotente por `queue_id` |
+| Enviar: emitir | `POST` em `issued_return_notes` | `IssuedReturnNote` | uma linha, `on_conflict=queue_id`, `ignore-duplicates`; vazio: lê por `queue_id` e devolve a mesma | erro sobe; antes do e-mail o envio solta a trava (`releaseSend`) e reenviar refaz; depois do e-mail a trava não é solta, para a lacuna do segundo e-mail não crescer | idempotente por `queue_id` |
 | Enviar: registrar a emissão | `PATCH` do `save` (com a trava) | `SupplierRequest` | `issued_return_note_id`, `version + 1`, histórico | 0 linhas: perdeu a trava: para | nenhum |
 | Enviar: mover a fila | `PATCH` existente com `status=eq.pendente` | entrada da fila | `emitida`, número, quem, quando | 0 linhas: conflito (já tratado no caso de uso) | idempotente pelo número |
 | Enviar: marcar | `PATCH` do `save` (com a trava) | `SupplierRequest` | `sent` + carimbo + anexos, ou `send_failed` + motivo; limpa a trava; `version + 1`, histórico | 0 linhas: perdeu a trava | nenhum |

@@ -87,8 +87,8 @@ export interface SupplierRequestStore {
   claimSend(id: number, by: string, at: Date): Promise<ClaimResult>;
   /** #12/AC-4: solta a trava de um envio que parou antes de enviar (fila já tratada, por exemplo); só solta a que tem esta chave. */
   releaseSend(id: number, claim: string, by: string, at: Date): Promise<void>;
-  /** #12/AC-6: as notas de origem com pedido aberto do tipo, numa só leitura (o `pending()` da tarefa não faz uma leitura por devolução). */
-  listOpenKeys(requestType: RequestType): Promise<ReadonlySet<string>>;
+  /** #12/AC-6: das notas de origem perguntadas, as que têm pedido aberto do tipo, numa só leitura limitada a elas (sem chave, nenhuma leitura). */
+  listOpenKeys(requestType: RequestType, invoiceAccessKeys: readonly string[]): Promise<ReadonlySet<string>>;
 }
 
 /** #11/AC-5: a emissão mock, idempotente por devolução da fila: a segunda chamada devolve a nota já emitida. */
