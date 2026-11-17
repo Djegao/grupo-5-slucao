@@ -1,4 +1,4 @@
-import { filterOf, followUpDraftFor, overdueReading, validateRequestText, type RequestFilter, type SupplierReading, type TextField } from '../domain/index.js';
+import { filterOf, followUpDraftFor, followUpDue, overdueReading, owesFollowUp, validateRequestText, type RequestFilter, type SupplierReading, type TextField } from '../domain/index.js';
 import { followUpCatalogOf, todayIso } from './reply-catalog.js';
 import type { FollowUpMail, FollowUpMailResult, FollowUpStamp, ReplyDeps, ReplyList, ReplyListRow, ReplyRequest } from './reply-ports.js';
 
@@ -12,7 +12,7 @@ const SHORT_REASON = /^[a-z][a-z0-9_]{0,39}$/;
 export type SendFollowUpResult =
   | { readonly kind: 'ok'; readonly request: ReplyRequest }
   | { readonly kind: 'not_found' }
-  | { readonly kind: 'conflict'; readonly reason: 'not_no_reply' | 'no_draft' | 'already_sent' | 'send_in_progress' }
+  | { readonly kind: 'conflict'; readonly reason: 'not_follow_up' | 'no_draft' | 'already_sent' | 'send_in_progress' | 'stale' }
   | { readonly kind: 'invalid'; readonly reason: 'text_invalid' }
   | { readonly kind: 'send_failed'; readonly reason: string };
 
@@ -35,6 +35,8 @@ export type ReplyUseCases = {
    * #34/AC-3: cada pedido `sent` sem leitura depois do prazo vira no_reply com follow_up; sem Claude, sem envio.
    * #58/AC-1: e ganha, na mesma varredura, o rascunho da cobrança montado pela regra (o pedido já no_reply que ficou sem rascunho,
    * numa rodada que caiu entre as duas gravações, ganha na seguinte). Nada é enviado: o envio é do `sendFollowUp` (#58/AC-7).
+   * #58/AC-2: o pedido cuja leitura é a resposta `partially_fulfilled` ou `needs_information` com next_step follow_up também ganha a cobrança
+   * (só dos itens que faltam), passado o prazo do pedido; a leitura do fornecedor fica, a varredura não grava outra.
    * #36/AC-4: trata no máximo `limit` pedidos por chamada (os de menor id); a chamada seguinte trata os próximos.
    */
   sweepOverdue(limit?: number): Promise<SweepResult>;
@@ -46,9 +48,15 @@ export type ReplyUseCases = {
   listRequests(filter: RequestFilter, today: string): Promise<ReplyList>;
 };
 
-/** #58/AC-1: o pedido já no_reply que espera a cobrança: sem rascunho, sem recusa antiga do Claude e sem envio. */
-const awaitsDraft = (r: ReplyRequest): boolean =>
-  r.status === 'sent' && r.reading?.replyOutcome === 'no_reply' && r.followUp.draft === null && r.followUp.rejection === null && r.followUp.sent === null;
+/**
+ * #58/AC-1, AC-2: o pedido que já tem a leitura que pede cobrança (o no_reply, ou a resposta parcial ou de pedido de informação com
+ * follow_up, passado o prazo) e espera o rascunho: sem rascunho, sem recusa antiga do Claude e sem envio.
+ */
+const awaitsDraft = (r: ReplyRequest, today: string): boolean =>
+  followUpDue(r, r.reading, today) && r.followUp.draft === null && r.followUp.rejection === null && r.followUp.sent === null;
+
+/** #58/AC-2, AC-4: a cobrança só existe no pedido `sent` com a leitura que a pede. */
+const owesDraft = (r: ReplyRequest): boolean => r.status === 'sent' && owesFollowUp(r.reading);
 
 /** #58/AC-1, AC-2: monta pela regra a cobrança do que a leitura não deu por atendido, com o novo prazo de hoje, e grava o rascunho. */
 async function draftFollowUp(deps: ReplyDeps, request: ReplyRequest, reading: SupplierReading, today: string): Promise<void> {
@@ -71,7 +79,7 @@ async function sweepOverdue(deps: ReplyDeps, limit: number = Infinity): Promise<
       await draftFollowUp(deps, request, overdue, today);
       drafted.push(request.id);
       handled += 1;
-    } else if (request.reading !== null && awaitsDraft(request)) {
+    } else if (request.reading !== null && awaitsDraft(request, today)) {
       await draftFollowUp(deps, request, request.reading, today);
       drafted.push(request.id);
       handled += 1;
@@ -106,15 +114,17 @@ function lostClaim(requestId: number, operation: string): SendFollowUpResult {
 async function sendFollowUp(deps: ReplyDeps, id: number, by: string): Promise<SendFollowUpResult> {
   const request = await deps.requests.get(id);
   if (request === null) return { kind: 'not_found' };
-  if (request.status !== 'sent' || request.reading?.replyOutcome !== 'no_reply') return { kind: 'conflict', reason: 'not_no_reply' };
+  if (!owesDraft(request)) return { kind: 'conflict', reason: 'not_follow_up' };
   const { draft, sent } = request.followUp;
   if (sent !== null) return { kind: 'conflict', reason: 'already_sent' };
   if (draft === null) return { kind: 'conflict', reason: 'no_draft' };
   const text = validateRequestText(draft, followUpCatalogOf(request));
   if (!text.ok) return { kind: 'invalid', reason: 'text_invalid' };
   // #34/AC-4: a reivindicação vem antes do e-mail; quem não a ganha não envia, e a que fica presa após o envio impede o segundo e-mail.
-  const claim = await deps.requests.claimFollowUpSend(id, by);
-  if (claim === null) return { kind: 'conflict', reason: 'send_in_progress' };
+  // #58/AC-5: sobre o texto que esta chamada leu e validou: se uma edição entrou no meio, o envio recusa (stale) em vez de mandar o texto antigo.
+  const attempt = await deps.requests.claimFollowUpSend(id, by, draft);
+  if (attempt.kind !== 'won') return { kind: 'conflict', reason: attempt.kind === 'stale' ? 'stale' : 'send_in_progress' };
+  const claim = attempt.claim;
   const result = await dispatch(deps, id, {
     invoiceAccessKey: request.invoiceAccessKey,
     supplierId: request.note.supplierId,
@@ -141,7 +151,7 @@ async function editFollowUp(deps: ReplyDeps, id: number, template: string, by: s
   const request = await deps.requests.get(id);
   if (request === null) return { kind: 'not_found' };
   const { draft, sent } = request.followUp;
-  if (request.status !== 'sent' || request.reading?.replyOutcome !== 'no_reply') return { kind: 'conflict', reason: 'no_draft' };
+  if (!owesDraft(request)) return { kind: 'conflict', reason: 'no_draft' };
   if (sent !== null) return { kind: 'conflict', reason: 'already_sent' };
   if (draft === null) return { kind: 'conflict', reason: 'no_draft' };
   // #58/AC-4: troca só o corpo, como o PATCH do rascunho da #13: o assunto e os itens ficam; o texto cru, com {{chave}}, é o que se confere e o que se guarda.

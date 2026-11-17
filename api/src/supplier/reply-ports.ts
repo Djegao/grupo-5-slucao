@@ -81,6 +81,15 @@ export type ReadingRecorded = 'recorded' | 'superseded';
 /** #35: a ficha da reivindicação do envio: o que a prende a quem a ganhou (como a da #12). Nunca sai do armazém nem entra em log. */
 export type FollowUpClaim = string;
 
+/**
+ * #58/AC-5 (lost update): o resultado de reivindicar o envio. `won` traz a ficha; `taken`: já há envio reivindicado dentro do prazo, ou
+ * carimbado, ou não há o que enviar; `stale`: o texto que o envio leu já não é o gravado (uma edição entrou no meio): refaz a leitura.
+ */
+export type ClaimAttempt =
+  | { readonly kind: 'won'; readonly claim: FollowUpClaim }
+  | { readonly kind: 'taken' }
+  | { readonly kind: 'stale' };
+
 /** #58/AC-5: o resultado de editar o rascunho; só `recorded` gravou. */
 export type EditWrite = 'recorded' | 'already_sent' | 'send_in_progress' | 'stale';
 
@@ -118,11 +127,12 @@ export interface ReplyRequestStore {
   editFollowUpDraft(id: number, text: SupplierRequestText, by: string): Promise<EditWrite>;
   /**
    * #34/AC-4: reivindica o envio da cobrança antes do e-mail sair. Devolve a ficha da reivindicação (#35, o `send_claim` da #12)
-   * para quem ganhou, e `null` se já há envio reivindicado dentro do prazo ou carimbado. O OLTP tem de garantir que é uma transição
+   * para quem ganhou (`won`), e `taken` se já há envio reivindicado dentro do prazo ou carimbado. #58/AC-5: `draft` é o texto que o envio leu
+   * e vai mandar; a reivindicação só vale sobre ele, na versão lida: se uma edição entrou no meio devolve `stale` e nada é reivindicado. O OLTP tem de garantir que é uma transição
    * guardada e atômica (um UPDATE condicional por pedido), e `by` entra no histórico (#35), para duas chamadas ao mesmo tempo não
    * ganharem as duas. A reivindicação vence com o prazo (#35): a ficha é o que prende a falha e o carimbo a quem a ganhou.
    */
-  claimFollowUpSend(id: number, by: string): Promise<FollowUpClaim | null>;
+  claimFollowUpSend(id: number, by: string, draft: SupplierRequestText): Promise<ClaimAttempt>;
   /**
    * #34/AC-4: grava o motivo da falha e solta a reivindicação, para a pessoa poder tentar de novo; `by` entra no histórico (#35).
    * #35: só vale para quem ainda detém a ficha; com a reivindicação vencida e retomada por outro, volta `lost` e não grava nada.

@@ -71,11 +71,44 @@ describe('#58/AC-1 (#58/AC-7): a varredura monta a cobrança pela regra, sem o C
     expect(followUp.sent).toBeNull();
   });
 
-  it('#58/AC-2: pede só o que o fornecedor não atendeu: os asks fora de fulfilledAsks da leitura', async () => {
-    const done = reading({ replyOutcome: 'no_reply', nextStep: 'follow_up', fulfilledAsks: [ASKS[0] as string] });
-    const { deps, store } = parts([replyRequest(7, { reading: done })]);
-    await createReplyUseCases(deps).sweepOverdue();
+  it('#58/AC-2: a resposta parcial com follow_up, depois do prazo, ganha a cobrança que pede só os itens que o fornecedor não atendeu', async () => {
+    const partial = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'follow_up', fulfilledAsks: [ASKS[0] as string] });
+    const { deps, store } = parts([replyRequest(7, { reading: partial })]);
+    expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [], drafted: [7] });
     expect(store.rows.get(7)?.followUp.draft?.asks).toEqual([ASKS[1]]);
+    expect(store.rows.get(7)?.followUp.dueOn).toBe('2026-11-25');
+    expect(store.calls.map((c) => c.op)).toEqual(['saveFollowUpDraft']); // a leitura do fornecedor fica: a varredura não grava outra
+    expect(store.rows.get(7)?.reading).toEqual(partial);
+  });
+
+  it('#58/AC-2: o pedido de informação com follow_up, depois do prazo, ganha a cobrança com os itens que faltam', async () => {
+    const asked = reading({ replyOutcome: 'needs_information', nextStep: 'follow_up' });
+    const { deps, store } = parts([replyRequest(7, { reading: asked })]);
+    expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [], drafted: [7] });
+    expect(store.rows.get(7)?.followUp.draft?.asks).toEqual(ASKS);
+  });
+
+  it('#58/AC-2: a resposta parcial que ainda está no prazo, ou cujo próximo passo é nosso, não ganha cobrança', async () => {
+    const partial = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'follow_up' });
+    const ours = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'answer_supplier' });
+    const { deps, store } = parts([replyRequest(7, { reading: partial, dueOn: TODAY }), replyRequest(8, { reading: ours })]);
+    expect(await createReplyUseCases(deps).sweepOverdue()).toEqual({ marked: [], drafted: [] });
+    expect(store.calls).toEqual([]);
+  });
+
+  it('#58/AC-2: a cobrança da resposta parcial é montada uma vez só e respeita o teto da rodada', async () => {
+    const partial = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'follow_up' });
+    const { deps } = parts([replyRequest(7, { reading: partial }), replyRequest(8, { reading: partial })]);
+    const useCases = createReplyUseCases(deps);
+    expect(await useCases.sweepOverdue(1)).toEqual({ marked: [], drafted: [7] });
+    expect(await useCases.sweepOverdue(1)).toEqual({ marked: [], drafted: [8] });
+    expect(await useCases.sweepOverdue(1)).toEqual({ marked: [], drafted: [] });
+  });
+
+  it('#58/AC-2: o no_reply da varredura não atendeu nada: pede todos os itens do pedido', async () => {
+    const { deps, store } = parts([replyRequest(7)]);
+    await createReplyUseCases(deps).sweepOverdue();
+    expect(store.rows.get(7)?.followUp.draft?.asks).toEqual(ASKS);
   });
 
   it('#58/AC-1: o pedido já marcado no_reply por uma rodada que caiu antes do rascunho ganha o rascunho na rodada seguinte, e uma só vez', async () => {
@@ -219,10 +252,44 @@ describe('#34/AC-4 (#4/AC-3): a cobrança sai só pelo caso de uso de envio, cha
     ]);
     const useCases = createReplyUseCases(deps);
     expect(await useCases.sendFollowUp(1, 'ana')).toEqual({ kind: 'not_found' });
-    expect(await useCases.sendFollowUp(8, 'ana')).toEqual({ kind: 'conflict', reason: 'not_no_reply' });
-    expect(await useCases.sendFollowUp(10, 'ana')).toEqual({ kind: 'conflict', reason: 'not_no_reply' });
+    expect(await useCases.sendFollowUp(8, 'ana')).toEqual({ kind: 'conflict', reason: 'not_follow_up' });
+    expect(await useCases.sendFollowUp(10, 'ana')).toEqual({ kind: 'conflict', reason: 'not_follow_up' });
     expect(await useCases.sendFollowUp(9, 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
     expect(mailer.sent).toEqual([]);
+  });
+
+  it.each([['partially_fulfilled'], ['needs_information']] as const)('#58/AC-2: envia a cobrança da leitura %s com follow_up, como a do no_reply', async (replyOutcome) => {
+    const read = reading({ replyOutcome, nextStep: 'follow_up' });
+    const { deps, mailer } = parts([replyRequest(7, { ...drafted(), reading: read })]);
+    expect(await createReplyUseCases(deps).sendFollowUp(7, 'ana')).toMatchObject({ kind: 'ok' });
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it('#58/AC-2: a resposta parcial cujo próximo passo é nosso (answer_supplier) não tem cobrança a enviar: conflito not_follow_up', async () => {
+    const ours = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'answer_supplier' });
+    const { deps, mailer } = parts([replyRequest(7, { ...drafted(), reading: ours })]);
+    expect(await createReplyUseCases(deps).sendFollowUp(7, 'ana')).toEqual({ kind: 'conflict', reason: 'not_follow_up' });
+    expect(mailer.sent).toEqual([]);
+  });
+
+  it('#58/AC-5: a edição que entra entre a leitura do envio e a reivindicação faz o envio recusar (stale), sem mandar o texto antigo', async () => {
+    const { deps, store, mailer } = parts([drafted()]);
+    const read = store.get;
+    store.get = async (id) => {
+      const seen = await read(id); // o envio leu o texto antigo...
+      await store.editFollowUpDraft(id, { ...GOOD_FOLLOW_UP, body: 'Texto novo, até {{cobranca.prazo}}.' }, 'bia'); // ...e a edição entrou antes da reivindicação
+      return seen;
+    };
+    expect(await createReplyUseCases(deps).sendFollowUp(7, 'ana')).toEqual({ kind: 'conflict', reason: 'stale' });
+    expect(mailer.sent).toEqual([]);
+    expect(store.claims.has(7)).toBe(false);
+  });
+
+  it('#58/AC-5: depois do stale, repetir o envio manda o texto novo', async () => {
+    const { deps, store, mailer } = parts([drafted()]);
+    await store.editFollowUpDraft(7, { ...GOOD_FOLLOW_UP, body: 'Texto novo, total {{devolucao.total}}.' }, 'bia');
+    expect(await createReplyUseCases(deps).sendFollowUp(7, 'ana')).toMatchObject({ kind: 'ok' });
+    expect(mailer.sent[0]?.body).toContain('Texto novo');
   });
 
   it('revalida o rascunho contra o catálogo: texto com número fora dele não sai', async () => {
@@ -419,6 +486,15 @@ describe('#58/AC-4: editar o texto da cobrança ainda não enviada, revalidado c
     expect(await useCases.editFollowUp(9, 'Texto.', 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
     expect(await useCases.editFollowUp(10, 'Texto.', 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
     expect(await useCases.editFollowUp(1, 'Texto.', 'ana')).toEqual({ kind: 'not_found' });
+  });
+
+  it('#58/AC-4: a cobrança da resposta parcial com follow_up também se edita; a de leitura que não a pede, não', async () => {
+    const partial = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'follow_up' });
+    const ours = reading({ replyOutcome: 'partially_fulfilled', nextStep: 'answer_supplier' });
+    const { deps } = parts([{ ...ruleDrafted(), reading: partial }, { ...ruleDrafted(), id: 8, reading: ours }]);
+    const useCases = createReplyUseCases(deps);
+    expect((await useCases.editFollowUp(7, 'Novo texto {{cobranca.prazo}}.', 'ana')).kind).toBe('ok');
+    expect(await useCases.editFollowUp(8, 'Novo texto {{cobranca.prazo}}.', 'ana')).toEqual({ kind: 'conflict', reason: 'no_draft' });
   });
 
   it('#58/AC-7: editar não envia: o e-mail só sai pelo caso de uso de envio, e o texto editado é o que sai, renderizado', async () => {

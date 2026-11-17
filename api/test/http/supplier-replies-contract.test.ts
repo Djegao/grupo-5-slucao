@@ -88,7 +88,7 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
     const request = await viewOf(w);
     expect(Object.keys(request).sort()).toEqual([...VIEW_KEYS_13, 'followUp', 'reading'].sort());
     expect(request.reading).toBeNull();
-    expect(request.followUp).toEqual({ drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null });
+    expect(request.followUp).toEqual({ drafted: false, sent: false, draft: null, dueOn: null, sentBy: null, sentAt: null, failure: null });
     expect(request).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'nota-devolucao-ND-1.pdf' } }); // #57/AC-5
   });
 
@@ -102,7 +102,8 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
   it('#36/AC-2: a cobrança rascunhada vem renderizada e com a forma {{chave}}, para "Cobrar" abrir, revisar e enviar', async () => {
     const w = await overdueWorld();
     const { followUp } = await viewOf(w);
-    expect(Object.keys(followUp).sort()).toEqual(['draft', 'drafted', 'failure', 'sent', 'sentAt', 'sentBy']);
+    expect(Object.keys(followUp).sort()).toEqual(['draft', 'drafted', 'dueOn', 'failure', 'sent', 'sentAt', 'sentBy']);
+    expect(followUp.dueOn).toBe('2026-11-25'); // #59: o novo prazo da cobrança, AAAA-MM-DD
     expect(Object.keys(followUp.draft).sort()).toEqual(['asks', 'body', 'subject', 'template']);
     expect(followUp.draft.body).toContain('R$ 59,43');
     expect(followUp.draft.body).not.toContain('{{');

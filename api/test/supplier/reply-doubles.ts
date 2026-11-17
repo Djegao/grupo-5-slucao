@@ -98,6 +98,8 @@ export type FakeStore = ReplyDeps['requests'] & {
   failStamp: { on: boolean };
 };
 
+const textOf = (t: SupplierRequestText | null) => (t === null ? null : { subject: t.subject, body: t.body, asks: [...t.asks] });
+
 export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
   const map = new Map(rows.map((r) => [r.id, r]));
   const calls: StoreCall[] = [];
@@ -116,13 +118,15 @@ export const fakeStore = (rows: ReplyRequest[]): FakeStore => {
     calls,
     claims,
     failStamp,
-    claimFollowUpSend: (id, by) => {
+    // #58/AC-5: a reivindicação vale sobre o texto que o envio leu: se o rascunho gravado já é outro, volta `stale`.
+    claimFollowUpSend: (id, by, draft) => {
       calls.push({ op: 'claimFollowUpSend', args: [id, by] });
-      const taken = claims.has(id) || map.get(id)?.followUp.sent != null;
-      if (taken) return Promise.resolve(null);
+      const row = map.get(id);
+      if (claims.has(id) || row?.followUp.sent != null) return Promise.resolve({ kind: 'taken' });
+      if (JSON.stringify(textOf(row?.followUp.draft ?? null)) !== JSON.stringify(textOf(draft))) return Promise.resolve({ kind: 'stale' });
       issued += 1;
       claims.set(id, `claim-${issued}`);
-      return Promise.resolve(`claim-${issued}`);
+      return Promise.resolve({ kind: 'won', claim: `claim-${issued}` });
     },
     get: (id) => Promise.resolve(map.get(id) ?? null),
     listSent: () => Promise.resolve([...map.values()].filter((r) => r.status === 'sent')),

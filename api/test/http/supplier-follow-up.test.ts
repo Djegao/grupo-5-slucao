@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tasksFor } from '../../src/claude/tasks/index.js';
 import { sweepSupplierOverdue } from '../../src/cron/supplier-sweep.js';
 import { fakeMailer } from '../supplier/doubles.js';
-import { AFTER_DUE, ANA, replyAsk, sentWorld, viewOf, type Json } from '../support/reply-scenarios.js';
+import { LEASE_MS } from '../../src/supplier/supabase-store.js';
+import { AFTER_DUE, ANA, ASK_OK, READING, replyAsk, sentWorld, viewOf, type Json } from '../support/reply-scenarios.js';
 import { supplierWorld, type SupplierWorld } from '../support/supplier-world.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -238,5 +239,93 @@ describe('#58/AC-7 nada sai sem uma pessoa: a cobrança só é enviada pela rota
     const row = w.rows('outbox_supplier_emails')[0] ?? {};
     expect(mailer.sent).toHaveLength(0);
     expect([row.follow_up_sent_at, row.follow_up_sent_by, row.follow_up_claimed_at, row.follow_up_provider_message_id]).toEqual([null, null, null, null]);
+  });
+});
+
+/** #58/AC-2 (ref-pr40): a resposta que o domínio produz e ainda pede cobrança: o fornecedor atendeu um item e o próximo passo é follow_up. */
+const PARTIAL = { ...READING, reply_outcome: 'partially_fulfilled', supplier_document: null, summary: 'O fornecedor atendeu só parte do pedido.', next_step: 'follow_up' };
+
+/** #58/AC-2: o pedido que o fornecedor respondeu pela metade (lido antes do prazo); o relógio fica no dia da leitura. */
+async function answeredHalf(options: Parameters<typeof sentWorld>[0] = {}, reading: Record<string, unknown> = PARTIAL): Promise<SupplierWorld> {
+  const w = await sentWorld(options);
+  w.receive('Creditamos a nota de devolução; falta o comprovante.');
+  await w.runAllTasks(replyAsk(reading));
+  return w;
+}
+
+const sweepAt = async (w: SupplierWorld, now: Date): Promise<void> => {
+  w.setNow(now);
+  await sweepSupplierOverdue(w.rest, { now: () => now });
+};
+
+describe('#58/AC-2 a resposta parcial com follow_up, passado o prazo, também ganha a cobrança, e a pessoa a envia', () => {
+  it('#58/AC-2: a varredura monta a cobrança só com o item que o fornecedor não atendeu, com o novo prazo, e a leitura dele fica', async () => {
+    const w = await answeredHalf();
+    await sweepAt(w, AFTER_DUE);
+    const view = await viewOf(w);
+    expect(view.reading).toMatchObject({ replyOutcome: 'partially_fulfilled', nextStep: 'follow_up' });
+    expect((view.followUp as Json).draft.asks).toEqual(['Creditar R$ 59,43 até 17/11/2026']);
+    expect((view.followUp as Json).draft.body).toContain('25/11/2026');
+    expect(w.rows('outbox_supplier_emails')[0]).toMatchObject({ follow_up_draft: { dueOn: '2026-11-25' } });
+    expect(w.rows('outbox_supplier_emails')[0]?.history).toContainEqual(expect.objectContaining({ action: 'follow_up_drafted', by: 'supplier-overdue-sweep' }));
+  });
+
+  it('#58/AC-2: antes do prazo a resposta parcial não ganha cobrança', async () => {
+    const w = await answeredHalf();
+    await sweepAt(w, new Date('2026-11-17T15:00:00Z')); // o dia do prazo ainda está no prazo
+    expect(((await viewOf(w)).followUp as Json).draft).toBeNull();
+  });
+
+  it('#58/AC-2: a resposta parcial cujo próximo passo é nosso (answer_supplier) não ganha cobrança', async () => {
+    const w = await answeredHalf({}, { ...PARTIAL, next_step: 'answer_supplier' });
+    await sweepAt(w, AFTER_DUE);
+    expect(((await viewOf(w)).followUp as Json).draft).toBeNull();
+  });
+
+  it('#58/AC-2: a rota de envio aceita a resposta parcial: edita (PATCH), envia (POST) e o texto editado sai; depois, 409 already_sent', async () => {
+    const mailer = fakeMailer();
+    const w = await answeredHalf({ mailer });
+    await sweepAt(w, AFTER_DUE);
+    expect((await edit(w, EDITED)).status).toBe(200);
+
+    const sent = await w.call('POST', w.path('/send'), { body: {} });
+
+    expect(sent.status).toBe(200);
+    expect(mailer.sent.at(-1)).toMatchObject({ body: 'Prezados, ainda sem resposta sobre a nota 43894. Respondam até 25/11/2026, por favor.' });
+    expect((sent.body.request as Json).followUp).toMatchObject({ sent: true, sentBy: ANA });
+    expect(await w.call('POST', w.path('/send'), { body: {} })).toMatchObject({ status: 409, body: { error: 'conflict', reason: 'already_sent' } });
+  });
+
+  it('#58/AC-2: a leitura que não pede cobrança (recusa) não tem o que enviar nem editar: 409, e nada sai', async () => {
+    const mailer = fakeMailer();
+    const w = await answeredHalf({ mailer }, { ...READING, reply_outcome: 'refused', supplier_document: null, summary: 'O fornecedor recusou.', next_step: 'answer_supplier', fulfilled_asks: [] });
+    await sweepAt(w, AFTER_DUE);
+    const before = mailer.sent.length;
+    expect((await w.call('POST', w.path('/send'), { body: {} })).status).toBe(409);
+    expect(await edit(w, EDITED)).toMatchObject({ status: 409, body: { error: 'conflict', reason: 'no_draft' } });
+    expect(mailer.sent).toHaveLength(before);
+  });
+});
+
+describe('#58/AC-5 a reivindicação vencida não trava a edição', () => {
+  it('#58/AC-5: com o envio reivindicado há mais que o prazo (LEASE_MS) e sem carimbo, o PATCH é 200 e troca o texto', async () => {
+    const w = await overdue();
+    const row = w.rows('outbox_supplier_emails')[0] ?? {};
+    row.follow_up_claimed_at = new Date(AFTER_DUE.getTime() - LEASE_MS - 1000).toISOString();
+    row.follow_up_claim = '11111111-1111-4111-8111-111111111111';
+
+    expect((await edit(w, EDITED)).status).toBe(200);
+
+    expect((await draftOf(w)).template).toBe(EDITED);
+    expect(row).toMatchObject({ follow_up_claimed_at: null, follow_up_claim: null });
+  });
+});
+
+describe('#59 a visão do pedido enviado traz o novo prazo da cobrança em followUp.dueOn', () => {
+  it('#59: o pedido com a cobrança montada traz dueOn AAAA-MM-DD (o novo prazo); sem cobrança, null', async () => {
+    const w = await sentWorld();
+    expect(((await viewOf(w)).followUp as Json).dueOn).toBeNull();
+    await sweepAt(w, AFTER_DUE);
+    expect(((await viewOf(w)).followUp as Json).dueOn).toBe('2026-11-25');
   });
 });

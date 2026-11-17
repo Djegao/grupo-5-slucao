@@ -19,6 +19,8 @@ export type WireFollowUp = {
   readonly sent: boolean;
   /** #4/AC-2: o rascunho da cobrança: o texto renderizado e a forma com {{chave}}; nulo sem rascunho. */
   readonly draft: { readonly subject: string; readonly body: string; readonly template: string; readonly asks: readonly string[] } | null;
+  /** #58/AC-2, #59: o novo prazo da cobrança ('AAAA-MM-DD'), o que a regra gravou com o rascunho; nulo sem rascunho (ou no do Claude, de antes da #58). */
+  readonly dueOn: string | null;
   readonly sentBy: string | null;
   readonly sentAt: string | null;
   /** #4/AC-3: o motivo curto da última falha do envio; nunca o texto do provedor. */
@@ -72,6 +74,7 @@ export const followUpOf = (reply: ReplyRequest): WireFollowUp => {
     drafted: reply.followUp.draft !== null,
     sent: sent !== null,
     draft: renderedDraft(reply),
+    dueOn: reply.followUp.dueOn,
     sentBy: sent?.by ?? null,
     sentAt: sent?.at.toISOString() ?? null,
     failure,

@@ -164,6 +164,26 @@ export function overdueReading(request: RequestDeadline, reading: SupplierReadin
   return request.status === 'sent' && reading === null && pastDue ? OVERDUE_READING : null;
 }
 
+/**
+ * #58/AC-2 (como a followUpDraftFor da PR #40): a leitura que pede a cobrança é a que não respondeu (`no_reply`) e as respostas
+ * `partially_fulfilled` e `needs_information` cujo próximo passo é `follow_up`. Outro próximo passo é resposta nossa, não cobrança.
+ */
+export function owesFollowUp(reading: SupplierReading | null): boolean {
+  if (reading === null) return false;
+  if (reading.replyOutcome === 'no_reply') return true;
+  const partial = reading.replyOutcome === 'partially_fulfilled' || reading.replyOutcome === 'needs_information';
+  return partial && reading.nextStep === 'follow_up';
+}
+
+/**
+ * #58/AC-2: a cobrança é devida hoje: o pedido está `sent`, a leitura a pede e, nas respostas (`partially_fulfilled`,
+ * `needs_information`), o prazo do pedido já passou (no dia do prazo ainda está no prazo). O `no_reply` só nasce depois do prazo.
+ */
+export function followUpDue(request: RequestDeadline, reading: SupplierReading | null, today: string): boolean {
+  if (request.status !== 'sent' || reading === null || !owesFollowUp(reading)) return false;
+  return reading.replyOutcome === 'no_reply' || isPastDue(request.dueOn, today);
+}
+
 /** #4: os filtros da lista "Pedidos ao fornecedor"; o rótulo que a pessoa lê mora fora do domínio. */
 export type RequestFilter = 'awaiting' | 'answered' | 'needs_you' | 'overdue';
 
@@ -188,7 +208,7 @@ export type FollowUpDraft = { readonly text: SupplierRequestText; readonly dueOn
 
 /**
  * #58/AC-1: a cobrança montada pela regra, sem o Claude. #58/AC-2: pede só o que o fornecedor ainda não atendeu (os `asks` fora
- * de `fulfilledAsks`; com tudo atendido volta a pedir os itens do pedido, para o texto nunca ficar sem itens), cita a nota de origem
+ * de `fulfilledAsks`; com tudo atendido, o que uma leitura parcial ou de pedido de informação pode listar, volta a pedir os itens do pedido, para o texto nunca ficar sem itens), cita a nota de origem
  * e traz o novo prazo, 3 dias úteis depois de `today`. #58/AC-3: todo número do texto é um marcador {{chave}} do catálogo: o número
  * da nota (`nota.numero`) e o novo prazo (`cobranca.prazo`, que `withFollowUpDueDate` põe no catálogo); os itens vêm do pedido, que já os guarda assim.
  */
