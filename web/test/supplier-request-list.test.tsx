@@ -76,7 +76,7 @@ function sentView(row: ReadingRowDto): SentRequestDetailDto {
   };
 }
 
-describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => {
+describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
   // #21 A API falsa: o servidor decide o filtro e as contagens; a proposta da gaveta é 404 (a gaveta da nota mostra só o bloco desta tela).
   let requests: Fixture[] = SUPPLIER_REQUESTS;
   let failList = false;
@@ -191,7 +191,9 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => {
 
     // #5 A gaveta do kit é achada pelo título, como em approval.test.tsx, não por role="dialog".
     expect(await screen.findByRole("heading", { name: /Proposta da NF/ })).toBeTruthy();
-    expect(await screen.findByText("Pedido ao fornecedor")).toBeTruthy();
+    // #21 Dentro da região desta tela: a gaveta da nota (#3) também escreve "Pedido ao fornecedor".
+    const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
+    expect(within(region).getAllByText("Pedido ao fornecedor")).toHaveLength(1);
     // #5 Estado 7 do wireframe: pedido enviado, resposta do fornecedor e leitura do agente.
     expect(screen.getByText(/Pedido enviado/)).toBeTruthy();
     expect(screen.getByText(/Resposta do fornecedor/)).toBeTruthy();
@@ -206,7 +208,8 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => {
 
     expect(await screen.findByRole("heading", { name: /Proposta da NF/ })).toBeTruthy();
     // #21 O pedido da gaveta vem do servidor, depois do título: o bloco e o rascunho esperam por ele.
-    expect(await screen.findByText("Pedido ao fornecedor")).toBeTruthy();
+    const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
+    expect(within(region).getAllByText("Pedido ao fornecedor")).toHaveLength(1);
     expect(await screen.findByText("Rascunho da cobrança")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Enviar cobrança" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Descartar rascunho" })).toBeTruthy();
@@ -226,6 +229,21 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => {
     expect(posts).toEqual([{ method: "POST", path: `/api/supplier-requests/${keyOf(1)}/send` }]);
     expect(screen.getByRole("radio", { name: /^Atrasados/ }).textContent).toMatch(/1/);
     expect(screen.getByRole("radio", { name: /^Aguardando/ }).textContent).toMatch(/2/);
+  });
+
+  it("#5/AC-4: a linha que o servidor já cobrou (followUp.sent) mostra 'Aguardando (cobrado)', sem 'Cobrar', e a gaveta não oferece cobrar de novo", async () => {
+    requests = [{ ...SUPPLIER_REQUESTS[0]!, row: { ...SUPPLIER_REQUESTS[0]!.row, followUp: { drafted: true, sent: true } } }];
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
+    // #21 O servidor ainda a lê no filtro Atrasados, mas já cobrada ela é Aguardando: sai do chip e aparece em "Ver todos".
+    fireEvent.click(await screen.findByRole("button", { name: "Ver todos" }));
+    const row = (await screen.findByText("NF 59738")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Cobrar" })).toBeNull();
+    expect(within(row).getByText(/Aguardando/)).toBeTruthy();
+    fireEvent.click(row);
+    const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
+    expect(within(region).queryByRole("button", { name: /Cobrar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
   });
 
   it("#21: a leitura da gaveta que falha mostra a mensagem fechada, nunca o corpo da resposta da API", async () => {

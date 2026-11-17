@@ -7,6 +7,7 @@ import { texts } from "../texts";
 import { SupplierRequestList } from "./SupplierRequestList";
 import {
   applyCharges,
+  chargesOf,
   countByChip,
   countsAfterCharges,
   INITIAL_STATE,
@@ -129,7 +130,9 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
   const { state, rows, counts, onFilterChange, onRetry, conversationOf, draftOf, send, onNextStep } = props;
   const { drawerState = "ready", drawerError, onDrawerRetry, onDrawerChange, editableDraft = true, renderDrawer = defaultShell } = props;
   const [screen, dispatch] = useReducer(screenReducer, INITIAL_STATE);
-  const current = applyCharges(rows, screen.charged);
+  // #5/AC-4 Cobrada nesta sessão ou já cobrada pelo servidor: nos dois casos a linha é Aguardando (cobrado) e não oferece "Cobrar".
+  const charged = chargesOf(rows, screen.charged);
+  const current = applyCharges(rows, charged);
   const openRow = screen.drawer ? current.find((row) => row.id === screen.drawer?.requestId) : undefined;
   const flow = screen.drawer?.followUp ?? null;
 
@@ -170,7 +173,7 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
     const loaded = drawerState === "ready" ? conversationOf(row) : null;
     if (!loaded) return <DrawerPending failed={false} message={drawerTexts.loading} />;
     // #5/AC-4 Pedido já cobrado nesta sessão: o bloco fica "Aguardando (cobrado)" e sem próximo passo (estado 9 do wireframe, #20).
-    const conversation: SupplierConversationView = screen.charged[row.id]
+    const conversation: SupplierConversationView = charged[row.id]
       ? { ...loaded, status: "waitingCharged", reading: { ...loaded.reading, nextStep: null } }
       : loaded;
     const base = draftOf(row);
@@ -194,7 +197,7 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
       <SupplierRequestList
         state={state}
         filter={screen.filter}
-        counts={counts ? countsAfterCharges(counts, rows, screen.charged) : countByChip(current)}
+        counts={counts ? countsAfterCharges(counts, rows, charged) : countByChip(current)}
         rows={visibleRows(current, screen.filter)}
         onFilterChange={(filter) => {
           dispatch({ type: "filter", filter });

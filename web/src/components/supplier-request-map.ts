@@ -88,6 +88,8 @@ export function rowOf(row: ReadingRowDto, filter: ReplyFilterDto): SupplierReque
     request: texts.supplierRequests.requestTypes[row.requestType],
     amountCents: row.totalCents,
     dueOn: row.dueOn,
+    // #5/AC-4 A cobrança que o servidor já enviou vem marcada, para a tela não oferecer cobrar de novo.
+    ...(row.followUp.sent ? { alreadyCharged: true } : {}),
   };
   return { ...base, ...rowStatus(row, filter) };
 }
@@ -147,10 +149,10 @@ export function conversationOf(row: SupplierRequestRow, detail: SentRequestDetai
   };
 }
 
-/** #5/AC-4 O rascunho da cobrança que o servidor guarda; nulo quando não há ou já não confere com o catálogo (#36). */
+/** #5/AC-4 O rascunho da cobrança que o servidor guarda; nulo quando não há, já não confere com o catálogo (#36) ou a cobrança já foi enviada. */
 export function draftOf(detail: SentRequestDetailDto, today: string): FollowUpDraftView | null {
   const draft = detail.followUp.draft;
-  if (draft === null) return null;
+  if (draft === null || detail.followUp.sent) return null;
   return {
     to: detail.email.to,
     dueOn: followUpDueOn(today),

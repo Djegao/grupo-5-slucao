@@ -8,7 +8,7 @@ import NotasDuplicadas from "./duplicadas";
 import FilaDeAprovacao from "./fila";
 import Recebimento from "./recebimento-loja";
 import ListaDoDia from "./lista-do-dia";
-import PedidosFornecedor from "./pedidos-fornecedor";
+import SupplierRequestsRoute from "./supplier-requests";
 import Proposta from "./proposta";
 import ValorBarrado from "./valor-barrado";
 import type { RouteDefinition } from "./types";
@@ -25,7 +25,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   { path: "/pagar/valor-barrado", component: ValorBarrado },
   { path: "/doca", component: Doca },
   { path: "/devolucoes", component: Devolucoes },
-  { path: "/pedidos-fornecedor", component: PedidosFornecedor }, // ADR-004
+  { path: "/pedidos-fornecedor", component: SupplierRequestsRoute }, // ADR-004
   { path: "/recebimento/loja", component: Recebimento },
 ];
 

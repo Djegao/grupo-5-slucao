@@ -56,6 +56,15 @@ export interface ChargedRequest {
   sentTime?: string;
 }
 
+/**
+ * #5/AC-4 As cobranças da tela: as que o servidor já enviou (linhas com `alreadyCharged`, #36) e as desta sessão, que valem sobre as semeadas.
+ * #21 A lista não traz quando a cobrança saiu: a linha semeada fica com o prazo que o servidor deu e sem carimbo.
+ */
+export function chargesOf(rows: SupplierRequestRow[], session: Record<string, ChargedRequest>): Record<string, ChargedRequest> {
+  const seeded = rows.filter((row) => row.alreadyCharged).map((row): [string, ChargedRequest] => [row.id, { dueOn: row.dueOn, sentOn: "—" }]);
+  return { ...Object.fromEntries(seeded), ...session };
+}
+
 /** #5/AC-2 A linha cobrada passa a Aguardando com o novo prazo e sai de Atrasados (Q7, estado 9 do wireframe). */
 export function applyCharges(rows: SupplierRequestRow[], charged: Record<string, ChargedRequest>): SupplierRequestRow[] {
   if (Object.keys(charged).length === 0) return rows;

@@ -81,6 +81,11 @@ describe("#21 linhas e contagens do servidor", () => {
     expect(rowOf(dto({ supplierName: null }), "awaiting").supplier).toBe("F07");
   });
 
+  it("#5/AC-4: a linha que o servidor já cobrou (followUp.sent) vem marcada como cobrada; as demais, sem a marca", () => {
+    expect(rowOf(dto({ followUp: { drafted: true, sent: true } }), "overdue")).toMatchObject({ status: "late", alreadyCharged: true });
+    expect(rowOf(dto(), "overdue")).not.toHaveProperty("alreadyCharged");
+  });
+
   it("#5/AC-2: a situação sai do filtro que trouxe a linha, sem comparar datas, e cai no mesmo chip (a #20 não reclassifica)", () => {
     const cases: [ReplyFilterDto, ReadingRowDto, string][] = [
       ["awaiting", dto(), "waiting"],
@@ -177,6 +182,11 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
   it("#5/AC-4: o rascunho é o do servidor, para o e-mail do pedido, com o novo prazo e sem anexo; sem rascunho, nulo", () => {
     expect(draftOf(detail(), today)).toEqual({ to: "financeiro@f07.example", dueOn: "2026-11-19", subject: "Cobrança", body: "Olá", attachmentName: "Nenhum" });
     expect(draftOf(detail({ followUp: { ...detail().followUp, draft: null } }), today)).toBeNull();
+  });
+
+  it("#5/AC-4: pedido já cobrado (followUp.sent): não há rascunho a oferecer, mesmo que o servidor ainda guarde o texto", () => {
+    const base = detail().followUp;
+    expect(draftOf(detail({ followUp: { ...base, sent: true, sentAt: "2026-11-15T13:00:00.000Z" } }), today)).toBeNull();
   });
 
   it("#5/AC-4: o resultado do envio é 'enviado' com o carimbo, ou um motivo fechado: o código do servidor não chega à tela", () => {

@@ -75,7 +75,7 @@ async function openDrawerOnLateRow(): Promise<void> {
   await screen.findByText("Rascunho da cobrança");
 }
 
-describe("#21: acessibilidade da página /pedidos-fornecedor montada", () => {
+describe("#21: acessibilidade da página /pedidos-fornecedor montada", () => { // ADR-004
   beforeEach(() => vi.stubGlobal("fetch", vi.fn(respond)));
   afterEach(() => vi.unstubAllGlobals());
 

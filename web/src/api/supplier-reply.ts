@@ -33,6 +33,19 @@ function sentOf(response: SupplierRequestDetailResponseDto): SentRequestDetailDt
 
 const pathOf = (accessKey: string, action = ""): string => `/api/supplier-requests/${encodeURIComponent(accessKey)}${action}`;
 
+/**
+ * #5/AC-4 O envio devolve o pedido como ficou. Um 409 (já enviado, envio em curso, sem rascunho; #36) não é falha desconhecida: relê o pedido
+ * e devolve como o servidor o tem, e é o `followUp.sent` dele que diz se a cobrança saiu. O corpo do 409 não é lido (layer-exposure).
+ */
+async function sendFollowUpOf(accessKey: string): Promise<SentRequestDetailDto> {
+  try {
+    return sentOf(await apiPost<SupplierRequestDetailResponseDto>(pathOf(accessKey, "/send"), {}, { timeoutMs: FOLLOW_UP_SEND_TIMEOUT_MS }));
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 409) throw error;
+    return sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey)));
+  }
+}
+
 export interface SupplierReplyApi {
   /** #21 As linhas do filtro e as contagens dos quatro filtros. */
   list: (filter: ReplyFilterDto, signal: AbortSignal) => Promise<ReadingListDto>;
@@ -45,6 +58,5 @@ export interface SupplierReplyApi {
 export const supplierReplyApi: SupplierReplyApi = {
   list: (filter, signal) => apiGet<ReadingListDto>(`/api/supplier-requests?status=${filter}`, { signal }),
   detail: async (accessKey, signal) => sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey), { signal })),
-  sendFollowUp: async (accessKey) =>
-    sentOf(await apiPost<SupplierRequestDetailResponseDto>(pathOf(accessKey, "/send"), {}, { timeoutMs: FOLLOW_UP_SEND_TIMEOUT_MS })),
+  sendFollowUp: sendFollowUpOf,
 };

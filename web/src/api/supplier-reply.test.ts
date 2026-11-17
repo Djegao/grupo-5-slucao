@@ -72,6 +72,28 @@ describe("#21 fio da lista dos pedidos ao fornecedor", () => {
     expect(calls).toEqual([{ method: "POST", path: `${BASE}/send`, body: {} }]);
   });
 
+  it("#5/AC-4: um 409 no envio (já enviado) relê o pedido e devolve como o servidor o tem, com followUp.sent", async () => {
+    const sent = { ...SENT, followUp: { ...SENT.followUp, sent: true, sentAt: "2026-11-15T13:12:00.000Z" } };
+    calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        calls.push({ method: init.method ?? "GET", path: String(input), body: undefined });
+        return init.method === "POST" ? Response.json({ error: "conflict", reason: "already_sent" }, { status: 409 }) : Response.json({ request: sent });
+      }),
+    );
+    expect(await supplierReplyApi.sendFollowUp(KEY)).toEqual(sent);
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`POST ${BASE}/send`, `GET ${BASE}`]);
+  });
+
+  it("#5/AC-4: um 409 em que o pedido não consta enviado (envio em curso) devolve o pedido sem followUp.sent; outro erro segue como erro", async () => {
+    serve(() => Response.json({ request: SENT }));
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) => (init.method === "POST" ? Response.json({ error: "conflict" }, { status: 409 }) : Response.json({ request: SENT }))));
+    expect((await supplierReplyApi.sendFollowUp(KEY)).followUp.sent).toBe(false);
+    serve(() => Response.json({ error: "internal_error" }, { status: 500 }));
+    await expect(supplierReplyApi.sendFollowUp(KEY)).rejects.toBeInstanceOf(ApiError);
+  });
+
   it("#21: o envio da cobrança tem prazo próprio e termina como falha de rede (status 0) quando ele estoura", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(

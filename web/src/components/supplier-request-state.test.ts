@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCharges,
+  chargesOf,
   countByChip,
   countsAfterCharges,
   INITIAL_STATE,
@@ -205,5 +206,21 @@ describe("#21 contagens do servidor e cobranças da sessão", () => {
     const charged = { w: { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
     expect(countsAfterCharges(server, [row("w", "waiting", "2026-11-20")], charged)).toEqual(server);
     expect(countsAfterCharges({ ...server, late: 0 }, late, { a: charged.w })).toEqual({ waiting: 2, fulfilled: 0, needsYou: 1, late: 0 });
+  });
+});
+
+describe("#21 cobranças que o servidor já fez", () => {
+  const lateCharged: SupplierRequestRow = { ...row("r-late", "late", "2026-11-14"), alreadyCharged: true };
+
+  it("#5/AC-4: a linha com alreadyCharged semeia o estado cobrado, e a da sessão vale sobre a semeada", () => {
+    expect(chargesOf([lateCharged, row("r-other", "late", "2026-11-12")], {})).toEqual({ "r-late": { dueOn: "2026-11-14", sentOn: "—" } });
+    const session = { "r-late": { dueOn: "2026-11-19", sentOn: "2026-11-16" } };
+    expect(chargesOf([lateCharged], session)).toEqual(session);
+  });
+
+  it("#5/AC-4: a linha semeada passa a Aguardando, sem Cobrar, e as contagens do servidor a movem de Atrasados", () => {
+    const charged = chargesOf([lateCharged], {});
+    expect(applyCharges([lateCharged], charged)[0]?.status).toBe("waiting");
+    expect(countsAfterCharges({ waiting: 0, fulfilled: 0, needsYou: 0, late: 1 }, [lateCharged], charged)).toEqual({ waiting: 1, fulfilled: 0, needsYou: 0, late: 0 });
   });
 });

@@ -43,8 +43,8 @@ async function loadList(filter: SupplierFilterValue, signal: AbortSignal): Promi
 
 const drawerError = (reason: SupplierReplyReason | null): string => texts.supplierRequests.drawer.errors[reason ?? "unknown"];
 
-/** #5/AC-3 /pedidos-fornecedor: os pedidos ao fornecedor com a leitura da resposta (#4); a gaveta abre no bloco do pedido e "Cobrar" abre o rascunho para revisar e enviar. */
-export default function PedidosFornecedor(_props: RouteProps): ReactElement {
+/** #5/AC-3 ADR-004 /pedidos-fornecedor: os pedidos ao fornecedor com a leitura da resposta (#4); a gaveta abre no bloco do pedido e "Cobrar" abre o rascunho para revisar e enviar. */
+export default function SupplierRequestsRoute(_props: RouteProps): ReactElement {
   const [filter, setFilter] = useState<SupplierFilterValue>(INITIAL_STATE.filter);
   const { state, data, retry } = useLoad((signal) => loadList(filter, signal), (loaded) => loaded.empty);
   const [openId, setOpenId] = useState<string | null>(null);

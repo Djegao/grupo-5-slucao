@@ -15,7 +15,7 @@ const EXPECTED: Record<string, { path: string; title: string; empty: string }> =
   "/pagar/valor-barrado": { path: "/pagar/valor-barrado", title: "Pagamento errado evitado", empty: "Nada evitado neste mês ainda" },
   "/doca": { path: "/doca", title: "Doca", empty: "Nenhuma nota com entrega prevista hoje" },
   "/devolucoes": { path: "/devolucoes", title: "Notas de devolução", empty: "Nenhuma devolução pendente de emissão" },
-  "/pedidos-fornecedor": { path: "/pedidos-fornecedor", title: "Pedidos ao fornecedor", empty: "Nenhum pedido ao fornecedor ainda" },
+  "/pedidos-fornecedor": { path: "/pedidos-fornecedor", title: "Pedidos ao fornecedor", empty: "Nenhum pedido ao fornecedor ainda" }, // ADR-004
   "/recebimento/loja": { path: "/recebimento/loja", title: "Recebimento na loja", empty: "Nenhuma nota com entrega prevista hoje" },
 };
 
