@@ -33,6 +33,9 @@ export type WorldOptions = {
 
 export type Reply = { readonly status: number; readonly body: Record<string, unknown>; readonly headers: Headers };
 
+/** #57: a resposta que não é JSON (o PDF da nota), lida como texto: o PDF do mock é só ASCII. */
+export type Download = { readonly status: number; readonly headers: Headers; readonly text: string };
+
 export type CallInit = { readonly body?: unknown; readonly json?: boolean; readonly token?: boolean; readonly raw?: string };
 
 const JSON_TYPE = { 'Content-Type': 'application/json' };
@@ -41,6 +44,8 @@ export type SupplierWorld = {
   readonly fake: FakePostgrest;
   readonly rest: SupabaseRest;
   readonly call: (method: string, path: string, init?: CallInit) => Promise<Reply>;
+  /** #57: um GET cujo corpo não é JSON, pelo mesmo roteador. */
+  readonly download: (path: string) => Promise<Download>;
   readonly runCron: (ask?: Ask) => Promise<readonly string[]>;
   /** #36: muda o dia de hoje do Worker (o prazo da cobrança). */
   readonly setNow: (now: Date) => void;
@@ -86,6 +91,13 @@ export async function supplierWorld(options: WorldOptions = {}): Promise<Supplie
     return { status: response.status, body: typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}, headers: response.headers };
   }
 
+  /** #57: o GET do PDF da nota, com o Access assinado, pelo roteador de verdade. */
+  async function download(path: string): Promise<Download> {
+    const request = new Request(`https://worker.test${path}`, { method: 'GET', headers: { 'Cf-Access-Jwt-Assertion': token } });
+    const response = await route(request, env, { verifier: kit.verifier, supplierRequests });
+    return { status: response.status, headers: response.headers, text: await response.text() };
+  }
+
   /** #13/AC-1 (#2): o Cron roda a tarefa do rascunho com o Claude falso: o mesmo laço da produção, só a pergunta é nossa. */
   async function runCron(ask: Ask = fakeAsk()): Promise<readonly string[]> {
     const log: string[] = [];
@@ -118,7 +130,7 @@ export async function supplierWorld(options: WorldOptions = {}): Promise<Supplie
 
   const path = (suffix = '', key = SOURCE_KEY): string => `/api/supplier-requests/${key}${suffix}`;
   const rows = (table: string) => fake.rows(table);
-  return { fake, rest, call, runCron, runAllTasks, setNow, receive, path, rows, key: SOURCE_KEY };
+  return { fake, rest, call, download, runCron, runAllTasks, setNow, receive, path, rows, key: SOURCE_KEY };
 }
 
 /** #13: um `Ask` de verdade (o cliente do Claude) sobre um fetch falso que responde com o status dado. */

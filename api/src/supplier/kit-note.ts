@@ -1,5 +1,6 @@
 import type { IssuedReturnNote } from '../domain/index.js';
 import type { MailAttachment } from './ports.js';
+import { returnNotePdf } from './return-note-pdf.js';
 
 // #11: a borda que leva a nota emitida do domínio (campos em inglês, #10) ao JSON do kit
 // #11: (data/kit/notas.json, #2/AC-2), em português. `emitente`, `nota_referenciada` e `natureza` não estão no kit:
@@ -57,9 +58,19 @@ export function toKitNote(note: IssuedReturnNote): KitReturnNote {
   };
 }
 
+/** #57/AC-1: o nome dos anexos da nota, o mesmo para o JSON e o PDF, que só diferem na extensão. */
+export const noteFilename = (note: IssuedReturnNote, extension: 'json' | 'pdf'): string => `nota-devolucao-${note.noteId}.${extension}`;
+
 /** #11/AC-4 (#2): o anexo do e-mail, a nota em JSON. */
 export const kitNoteAttachment = (note: IssuedReturnNote): MailAttachment => ({
-  filename: `${note.noteId}.json`,
+  filename: noteFilename(note, 'json'),
   contentType: 'application/json',
   content: JSON.stringify(toKitNote(note), null, 2),
+});
+
+/** #57/AC-1: o anexo do e-mail, a mesma nota em PDF (função pura sobre a nota do kit, então os valores batem com o JSON). */
+export const kitNotePdfAttachment = (note: IssuedReturnNote): MailAttachment => ({
+  filename: noteFilename(note, 'pdf'),
+  contentType: 'application/pdf',
+  content: returnNotePdf(toKitNote(note)),
 });

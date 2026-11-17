@@ -89,7 +89,7 @@ describe('#36/AC-2 GET /api/supplier-requests/{accessKey} estendida com a leitur
     expect(Object.keys(request).sort()).toEqual([...VIEW_KEYS_13, 'followUp', 'reading'].sort());
     expect(request.reading).toBeNull();
     expect(request.followUp).toEqual({ drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null });
-    expect(request).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'ND-1.json' } });
+    expect(request).toMatchObject({ status: 'sent', sentBy: 'ana@jachegou.test', returnNote: { number: 'ND-1' }, attachment: { name: 'nota-devolucao-ND-1.pdf' } }); // #57/AC-5
   });
 
   it('#36/AC-2: com a resposta lida, reading traz os seis campos da leitura', async () => {

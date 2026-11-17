@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { issueReturnNote } from '../../src/domain/index.js';
-import { kitNoteAttachment, toKitNote } from '../../src/supplier/kit-note.js';
+import { kitNoteAttachment, kitNotePdfAttachment, toKitNote } from '../../src/supplier/kit-note.js';
+import { returnNotePdf } from '../../src/supplier/return-note-pdf.js';
 import { SOURCE_KEY, returnNote } from '../domain/supplier-request-fixtures.js';
 
 // #11: testes da borda que leva a nota emitida ao JSON do kit (api/src/supplier/kit-note.ts), chamada direto.
@@ -46,10 +47,19 @@ describe('#11/AC-4 a nota anexa é o JSON no formato do kit', () => { // ADR-002
     expect(note.emitente).toEqual({ nome: expect.any(String), destino: 'LJ-012' });
   });
 
-  it('o anexo se chama <nota_id>.json, é application/json e o conteúdo é a nota do kit', () => { // ADR-002
+  it('#57/AC-1: o anexo se chama nota-devolucao-<nota_id>.json, é application/json e o conteúdo é a nota do kit', () => { // ADR-002
     const attachment = kitNoteAttachment(issued());
-    expect(attachment.filename).toBe('ND-101.json');
+    expect(attachment.filename).toBe('nota-devolucao-ND-101.json');
     expect(attachment.contentType).toBe('application/json');
     expect(JSON.parse(attachment.content)).toEqual(JSON.parse(JSON.stringify(toKitNote(issued()))));
+  });
+});
+
+describe('#57/AC-1 o anexo em PDF da nota', () => { // ADR-002
+  it('#57/AC-1: se chama nota-devolucao-<nota_id>.pdf, é application/pdf e o conteúdo é o PDF da mesma nota do JSON', () => { // ADR-002
+    const attachment = kitNotePdfAttachment(issued());
+    expect(attachment.filename).toBe('nota-devolucao-ND-101.pdf');
+    expect(attachment.contentType).toBe('application/pdf');
+    expect(attachment.content).toBe(returnNotePdf(toKitNote(issued())));
   });
 });
