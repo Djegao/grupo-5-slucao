@@ -244,8 +244,9 @@ describe("#64 SupplierConversation: confirmar o documento citado", () => {
   it("#64: já confirmado e a releitura falhou: a mensagem não diz que o documento não foi confirmado", () => {
     render(<SupplierConversation conversation={fulfilled} onNextStep={vi.fn()} confirmFailure="alreadyConfirmed" />);
     const text = screen.getByRole("alert").textContent ?? "";
-    expect(text).toContain("já foi confirmado");
+    expect(text).toContain("O documento já foi confirmado. Não consegui reler o pedido agora");
     expect(text).not.toContain("não foi confirmado");
+    expect(text).not.toContain("outra pessoa"); // #65 a releitura falhou: a tela não sabe quem confirmou
   });
 
   it("#64: conflito de outro motivo e a releitura falhou: a mensagem é neutra e não afirma o resultado", () => {

@@ -439,7 +439,7 @@ export const texts = {
         not_found: "Este pedido não foi encontrado.",
         conflict: "Este pedido mudou e o documento não foi confirmado. Veja o estado atual e tente de novo.",
         /** #64 O servidor disse "já confirmado" e a releitura falhou: a primeira confirmação fica, e a tela não sabe quem nem quando. */
-        alreadyConfirmed: "O documento já foi confirmado por outra pessoa. Não consegui reler o pedido agora: feche e abra a gaveta para ver quem confirmou e quando.",
+        alreadyConfirmed: "O documento já foi confirmado. Não consegui reler o pedido agora: feche e abra a gaveta para ver quem confirmou e quando.",
         /** #64 Um conflito de outro motivo e a releitura falhou: a mensagem não afirma se o documento foi confirmado. */
         conflictUnread: "Este pedido mudou e não consegui reler o estado dele agora. Feche e abra a gaveta para ver o estado atual antes de tentar de novo.",
         unavailable: "Não consegui falar com o servidor agora. O documento não foi confirmado.",
