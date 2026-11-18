@@ -513,4 +513,78 @@ export const texts = {
       other: "Não consegui pedir o dossiê agora. Tente de novo.",
     },
   },
+
+  /** #3 O bloco "Pedido ao fornecedor" na gaveta da proposta decidida (wireframe, seção 5). */
+  supplierRequest: {
+    title: "Pedido ao fornecedor",
+    badge: "Claude",
+    writing: "O Claude está preparando o pedido…",
+    note: { title: "Nota de devolução (rascunho)", lockedTitle: "Nota de devolução", locked: "travada", total: "Total da devolução" },
+    noteLine: (quantity: string, unitPrice: string) => `${quantity} × ${unitPrice}`,
+    noteFor: (supplier: string, reference: string) => `Para: ${supplier} · Ref.: ${reference}`,
+    email: {
+      title: "E-mail",
+      toAndDue: (to: string, due: string) => `Para: ${to} · Prazo: ${due}`,
+      subject: "Assunto:",
+      lockedFields: "Para, prazo e anexo: travados",
+      bodyLabel: "Texto do e-mail",
+      checkedOnSave: "Os números do texto são conferidos com o banco ao salvar.",
+      /** #17/AC-6 Os números do e-mail são marcadores {{...}}: o servidor reconfere o texto com eles. */
+      keepMarkers: "Mantenha os marcadores {{...}}: eles são os números do pedido, que ficam travados.",
+    },
+    attachment: (name: string) => `${name} (anexa ao enviar)`,
+    /** #65/AC-6 O rascunho com nota ainda não tem o nome do PDF (ele nasce com o número da nota, na emissão): vale o texto do wireframe #156. */
+    attachmentPending: "nota-devolucao-…pdf (anexa ao enviar)",
+    actions: {
+      discard: "Descartar",
+      edit: "Editar",
+      sendWithNote: "Emitir e enviar",
+      sendEmailOnly: "Enviar ao fornecedor",
+      save: "Salvar texto",
+      cancelEdit: "Cancelar edição",
+      resend: "Tentar enviar de novo",
+      redo: "Refazer",
+    },
+    pending: {
+      sendWithNote: "Emitindo e enviando…",
+      sendEmailOnly: "Enviando…",
+      save: "Salvando…",
+      discard: "Descartando…",
+      resend: "Reenviando…",
+      redo: "Refazendo…",
+    },
+    sentWithNote: (number: string, stamp: string, until: string) => `Nota de devolução ${number} emitida e enviada${stamp} · aguardando resposta até ${until}`,
+    sentEmailOnly: (stamp: string, until: string) => `E-mail enviado${stamp} · aguardando resposta até ${until}`,
+    byYou: "por você",
+    by: (who: string) => `por ${who}`,
+    /** #17 O carimbo da linha: a API pode entregar o pedido sem quem agiu ou sem a hora, e a frase então não os traz. */
+    stamp: (by: string | null, time: string | null) => `${by === null ? "" : ` ${by}`}${time === null ? "" : ` às ${time}`}`,
+    seeSent: "Ver o que foi enviado",
+    sendFailedWithNote: (number: string, reason: string) => `A nota ${number} foi emitida, mas o e-mail não saiu: ${reason}.`,
+    sendFailedEmailOnly: (reason: string) => `O e-mail não saiu: ${reason}.`,
+    /** #65/AC-4 O que "Tentar enviar de novo" e "Descartar" fazem com uma nota já emitida (wireframe #156, estado 8). */
+    sendFailedNoteKept: "Tentar de novo só reenvia o e-mail: não emite outra nota. Descartar o pedido não cancela a nota já emitida.",
+    /** #17 O `failure` do envio é um código curto da porta; a tela diz a frase, nunca o código. */
+    sendFailureReasons: {
+      resend_unavailable: "o serviço de e-mail está indisponível",
+      send_failed: "o serviço de e-mail recusou o envio",
+    },
+    sendFailureOther: "o envio não foi concluído",
+    /** #17/AC-8 O motivo da recusa do texto do Claude, por código da API. */
+    notPreparedReasons: {
+      number_mismatch: "o texto citou um número fora do catálogo",
+      invalid_shape: "o texto não veio na forma pedida",
+    },
+    notPreparedOther: "o texto não pôde ser aceito",
+    discarded: (stamp: string) => `Pedido descartado${stamp}`,
+    notPrepared: (reason: string) => `Não foi possível preparar o pedido: ${reason}.`,
+    loadFailed: { title: "Não foi possível carregar o pedido", retry: "Tentar de novo", loading: "Carregando…" },
+    errors: {
+      forbidden: "Você não tem permissão para esta ação.",
+      conflict: "Outra pessoa já agiu neste pedido. Feche e reabra a gaveta para ver o estado atual.",
+      unprocessable: "O pedido não pôde ser processado. Confira o texto e tente de novo.",
+      timeout: "A resposta demorou. Veja abaixo o estado atual do pedido antes de tentar de novo.",
+      other: "Não foi possível concluir a ação. Tente de novo em um minuto.",
+    },
+  },
 };

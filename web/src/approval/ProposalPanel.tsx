@@ -12,6 +12,7 @@ import { AccessKey } from "../components/AccessKey";
 import { Dossier } from "../components/Dossier";
 import { ProposalTimeline } from "./ProposalTimeline";
 import { useDossier } from "./useDossier";
+import { SupplierRequestSection, type SupplierRequestSource } from "./SupplierRequestSection";
 import { EvidenceView } from "../evidence";
 import { partialPrefill, type Disposition, type PartialInput } from "./partial-prefill";
 import { ACTION_LABEL, ACTION_TONE, LEVEL_LABEL, LEVEL_TONE, type DockActionKind } from "./labels";
@@ -57,11 +58,14 @@ export function ProposalPanel({
   proposal,
   onDecided,
   afterCount,
+  supplierRequest,
 }: {
   proposal: ProposalDetailDto;
   onDecided?: (result: DecisionResultDto) => void;
   /** #134 Depois da contagem (2ª entrega) o verbo é "Confirmar recebimento"; antes da doca, "Receber". */
   afterCount?: boolean;
+  /** #3/AC-1 De onde vem o pedido ao fornecedor (#16, #17); sem isto, ou sem pedido, o bloco não existe. */
+  supplierRequest?: SupplierRequestSource;
 }): JSX.Element {
   const [decided, setDecided] = useState<DecisionResultDto | null>(null);
   // #203 A opção marcada é do DecisionForm, mas a gaveta a conhece (value/onValueChange) para mostrar os itens só no parcial.
@@ -161,14 +165,17 @@ export function ProposalPanel({
       <Dossier dossier={dossier.dossier} onRequest={() => void dossier.request()} message={dossier.message} busy={dossier.busy} renewing={dossier.renewing} />
       <ProposalTimeline steps={proposal.timeline ?? []} />
       {decided ?? proposal.approval ? (
-        <Alert
-          variant="success"
-          title={texts.proposalPanel.decidedTitle}
-          description={texts.proposalPanel.decidedDescription(
-            ACTION_LABEL[(decided?.approval ?? proposal.approval)!.dockAction.kind as DockActionKind].toLowerCase(),
-            (decided?.title.state ?? proposal.title.state).replaceAll("_", " "),
-          )}
-        />
+        <>
+          <Alert
+            variant="success"
+            title={texts.proposalPanel.decidedTitle}
+            description={texts.proposalPanel.decidedDescription(
+              ACTION_LABEL[(decided?.approval ?? proposal.approval)!.dockAction.kind as DockActionKind].toLowerCase(),
+              (decided?.title.state ?? proposal.title.state).replaceAll("_", " "),
+            )}
+          />
+          {supplierRequest ? <SupplierRequestSection source={supplierRequest} accessKey={proposal.invoiceAccessKey} /> : null}
+        </>
       ) : proposal.canApprove ? (
         <>
           <DecisionForm<Choice>
