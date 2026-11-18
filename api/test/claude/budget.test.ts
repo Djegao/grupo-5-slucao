@@ -138,9 +138,9 @@ describe('#36/AC-4 a conta das subrequests da rodada do Cron, medida na rodada d
   });
 
   // #48 (do fork Djegao/grupo-5-slucao, não o #48 da principal): a conta cabia nos 50 do plano gratuito desde a #58 (50), e o auditor da #230
-  // (invoice-audit, maxPerRun 1, 8 subrequests) a leva a 58. Este teste volta a ser `it.fails`, a lacuna registrada: quando a rodada couber
-  // nos 50 (menos leituras, ou o auditor fora do plano gratuito), o `it.fails` cai e vira `it`. A conta mede só a varredura e a rodada do Claude,
-  // não a invocação inteira do Cron (api/src/claude/cron.ts).
+  // #48 (invoice-audit, maxPerRun 1, 8 subrequests) a leva a 58. Este teste volta a ser `it.fails`, a lacuna registrada: quando a rodada couber
+  // #48 nos 50 (menos leituras, ou o auditor fora do plano gratuito), o `it.fails` cai e vira `it`. A conta mede só a varredura e a rodada do Claude,
+  // #48 não a invocação inteira do Cron (api/src/claude/cron.ts).
   it.fails('a varredura e a rodada do Claude cabem nos 50 subrequests do plano gratuito (#48: hoje 58, com o auditor)', async () => {
     const m = await measureRound();
     expect(m.total).toBeLessThanOrEqual(SUBREQUEST_LIMIT);

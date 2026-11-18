@@ -21,7 +21,7 @@ import { tasksFor } from './tasks/index.js';
  * O do dossiê: as propostas que esperam (6 leituras, 1 se não há nenhuma), 1 leitura das próprias chaves e, havendo
  * candidata, 1 dos pedidos da gaveta em andamento (#130); só
  * havendo chave nova ou pronta para nova tentativa vêm o contexto (7) e até 5 × 2. Sem nada novo: 7 a 8, sem chamar
- * o Claude. Com as três tarefas cheias: as outras duas leem umas 7, o laço 3, o dossiê 7 + 7, e 3 × 5 × 2 = 54.
+ * o Claude. Com as tarefas do laço cheias, cada uma no limite dela (#36: 1 + 1 + 1 + 2 + 1 = 6 pedidos, 6 × 2 = 12): as outras duas leem umas 7, o laço 3, o dossiê 7 + 7, e mais os 12 dos pedidos do laço.
  * #230 O auditor (invoice-audit, `maxPerRun` 1) soma 22 no pior caso; a conta está em tasks/invoice-audit.ts.
  * #36 As tarefas do #36 trazem o limite delas (api/src/claude/tasks/index.ts e api/src/supplier/draft-task.ts) e o teto só protege uma tarefa nova sem limite.
  * #36 Conta de subrequests, com a fila cheia de cada tarefa e cada uma no limite dela (PostgREST + Messages API), medida por

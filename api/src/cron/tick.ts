@@ -131,7 +131,7 @@ async function runRound(
   const returnNotes = await publishReturnNotes(rest);
   const duplicates = await blockDuplicateTitles(rest); // #31/AC-5: o título da E6 fica bloqueado já na detecção.
   // #36/AC-4 (#4/AC-2) O pedido ao fornecedor sem resposta depois do prazo vira no_reply, sem o Claude: a regra roda mesmo sem credencial.
-  // #36 Vai antes da rodada do Claude, que então rascunha a cobrança dos que a varredura acabou de marcar.
+  // #36 Vai antes da rodada do Claude; a cobrança é montada pela própria varredura (#58/AC-1).
   const overdueRequests = await markOverdueRequests(rest);
   // #171 O Claude vai por último: é periférico, e a captura (o caminho crítico) fica com os subrequests da
   // invocação. As sugestões que ele grava aqui a próxima rodada lê. Falha fechada: a regra decide sozinha.

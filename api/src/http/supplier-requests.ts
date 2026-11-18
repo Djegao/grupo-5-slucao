@@ -80,7 +80,7 @@
 // #58: followUp.draft.template guarda esse texto com {{chave}}; a pessoa o edita pelo PATCH .../follow-up antes de enviar.
 // #36: a leitura e a cobrança só existem no pedido `sent`; nenhum outro estado as traz.
 //
-// #13: SupplierRequestView (alinhada a web/src/approval/SupplierRequestBlock.tsx):
+// #13: SupplierRequestView (alinhada à gaveta da web, fatia 3):
 // #13:   { status: 'writing' }
 // #13:   | { status: 'draft' | 'sent' | 'send_failed', invoiceAccessKey, requestType: 'return_note',
 // #13:       returnNote: { number: string | null (o ND-n emitido; null antes da emissão), supplier (o código do fornecedor),

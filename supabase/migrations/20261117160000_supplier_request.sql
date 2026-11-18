@@ -88,3 +88,9 @@ alter table public.outbox_supplier_emails enable row level security;
 -- #12/AC-3 Uma nota de origem não tem dois pedidos abertos do mesmo tipo. O filtro do findOpen repete este predicado.
 create unique index outbox_supplier_emails_open_key on public.outbox_supplier_emails (invoice_access_key, request_type)
   where status in ('draft', 'sent', 'send_failed'); -- ADR-002
+
+-- #12 O findLatest (Q6) lê o pedido mais recente da nota e do tipo (invoice_access_key, request_type, order id desc, limit 1).
+create index outbox_supplier_emails_latest on public.outbox_supplier_emails (invoice_access_key, request_type, id desc);
+
+-- #12 O listByStatus (Q7) lê os mais novos de um estado (status, order id desc, limit).
+create index outbox_supplier_emails_status on public.outbox_supplier_emails (status, id desc);
