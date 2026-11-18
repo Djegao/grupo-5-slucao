@@ -219,6 +219,9 @@ export type SupplierRequestDto =
   | { status: Extract<RequestStatus, "discarded">; discardedAt: string | null; discardedBy: string | null }
   | { status: "failed"; failure: SupplierRequestRefusal };
 
+/** #65/AC-5 O limite do molde da cobrança que a API aceita: `MAX_TEMPLATE` em api/src/http/supplier-requests.ts, conferido com `template.length` (unidades UTF-16); acima dele o PATCH volta 422. */
+export const MAX_FOLLOW_UP_TEMPLATE = 20_000;
+
 /** Toda rota por chave de acesso responde `{ request }`; sem pedido, nulo. */
 export interface SupplierRequestResponseDto {
   request: SupplierRequestDto | null;

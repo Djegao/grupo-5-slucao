@@ -362,6 +362,8 @@ export const texts = {
       refused: "Recusou",
     },
     toConfirm: "(citada, falta confirmar)",
+    /** #65/AC-1 O selo da linha cuja resposta traz ordem escondida; o nome acessível é mais longo que o texto visível, que ele contém (sem o ícone). */
+    hiddenOrder: { badge: "⚠ Ordem escondida", label: "Ordem escondida na resposta do fornecedor" },
     /** #19 O vazio geral: nenhuma solicitação existe ainda. */
     empty: {
       title: "Nenhum pedido ao fornecedor ainda.",
@@ -436,6 +438,10 @@ export const texts = {
         unauthorized: "Sua sessão não permite confirmar este documento. Entre de novo.",
         not_found: "Este pedido não foi encontrado.",
         conflict: "Este pedido mudou e o documento não foi confirmado. Veja o estado atual e tente de novo.",
+        /** #64 O servidor disse "já confirmado" e a releitura falhou: a primeira confirmação fica, e a tela não sabe quem nem quando. */
+        alreadyConfirmed: "O documento já foi confirmado. Não consegui reler o pedido agora: feche e abra a gaveta para ver quem confirmou e quando.",
+        /** #64 Um conflito de outro motivo e a releitura falhou: a mensagem não afirma se o documento foi confirmado. */
+        conflictUnread: "Este pedido mudou e não consegui reler o estado dele agora. Feche e abra a gaveta para ver o estado atual antes de tentar de novo.",
         unavailable: "Não consegui falar com o servidor agora. O documento não foi confirmado.",
         unknown: "Não consegui confirmar o documento agora. Tente de novo em um minuto.",
       },
@@ -459,6 +465,8 @@ export const texts = {
       saving: "Salvando…",
       cancelEdit: "Cancelar edição",
       keepMarkers: "Mantenha os marcadores {{...}}: eles são os números do pedido, que ficam travados.",
+      /** #65/AC-5 O contador da edição: os caracteres do texto (como a API os conta) e o limite dela; acima dele o servidor recusa o salvamento. */
+      counter: (count: number, limit: number) => (count > limit ? `${count} de ${limit} caracteres: acima do limite, o servidor não aceita.` : `${count} de ${limit} caracteres`),
       /** #59 O motivo do salvamento recusado é um dos fechados; o texto do servidor nunca chega à tela (layer-exposure). */
       saveFailed: {
         invalid: "O texto não foi salvo: confira os marcadores {{...}} e os números. O texto anterior continua valendo.",
@@ -645,6 +653,8 @@ export const texts = {
       keepMarkers: "Mantenha os marcadores {{...}}: eles são os números do pedido, que ficam travados.",
     },
     attachment: (name: string) => `${name} (anexa ao enviar)`,
+    /** #65/AC-6 O rascunho com nota ainda não tem o nome do PDF (ele nasce com o número da nota, na emissão): vale o texto do wireframe #156. */
+    attachmentPending: "nota-devolucao-…pdf (anexa ao enviar)",
     actions: {
       discard: "Descartar",
       edit: "Editar",
@@ -672,6 +682,8 @@ export const texts = {
     seeSent: "Ver o que foi enviado",
     sendFailedWithNote: (number: string, reason: string) => `A nota ${number} foi emitida, mas o e-mail não saiu: ${reason}.`,
     sendFailedEmailOnly: (reason: string) => `O e-mail não saiu: ${reason}.`,
+    /** #65/AC-4 O que "Tentar enviar de novo" e "Descartar" fazem com uma nota já emitida (wireframe #156, estado 8). */
+    sendFailedNoteKept: "Tentar de novo só reenvia o e-mail: não emite outra nota. Descartar o pedido não cancela a nota já emitida.",
     /** #17 O `failure` do envio é um código curto da porta; a tela diz a frase, nunca o código. */
     sendFailureReasons: {
       resend_unavailable: "o serviço de e-mail está indisponível",

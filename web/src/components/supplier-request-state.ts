@@ -37,7 +37,10 @@ export type SendResult = { ok: true; sentOn: string; sentTime?: string; sentBy?:
 export type SaveResult = { ok: true } | { ok: false; failure: SaveFailure };
 
 /** #64/AC-2 O motivo fechado de uma confirmação recusada ou que falhou: o status decide, nunca o texto nem o corpo da resposta (layer-exposure). */
-export type ConfirmFailure = SupplierReplyReason;
+export type ConfirmFailure = SupplierReplyReason | ConfirmRereadFailure;
+
+/** #64 O 409 da confirmação cuja releitura falhou: "já confirmado" (o servidor o disse) ou um conflito de que a tela não sabe o resultado. */
+export type ConfirmRereadFailure = "alreadyConfirmed" | "conflictUnread";
 
 /** #64/AC-2 O que a confirmação devolve: feita, ou o motivo fechado da falha. */
 export type ConfirmResult = { ok: true } | { ok: false; failure: ConfirmFailure };

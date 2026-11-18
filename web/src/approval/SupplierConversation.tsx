@@ -24,6 +24,18 @@ const BLOCK_TONE: Record<SupplierBlockStatus, "waiting" | "positive" | "negative
   refused: "negative",
 };
 
+/** #65/AC-2 O destaque de alerta do aviso de ordem escondida: borda, fundo e cor do texto de erro do design system, ícone ao lado. */
+const ALERT_STYLE = {
+  display: "flex",
+  gap: "var(--spacing-sm)",
+  alignItems: "flex-start",
+  padding: "var(--spacing-sm) var(--spacing-md)",
+  borderLeft: "4px solid var(--accent-red)",
+  borderRadius: "var(--border-radius-sm)",
+  background: "var(--accent-red-light)",
+  color: "var(--accent-red-dark)",
+} as const;
+
 export interface SupplierConversationProps {
   conversation: SupplierConversationView;
   /** #5/AC-3 O botão do próximo passo da leitura; quem confirma, encerra ou cobra é sempre uma pessoa. */
@@ -97,16 +109,20 @@ export function SupplierConversation({ conversation, onNextStep, confirming = fa
           </Text>
         )}
         {reading.injectionExcerpt ? (
-          <div role="note" style={{ display: "grid", gap: "var(--spacing-2xs)" }}>
-            <Text as="p" variant="label-lg">
-              {t.injectionTitle}
-            </Text>
-            <Text as="p" variant="body-base">
-              {t.injectionExcerpt(reading.injectionExcerpt)}
-            </Text>
-            <Text as="p" variant="body-base">
-              {t.injectionUnchanged}
-            </Text>
+          // #65/AC-2 O aviso é um alerta: papel alert, ícone e cor de alerta (tokens do design system). O trecho segue como texto, nunca marcação.
+          <div role="alert" style={ALERT_STYLE}>
+            <span aria-hidden="true">⚠</span>
+            <div style={{ display: "grid", gap: "var(--spacing-2xs)" }}>
+              <Text as="p" variant="label-lg">
+                {t.injectionTitle}
+              </Text>
+              <Text as="p" variant="body-base">
+                {t.injectionExcerpt(reading.injectionExcerpt)}
+              </Text>
+              <Text as="p" variant="body-base">
+                {t.injectionUnchanged}
+              </Text>
+            </div>
           </div>
         ) : null}
       </div>
@@ -146,14 +162,15 @@ export function SupplierConversation({ conversation, onNextStep, confirming = fa
             <Button variant="outline" size="base" onClick={() => onNextStep(nextStep)} disabled={confirming}>
               {nextStep === "confirm_document" && reading.documentCited ? (confirming ? t.confirming : t.confirmDocument(reading.documentCited)) : t.nextStep[nextStep]}
             </Button>
-            {nextStep === "confirm_document" && confirmFailure ? (
-              <div role="alert">
-                <Text as="p" variant="body-base">
-                  {t.confirmFailed[confirmFailure]}
-                </Text>
-              </div>
-            ) : null}
           </>
+        ) : null}
+        {/* #64 O conflito segue visível mesmo quando a releitura tira o passo de confirmar (a confirmação, se existe, já mostra quem e quando). */}
+        {confirmFailure && !confirmation ? (
+          <div role="alert">
+            <Text as="p" variant="body-base">
+              {t.confirmFailed[confirmFailure]}
+            </Text>
+          </div>
         ) : null}
       </div>
     </section>

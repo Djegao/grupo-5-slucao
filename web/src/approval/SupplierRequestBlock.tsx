@@ -164,7 +164,7 @@ function Draft(props: SupplierRequestBlockProps & { request: Extract<SupplierReq
     <>
       {request.returnNote ? <NoteView note={request.returnNote} locked={editing} /> : null}
       <EmailView email={request.email} locked={editing} text={editing ? (draftText ?? request.email.template) : undefined} onText={props.onDraftTextChange} />
-      {request.attachment && !editing ? <Text variant="body-xs">{t.attachment(request.attachment.name)}</Text> : null}
+      {editing ? null : <AttachmentHint attachment={request.attachment} hasNote={request.returnNote !== undefined} />}
       <div style={{ display: "flex", gap: "var(--spacing-md)" }}>
         {editing ? (
           <>
@@ -183,6 +183,20 @@ function Draft(props: SupplierRequestBlockProps & { request: Extract<SupplierReq
         </Button>
       </div>
     </>
+  );
+}
+
+/**
+ * #65/AC-6 A dica do anexo no rascunho, como o wireframe #156 a desenha: "📎 nota-devolucao-ND-0012.pdf (anexa ao enviar)".
+ * #65 O nome real vem do dado quando ele existe; antes da emissão a API não o traz (o PDF nasce com o número da nota), e vale o texto do wireframe. Pedido só de e-mail não tem anexo.
+ */
+function AttachmentHint({ attachment, hasNote }: { attachment?: SupplierRequestAttachment; hasNote: boolean }): JSX.Element | null {
+  if (!attachment && !hasNote) return null;
+  return (
+    <Text variant="body-xs">
+      <span aria-hidden="true">📎 </span>
+      {attachment ? t.attachment(attachment.name) : t.attachmentPending}
+    </Text>
   );
 }
 
@@ -267,6 +281,8 @@ function SendFailed(props: SupplierRequestBlockProps & { request: Extract<Suppli
   return (
     <>
       <Alert variant="error" title={message} showCloseButton={false} />
+      {/* #65/AC-4 Com a nota já emitida, diz o que tentar de novo e descartar fazem com ela. */}
+      {request.returnNote?.number ? <Text variant="body-xs">{t.sendFailedNoteKept}</Text> : null}
       {request.attachment ? <AttachmentLink attachment={request.attachment} /> : null}
       <PrimaryAction label={pending === "resend" ? t.pending.resend : t.actions.resend} onClick={props.onResend} pending={pending !== undefined} />
     </>

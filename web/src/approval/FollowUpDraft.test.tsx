@@ -174,4 +174,30 @@ describe("#19 FollowUpDraft", () => {
     render(<FollowUpDraft draft={{ ...draft, dueOn: null }} editing={false} {...handlers} phase="sent" sentOn="2026-11-15" sentTime="10:12" />);
     expect(screen.getByText("Cobrança enviada por você em 15/11 às 10:12.")).toBeTruthy();
   });
+
+  it("#65/AC-3: o corpo do rascunho mantém as quebras de linha do texto", () => {
+    render(<FollowUpDraft draft={{ ...draft, body: "Olá,\n\nPode nos responder até 20/11?\nObrigado." }} editing={false} onSave={vi.fn()} onCancelEdit={vi.fn()} onBodyChange={vi.fn()} onSend={vi.fn()} onDiscard={vi.fn()} onRetry={vi.fn()} phase="review" />);
+    const body = screen.getByText(/Pode nos responder até 20\/11\?/);
+    expect(body.textContent).toBe("Olá,\n\nPode nos responder até 20/11?\nObrigado.");
+    expect(getComputedStyle(body).whiteSpace).toBe("pre-line");
+  });
+
+  it("#65/AC-5: editando, o contador mostra os caracteres do texto e o limite que a API aceita (20000)", () => {
+    renderDraft({ phase: "review" }, true);
+    const counter = screen.getByText(`${draft.template.length} de 20000 caracteres`);
+    expect(screen.getByRole("textbox", { name: "Texto" }).getAttribute("aria-describedby")).toBe(counter.id);
+  });
+
+  it("#65/AC-5: o contador conta como a API (unidades UTF-16 do texto): um emoji vale 2", () => {
+    render(<FollowUpDraft draft={{ ...draft, template: "ab😀" }} editing onSave={vi.fn()} onCancelEdit={vi.fn()} onBodyChange={vi.fn()} onSend={vi.fn()} onDiscard={vi.fn()} onRetry={vi.fn()} phase="review" />);
+    expect(screen.getByText("4 de 20000 caracteres")).toBeTruthy();
+  });
+
+  it("#65/AC-5: acima do limite o contador avisa que o servidor não aceita, e fora da edição não há contador", () => {
+    const { unmount } = render(<FollowUpDraft draft={{ ...draft, template: "a".repeat(20_001) }} editing onSave={vi.fn()} onCancelEdit={vi.fn()} onBodyChange={vi.fn()} onSend={vi.fn()} onDiscard={vi.fn()} onRetry={vi.fn()} phase="review" />);
+    expect(screen.getByText("20001 de 20000 caracteres: acima do limite, o servidor não aceita.")).toBeTruthy();
+    unmount();
+    renderDraft();
+    expect(screen.queryByText(/de 20000 caracteres/)).toBeNull();
+  });
 });

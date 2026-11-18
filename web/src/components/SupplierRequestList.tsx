@@ -58,6 +58,14 @@ function StatusCell({ row, onFollowUp }: { row: SupplierRequestRow; onFollowUp: 
   return (
     <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--spacing-2xs)" }}>
       <GridBadge tone={STATUS_TONE[row.status]}>{statusText(row)}</GridBadge>
+      {row.hiddenOrder ? (
+        <GridBadge tone="negative">
+          {/* #65/AC-1 O texto visível é o selo; o nome acessível o contém e diz de que ordem se trata. */}
+          <span role="img" aria-label={t.hiddenOrder.label}>
+            {t.hiddenOrder.badge}
+          </span>
+        </GridBadge>
+      ) : null}
       {row.status === "fulfilledToConfirm" ? (
         <Text as="span" variant="caption-sm" color="var(--content-tertiary)">
           {t.toConfirm}

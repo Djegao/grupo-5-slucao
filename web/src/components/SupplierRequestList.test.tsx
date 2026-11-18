@@ -169,4 +169,13 @@ describe("#19 SupplierRequestList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ver todos" }));
     expect(onShowAll).toHaveBeenCalledTimes(1);
   });
+
+  it("#65/AC-1: a linha cuja leitura tem ordem escondida mostra o selo '⚠ Ordem escondida', com nome acessível; as outras não", () => {
+    renderList({ rows: [{ ...late, hiddenOrder: true }, lateToo] });
+    const rows = screen.getAllByRole("row").slice(1);
+    const flagged = within(rows[0]!);
+    expect(flagged.getByText("⚠ Ordem escondida")).toBeTruthy();
+    expect(flagged.getByRole("img", { name: "Ordem escondida na resposta do fornecedor" })).toBeTruthy();
+    expect(within(rows[1]!).queryByText("⚠ Ordem escondida")).toBeNull();
+  });
 });
