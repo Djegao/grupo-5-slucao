@@ -91,6 +91,14 @@ export interface SupplierReadingView {
   injectionExcerpt?: string;
 }
 
+/** #64/AC-3 A confirmação do documento citado: quem confirmou (o e-mail do Access) e quando (dia AAAA-MM-DD e "HH:MM" de São Paulo). */
+export interface DocumentConfirmationView {
+  document: string;
+  by: string;
+  on: string;
+  time?: string;
+}
+
 export interface SupplierConversationView {
   status: SupplierBlockStatus;
   sent: SupplierSentView;
@@ -98,6 +106,8 @@ export interface SupplierConversationView {
   /** #19 Data ISO de hoje, para "Nenhuma resposta até 15/11.". */
   asOf: string;
   reading: SupplierReadingView;
+  /** #64/AC-3 Presente quando o documento citado já foi confirmado: a conversa diz quem e quando, e não deixa botão de confirmar. */
+  confirmation?: DocumentConfirmationView;
 }
 
 /** #157 follow_up_draft: o rascunho da cobrança, no formato do pedido da #3. */

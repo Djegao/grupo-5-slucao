@@ -1,5 +1,7 @@
+import type { ReactElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ViewerProvider } from "../shell/viewer";
 import type { SupplierConversationView } from "../components/supplier-request-view";
 import { SupplierConversation } from "./SupplierConversation";
 
@@ -67,20 +69,20 @@ describe("#19 SupplierConversation", () => {
     expect(screen.getByText("Itens atendidos: devolução dos 3 itens")).toBeTruthy();
     expect(screen.getByText("Documento citado: ND 881")).toBeTruthy();
     expect(screen.getByText('Resumo: "O fornecedor diz que emitiu a ND 881 de R$ 2.163,20."')).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar documento" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar documento ND 881" }));
     expect(onNextStep).toHaveBeenCalledWith("confirm_document");
   });
 
   it("#5/AC-3: o rótulo 'Próximo passo:' vem antes do botão do próximo passo", () => {
     render(<SupplierConversation conversation={fulfilled} onNextStep={vi.fn()} />);
     const label = screen.getByText("Próximo passo:");
-    const button = screen.getByRole("button", { name: "Confirmar documento" });
+    const button = screen.getByRole("button", { name: "Confirmar documento ND 881" });
     expect(label.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it.each([
     ["close", "Encerrar"],
-    ["confirm_document", "Confirmar documento"],
+    ["confirm_document", "Confirmar documento ND 881"],
     ["answer_supplier", "Responder ao fornecedor"],
     ["follow_up", "Cobrar"],
   ] as const)("#5/AC-3: o botão do próximo passo %s se chama '%s'", (nextStep, label) => {
@@ -139,5 +141,75 @@ describe("#19 SupplierConversation", () => {
     render(<SupplierConversation conversation={{ ...noReply, reading: { replyOutcome: "no_reply", summary: "", nextStep: null } }} onNextStep={vi.fn()} />);
     expect(screen.queryByText(/Resumo:/)).toBeNull();
     expect(screen.getByText(/Nenhuma resposta até 15\/11/)).toBeTruthy();
+  });
+});
+
+describe("#64 SupplierConversation: confirmar o documento citado", () => {
+  const confirmation = { document: "ND 881", by: "ana@example.test", on: "2026-11-17", time: "10:05" };
+  const mine = (ui: ReactElement) => render(<ViewerProvider email="ana@example.test">{ui}</ViewerProvider>);
+
+  it("#64/AC-1: o próximo passo 'confirm_document' mostra o botão com o número citado no rótulo", () => {
+    render(<SupplierConversation conversation={fulfilled} onNextStep={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Confirmar documento ND 881" })).toBeTruthy();
+  });
+
+  it("#64/AC-4: sem documento citado, o passo 'confirm_document' não desenha botão de confirmar", () => {
+    const { documentCited: _cited, ...noDocument } = fulfilled.reading;
+    render(<SupplierConversation conversation={{ ...fulfilled, reading: { ...noDocument, nextStep: null } }} onNextStep={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+  });
+
+  it("#64/AC-2: confirmando, o botão fica parado e diz que confirma; o clique não chama o passo de novo", () => {
+    const onNextStep = vi.fn();
+    render(<SupplierConversation conversation={fulfilled} onNextStep={onNextStep} confirming />);
+    const busy = screen.getByRole("button", { name: "Confirmando o documento…" }) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    fireEvent.click(busy);
+    expect(onNextStep).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Confirmar documento ND 881" })).toBeNull();
+  });
+
+  it.each([
+    ["unauthorized", "Sua sessão não permite confirmar este documento. Entre de novo."],
+    ["not_found", "Este pedido não foi encontrado."],
+    ["conflict", "Este pedido mudou e o documento não foi confirmado. Veja o estado atual e tente de novo."],
+    ["unavailable", "Não consegui falar com o servidor agora. O documento não foi confirmado."],
+    ["unknown", "Não consegui confirmar o documento agora. Tente de novo em um minuto."],
+  ] as const)("#64/AC-2: o erro '%s' mostra a mensagem fechada, num alerta, e o botão segue lá para tentar de novo", (failure, message) => {
+    const onNextStep = vi.fn();
+    render(<SupplierConversation conversation={fulfilled} onNextStep={onNextStep} confirmFailure={failure} />);
+    expect(screen.getByRole("alert").textContent).toBe(message);
+    const button = screen.getByRole("button", { name: "Confirmar documento ND 881" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    expect(onNextStep).toHaveBeenCalledWith("confirm_document");
+  });
+
+  it("#64/AC-3: confirmado por quem olha a tela, diz 'Documento ND 881 confirmado por você em 17/11 às 10:05' e não deixa botão", () => {
+    mine(<SupplierConversation conversation={{ ...fulfilled, status: "fulfilled", confirmation, reading: { ...fulfilled.reading, nextStep: null } }} onNextStep={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toBe("Documento ND 881 confirmado por você em 17/11 às 10:05.");
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+    expect(screen.queryByText("Próximo passo:")).toBeNull();
+  });
+
+  it("#64/AC-3: confirmado por outra pessoa, diz o e-mail dela em vez de 'você'", () => {
+    render(
+      <ViewerProvider email="outra@example.test">
+        <SupplierConversation conversation={{ ...fulfilled, status: "fulfilled", confirmation, reading: { ...fulfilled.reading, nextStep: null } }} onNextStep={vi.fn()} />
+      </ViewerProvider>,
+    );
+    expect(screen.getByRole("status").textContent).toBe("Documento ND 881 confirmado por ana@example.test em 17/11 às 10:05.");
+  });
+
+  it("#64/AC-3: a confirmação vence o botão, mesmo que a leitura ainda traga 'confirm_document'", () => {
+    mine(<SupplierConversation conversation={{ ...fulfilled, status: "fulfilled", confirmation }} onNextStep={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toMatch(/confirmado por você/);
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+  });
+
+  it("#64/AC-3: o texto do e-mail de quem confirmou sai como texto, nunca como marcação", () => {
+    const hostile = { ...confirmation, by: '<img src=x onerror="alert(1)">@example.test' };
+    const { container } = render(<SupplierConversation conversation={{ ...fulfilled, status: "fulfilled", confirmation: hostile, reading: { ...fulfilled.reading, nextStep: null } }} onNextStep={vi.fn()} />);
+    expect(container.querySelector("img")).toBeNull();
   });
 });

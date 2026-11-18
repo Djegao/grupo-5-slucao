@@ -1,6 +1,7 @@
 // #20 O estado puro da lista "Pedidos ao fornecedor" (história #5): chip ativo, contagens, ordem, gaveta e fluxo da cobrança.
 // #20 Sem API nem React: a lista de linhas e o resultado do envio entram como dados; a #21 liga os dois ao contrato.
 import type { FollowUpFailure, FollowUpPhaseState, SaveFailure } from "../approval/FollowUpDraft";
+import type { SupplierReplyReason } from "../api/supplier-reply";
 import type { SupplierFilter, SupplierFilterValue, SupplierRequestRow, SupplierRowStatus } from "./supplier-request-view";
 
 /** #5/AC-2 O chip em que cada situação cai, como o wireframe aprovado decide (Q2): cada solicitação cai em um só chip. */
@@ -34,6 +35,29 @@ export type SendResult = { ok: true; sentOn: string; sentTime?: string; sentBy?:
 
 /** #59 O que o salvamento da edição devolve: salvo, ou o motivo fechado da recusa; o texto de um erro de fora nunca entra (layer-exposure). */
 export type SaveResult = { ok: true } | { ok: false; failure: SaveFailure };
+
+/** #64/AC-2 O motivo fechado de uma confirmação recusada ou que falhou: o status decide, nunca o texto nem o corpo da resposta (layer-exposure). */
+export type ConfirmFailure = SupplierReplyReason;
+
+/** #64/AC-2 O que a confirmação devolve: feita, ou o motivo fechado da falha. */
+export type ConfirmResult = { ok: true } | { ok: false; failure: ConfirmFailure };
+
+/** #64/AC-2 Em que ponto está a confirmação de um pedido: em curso, falha (com o motivo; o botão volta) ou feita. */
+export type ConfirmPhase = { phase: "confirming" } | { phase: "failed"; failure: ConfirmFailure } | { phase: "confirmed" };
+
+/** #64/AC-3 A linha confirmada vale como "Atendeu": sai de "Precisam de você" e conta em "Atendidos", sem o documento a confirmar. */
+export function asFulfilled(row: SupplierRequestRow): SupplierRequestRow {
+  return {
+    id: row.id,
+    invoiceNumber: row.invoiceNumber,
+    supplier: row.supplier,
+    request: row.request,
+    amountCents: row.amountCents,
+    dueOn: row.dueOn,
+    ...(row.alreadyCharged ? { alreadyCharged: true } : {}),
+    status: "fulfilled",
+  };
+}
 
 /** #5/AC-4 Uma cobrança que saiu: o novo prazo da linha (nulo se o servidor não o gravou) e quando foi enviada. */
 export interface ChargedRequest {
@@ -73,10 +97,12 @@ export interface ScreenState {
   charged: Record<string, ChargedRequest>;
   /** #5/AC-4 Os ids com cobrança em envio: seguem na lista com a gaveta fechada, até o envio acabar (#20). */
   sending: string[];
+  /** #64/AC-2 A confirmação do documento por pedido; segue valendo com a gaveta fechada, para o resultado de uma chamada em curso chegar. */
+  confirm: Record<string, ConfirmPhase>;
 }
 
 /** #5/AC-2 A lista abre com o chip Aguardando (Q3). */
-export const INITIAL_STATE: ScreenState = { filter: "waiting", drawer: null, charged: {}, sending: [] };
+export const INITIAL_STATE: ScreenState = { filter: "waiting", drawer: null, charged: {}, sending: [], confirm: {} };
 
 export type ScreenAction =
   | { type: "filter"; filter: SupplierFilterValue }
@@ -92,7 +118,10 @@ export type ScreenAction =
   | { type: "discard" }
   | { type: "sendStarted"; id: string }
   | { type: "sendSucceeded"; id: string; dueOn: string | null; sentOn: string; sentTime?: string; sentBy?: string | null }
-  | { type: "sendFailed"; id: string; failure: FollowUpFailure };
+  | { type: "sendFailed"; id: string; failure: FollowUpFailure }
+  | { type: "confirmStarted"; id: string }
+  | { type: "confirmSucceeded"; id: string }
+  | { type: "confirmFailed"; id: string; failure: ConfirmFailure };
 
 /** #5/AC-4 O texto e o descarte só mudam em revisão ou depois de uma falha: enviando e enviado ficam como estão. */
 function isOpenForChange(flow: FollowUpFlow | null): flow is FollowUpFlow {
@@ -164,6 +193,17 @@ function sendStarted(state: ScreenState, id: string): ScreenState {
   return { ...withFlow(state, { ...flow, phase: { phase: "sending" } }), sending: [...state.sending, id] };
 }
 
+/** #64/AC-2 Confirmar começa de "nada" ou de uma falha; em curso ou feita, um segundo clique não muda nada (o POST não se repete). */
+function confirmStarted(state: ScreenState, id: string): ScreenState {
+  const phase = state.confirm[id]?.phase;
+  return phase === "confirming" || phase === "confirmed" ? state : { ...state, confirm: { ...state.confirm, [id]: { phase: "confirming" } } };
+}
+
+/** #64/AC-2 O resultado só vale para quem estava confirmando. */
+function confirmSettled(state: ScreenState, id: string, next: ConfirmPhase): ScreenState {
+  return state.confirm[id]?.phase === "confirming" ? { ...state, confirm: { ...state.confirm, [id]: next } } : state;
+}
+
 /** #5/AC-4 A edição do rascunho toca só o texto; enviar vai de revisar a enviando e então a enviado ou falho, sem pular fase. */
 export function screenReducer(state: ScreenState, action: ScreenAction): ScreenState {
   const flow = state.drawer?.followUp ?? null;
@@ -197,5 +237,11 @@ export function screenReducer(state: ScreenState, action: ScreenAction): ScreenS
       return sendSucceeded(state, action);
     case "sendFailed":
       return sendFailed(state, action.id, action.failure);
+    case "confirmStarted":
+      return confirmStarted(state, action.id);
+    case "confirmSucceeded":
+      return confirmSettled(state, action.id, { phase: "confirmed" });
+    case "confirmFailed":
+      return confirmSettled(state, action.id, { phase: "failed", failure: action.failure });
   }
 }

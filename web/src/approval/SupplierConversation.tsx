@@ -2,7 +2,9 @@ import type { ReactElement } from "react";
 import { Button, Text } from "barte-design-system";
 import { formatCurrency } from "@barte-ai-services/barte-ui-kit";
 import { GridBadge } from "../components/GridBadge";
-import { shortDate, type SupplierBlockStatus, type SupplierConversationView, type SupplierNextStep } from "../components/supplier-request-view";
+import type { ConfirmFailure } from "../components/supplier-request-state";
+import { shortDate, type DocumentConfirmationView, type SupplierBlockStatus, type SupplierConversationView, type SupplierNextStep } from "../components/supplier-request-view";
+import { useViewer } from "../shell/viewer";
 import { texts } from "../texts";
 
 const t = texts.supplierRequests.conversation;
@@ -26,6 +28,23 @@ export interface SupplierConversationProps {
   conversation: SupplierConversationView;
   /** #5/AC-3 O botão do próximo passo da leitura; quem confirma, encerra ou cobra é sempre uma pessoa. */
   onNextStep: (step: SupplierNextStep) => void;
+  /** #64/AC-2 A confirmação do documento está em curso: o botão fica parado e o clique não chama o passo de novo. */
+  confirming?: boolean;
+  /** #64/AC-2 O motivo fechado da última confirmação que falhou; a tela mostra a mensagem dele e o botão segue lá. */
+  confirmFailure?: ConfirmFailure;
+}
+
+/** #64/AC-3 Quem confirmou e quando: "por você" é de quem olha a tela (como a cobrança, #5/AC-4); outra pessoa aparece pelo e-mail do Access, em texto. */
+function ConfirmationLine({ confirmation }: { confirmation: DocumentConfirmationView }): ReactElement {
+  const viewer = useViewer();
+  const by = confirmation.by === viewer ? texts.supplierRequest.byYou : texts.supplierRequest.by(confirmation.by);
+  return (
+    <div role="status">
+      <Text as="p" variant="body-base">
+        {t.confirmed(confirmation.document, by, shortDate(confirmation.on), confirmation.time)}
+      </Text>
+    </div>
+  );
 }
 
 /**
@@ -34,8 +53,8 @@ export interface SupplierConversationProps {
  * #21 A região se chama "Conversa e leitura do pedido", para não repetir o nome do bloco da #3 na mesma gaveta; o título visível segue o wireframe.
  * #19 O texto do fornecedor é dado: sai como texto, nunca como marcação, e não muda decisão, título nem valor.
  */
-export function SupplierConversation({ conversation, onNextStep }: SupplierConversationProps): ReactElement {
-  const { status, sent, reply, asOf, reading } = conversation;
+export function SupplierConversation({ conversation, onNextStep, confirming = false, confirmFailure }: SupplierConversationProps): ReactElement {
+  const { status, sent, reply, asOf, reading, confirmation } = conversation;
   const nextStep = reading.nextStep;
   return (
     <section aria-label={t.regionLabel} style={{ display: "grid", gap: "var(--spacing-md)" }}>
@@ -116,14 +135,24 @@ export function SupplierConversation({ conversation, onNextStep }: SupplierConve
             {t.summary(reading.summary)}
           </Text>
         )}
-        {nextStep ? (
+        {/* #64/AC-3 Confirmado, a conversa diz quem e quando, e não sobra botão de confirmar. */}
+        {confirmation ? <ConfirmationLine confirmation={confirmation} /> : null}
+        {nextStep && !confirmation ? (
           <>
             <Text as="p" variant="body-base">
               {t.nextStepLabel}:
             </Text>
-            <Button variant="outline" size="base" onClick={() => onNextStep(nextStep)}>
-              {t.nextStep[nextStep]}
+            {/* #64/AC-1, AC-2 Confirmar leva o número citado no rótulo e fica parado enquanto confirma. */}
+            <Button variant="outline" size="base" onClick={() => onNextStep(nextStep)} disabled={confirming}>
+              {nextStep === "confirm_document" && reading.documentCited ? (confirming ? t.confirming : t.confirmDocument(reading.documentCited)) : t.nextStep[nextStep]}
             </Button>
+            {nextStep === "confirm_document" && confirmFailure ? (
+              <div role="alert">
+                <Text as="p" variant="body-base">
+                  {t.confirmFailed[confirmFailure]}
+                </Text>
+              </div>
+            ) : null}
           </>
         ) : null}
       </div>

@@ -7,10 +7,13 @@ import { texts } from "../texts";
 import { SupplierRequestList } from "./SupplierRequestList";
 import {
   applyCharges,
+  asFulfilled,
   countByChip,
   INITIAL_STATE,
   screenReducer,
   visibleRows,
+  type ConfirmFailure,
+  type ConfirmResult,
   type FollowUpFlow,
   type SaveResult,
   type SendResult,
@@ -52,7 +55,9 @@ export interface SupplierRequestsProps {
   send: (row: SupplierRequestRow, draft: FollowUpDraftView) => Promise<SendResult>;
   /** #59 Salva o molde editado da cobrança (PATCH); devolve salvo ou o motivo fechado. Uma rejeição vira "unknown": o erro de fora não chega à tela. Sem isto, o texto não se edita. */
   saveDraft?: (row: SupplierRequestRow, template: string) => Promise<SaveResult>;
-  /** #20 Os próximos passos da leitura que não são cobrar (encerrar, confirmar, responder) são de outra camada; chegam por aqui. */
+  /** #64/AC-2 Confirma o documento citado do pedido; devolve feito ou o motivo fechado da falha. Uma rejeição vira "unknown": o erro de fora não chega à tela. Sem isto, "Confirmar documento" segue para `onNextStep`. */
+  confirmDocument?: (row: SupplierRequestRow) => Promise<ConfirmResult>;
+  /** #20 Os próximos passos da leitura que não são cobrar (encerrar, responder, e confirmar sem `confirmDocument`) são de outra camada; chegam por aqui. */
   onNextStep?: (row: SupplierRequestRow, step: SupplierNextStep) => void;
   /** #21 O pedido da gaveta aberta (ou nulo, fechada): a rota o lê da API. Sem isto, a gaveta está sempre pronta. */
   drawerState?: LoadState;
@@ -73,6 +78,8 @@ function DrawerBody(props: {
   draft: FollowUpDraftView | null;
   editable: boolean;
   onNextStep: (step: SupplierNextStep) => void;
+  confirming: boolean;
+  confirmFailure?: ConfirmFailure;
   onEdit: () => void;
   onSave: () => void;
   onCancelEdit: () => void;
@@ -80,10 +87,10 @@ function DrawerBody(props: {
   onSend: () => void;
   onDiscard: () => void;
 }): ReactElement {
-  const { conversation, flow, draft, editable, onNextStep, onEdit, onSave, onCancelEdit, onBodyChange, onSend, onDiscard } = props;
+  const { conversation, flow, draft, editable, onNextStep, confirming, confirmFailure, onEdit, onSave, onCancelEdit, onBodyChange, onSend, onDiscard } = props;
   return (
     <div style={{ display: "grid", gap: "var(--spacing-lg)", padding: "var(--spacing-lg)" }}>
-      <SupplierConversation conversation={conversation} onNextStep={onNextStep} />
+      <SupplierConversation conversation={conversation} onNextStep={onNextStep} confirming={confirming} confirmFailure={confirmFailure} />
       {flow && draft ? (
         <FollowUpDraft
           draft={draft}
@@ -142,14 +149,22 @@ function currentDraft(base: FollowUpDraftView, flow: FollowUpFlow | null): Follo
 
 /** #5 A tela "Pedidos ao fornecedor": liga a lista, a gaveta e o rascunho da cobrança ao estado da #20; os dados entram por props (a rota os lê, #21). */
 export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
-  const { state, rows, counts, onFilterChange, onRetry, conversationOf, draftOf, send, saveDraft, onNextStep } = props;
+  const { state, rows, counts, onFilterChange, onRetry, conversationOf, draftOf, send, saveDraft, confirmDocument, onNextStep } = props;
   const { drawerState = "ready", drawerError, onDrawerRetry, onDrawerChange, editableDraft = true, renderDrawer = defaultShell } = props;
   const [screen, dispatch] = useReducer(screenReducer, INITIAL_STATE);
   // #5/AC-4 Só a cobrança desta sessão muda a linha (Aguardando, cobrado). A que o servidor já enviou fica no chip dele e sem "Cobrar" (`alreadyCharged`, #21).
   const charged = screen.charged;
   const current = applyCharges(rows, charged);
-  const openRow = screen.drawer ? current.find((row) => row.id === screen.drawer?.requestId) : undefined;
+  const found = screen.drawer ? current.find((row) => row.id === screen.drawer?.requestId) : undefined;
+  // #64/AC-3 O pedido confirmado sai de "Precisam de você" quando a lista é relida: a gaveta dele segue aberta, com a última linha vista, como "Atendeu".
+  const lastSeen = useRef<SupplierRequestRow | undefined>(undefined);
+  if (found) lastSeen.current = found;
+  const confirmPhase = screen.drawer ? screen.confirm[screen.drawer.requestId] : undefined;
+  const kept = !found && confirmPhase?.phase === "confirmed" && lastSeen.current?.id === screen.drawer?.requestId ? lastSeen.current : undefined;
+  const openRow = found ?? (kept ? asFulfilled(kept) : undefined);
   const flow = screen.drawer?.followUp ?? null;
+  // #64/AC-2 Um segundo clique no mesmo instante, antes de a tela pintar o botão parado, não repete o POST.
+  const confirmingIds = useRef(new Set<string>());
 
   const changed = useRef(onDrawerChange);
   changed.current = onDrawerChange;
@@ -194,8 +209,26 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
     dispatch(result.ok ? { type: "saveSucceeded", id: row.id } : { type: "saveFailed", id: row.id, failure: result.failure });
   }
 
+  /** #64/AC-2 Confirma o documento citado pelo `confirmDocument`: ocupado até voltar; o erro vira o motivo fechado e a tela fica como estava. */
+  async function confirmCitedDocument(row: SupplierRequestRow, confirm: NonNullable<typeof confirmDocument>): Promise<void> {
+    const phase = screen.confirm[row.id]?.phase;
+    if (phase === "confirming" || phase === "confirmed" || confirmingIds.current.has(row.id)) return;
+    confirmingIds.current.add(row.id);
+    dispatch({ type: "confirmStarted", id: row.id });
+    let result: ConfirmResult;
+    try {
+      result = await confirm(row);
+    } catch {
+      // #64 O erro de quem confirmou não é lido nem mostrado: a tela só conhece o motivo fechado "unknown" (layer-exposure).
+      result = { ok: false, failure: "unknown" };
+    }
+    confirmingIds.current.delete(row.id);
+    dispatch(result.ok ? { type: "confirmSucceeded", id: row.id } : { type: "confirmFailed", id: row.id, failure: result.failure });
+  }
+
   function handleNextStep(row: SupplierRequestRow, step: SupplierNextStep): void {
     if (step === "follow_up") dispatch({ type: "openFollowUp", id: row.id });
+    else if (step === "confirm_document" && confirmDocument) void confirmCitedDocument(row, confirmDocument);
     else onNextStep?.(row, step);
   }
 
@@ -215,6 +248,8 @@ export function SupplierRequests(props: SupplierRequestsProps): ReactElement {
         draft={base ? currentDraft(base, flow) : null}
         editable={editableDraft && saveDraft !== undefined}
         onNextStep={(step) => handleNextStep(row, step)}
+        confirming={confirmPhase?.phase === "confirming" || confirmPhase?.phase === "confirmed"}
+        confirmFailure={confirmPhase?.phase === "failed" ? confirmPhase.failure : undefined}
         onEdit={() => dispatch({ type: "edit" })}
         onSave={() => void saveFollowUp(row)}
         onCancelEdit={() => dispatch({ type: "cancelEdit" })}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import type { ReadingListDto, SentRequestDetailDto } from "./contract";
-import { FOLLOW_UP_SAVE_TIMEOUT_MS, FOLLOW_UP_SEND_TIMEOUT_MS, saveFailureOf, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
+import { CONFIRM_DOCUMENT_TIMEOUT_MS, FOLLOW_UP_SAVE_TIMEOUT_MS, FOLLOW_UP_SEND_TIMEOUT_MS, saveFailureOf, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
 
 // #21 O fio da lista "Pedidos ao fornecedor" (#5): o filtro vai na consulta, as contagens são do servidor, e o erro vira motivo fechado.
 
@@ -24,6 +24,7 @@ const SENT = {
   sentBy: "analista@barte.com",
   sentAt: "2026-11-07T12:40:00.000Z",
   reading: null,
+  documentConfirmation: null,
   followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá", asks: [] }, sentBy: null, sentAt: null, failure: null, dueOn: "2026-11-19" },
 } satisfies SentRequestDetailDto;
 
@@ -191,5 +192,60 @@ describe("#59 fio da edição da cobrança", () => {
     const reread = await supplierReplyApi.sendFollowUp(KEY);
     expect(reread.followUp.sent).toBe(false);
     expect(reread.followUp.draft?.body).toBe("Texto novo");
+  });
+});
+
+describe("#64 fio da confirmação do documento citado", () => {
+  const CONFIRMATION = { document: "NF-D 881", by: "analista@barte.com", at: "2026-11-17T13:05:00.000Z" };
+  const CONFIRMED = { ...SENT, documentConfirmation: CONFIRMATION };
+
+  it("#64/AC-2: confirmDocument é um POST de corpo {} no .../confirm-document e devolve o pedido como ficou, com quem confirmou e quando", async () => {
+    serve(() => Response.json({ request: CONFIRMED }));
+    expect(await supplierReplyApi.confirmDocument(KEY)).toEqual({ kind: "confirmed", detail: CONFIRMED });
+    expect(calls).toEqual([{ method: "POST", path: `${BASE}/confirm-document`, body: {} }]);
+  });
+
+  it("#64/AC-2: um 409 (já confirmado, ou o pedido mudou) relê o pedido e o devolve como conflito; o corpo do 409 não é lido", async () => {
+    calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        calls.push({ method: init.method ?? "GET", path: String(input), body: undefined });
+        return init.method === "POST" ? Response.json({ error: "conflict", reason: "already_confirmed", detail: "texto cru" }, { status: 409 }) : Response.json({ request: CONFIRMED });
+      }),
+    );
+    expect(await supplierReplyApi.confirmDocument(KEY)).toEqual({ kind: "conflict", detail: CONFIRMED });
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`POST ${BASE}/confirm-document`, `GET ${BASE}`]);
+  });
+
+  it("#64/AC-2: 403, 404 e 5xx seguem como erro (sem reler), para a tela tirar o motivo fechado do status", async () => {
+    for (const status of [403, 404, 500, 502]) {
+      serve(() => Response.json({ error: "x", correlationId: "c-1" }, { status }));
+      await expect(supplierReplyApi.confirmDocument(KEY)).rejects.toMatchObject({ status });
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it("#64/AC-2: a chamada tem prazo próprio e termina como falha de rede (status 0) quando ele estoura", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_path: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      ),
+    );
+    const outcome = supplierReplyApi.confirmDocument(KEY).catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(CONFIRM_DOCUMENT_TIMEOUT_MS + 1);
+    const reason = await outcome;
+    expect(reason).toBeInstanceOf(ApiError);
+    expect((reason as ApiError).status).toBe(0);
+  });
+
+  it("#64/AC-2: uma resposta 200 que não é o pedido enviado falha a chamada, em vez de mostrar o que não se sabe", async () => {
+    serve(() => Response.json({ request: { status: "draft" } }));
+    await expect(supplierReplyApi.confirmDocument(KEY)).rejects.toBeInstanceOf(ApiError);
   });
 });

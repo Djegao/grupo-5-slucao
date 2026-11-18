@@ -277,9 +277,17 @@ export interface FollowUpDetailDto {
   dueOn: string | null;
 }
 
-/** #21 O pedido `sent` do `GET /api/supplier-requests/{accessKey}`: a visão da #13 mais a leitura e a cobrança (#36). */
+/** #64 A confirmação do documento citado na leitura atual (api #63/AC-3): o documento, quem confirmou (o e-mail do Access) e quando (ISO 8601, UTC). */
+export interface DocumentConfirmationDto {
+  document: string;
+  by: string;
+  at: string;
+}
+
+/** #21 O pedido `sent` do `GET /api/supplier-requests/{accessKey}`: a visão da #13 mais a leitura e a cobrança (#36), e a confirmação do documento (#64: nula até a pessoa confirmar). */
 export type SentRequestDetailDto = Extract<SupplierRequestDto, { status: "sent" }> & {
   reading: ReadingDto | null;
+  documentConfirmation: DocumentConfirmationDto | null;
   followUp: FollowUpDetailDto;
 };
 

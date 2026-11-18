@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SupplierRequests, type SupplierRequestsProps } from "./SupplierRequests";
-import type { SaveResult, SendResult } from "./supplier-request-state";
-import type { FollowUpDraftView, SupplierConversationView, SupplierRequestRow } from "./supplier-request-view";
+import type { ConfirmResult, SaveResult, SendResult } from "./supplier-request-state";
+import { ViewerProvider } from "../shell/viewer";
+import type { DocumentConfirmationView, FollowUpDraftView, SupplierConversationView, SupplierRequestRow } from "./supplier-request-view";
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("../router", () => ({ navigate }));
@@ -564,5 +565,161 @@ describe("#59 SupplierRequests: editar a cobrança", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cobrar" }));
     expect(screen.getByRole("heading", { name: "Rascunho da cobrança" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Editar" })).toBeTruthy();
+  });
+});
+
+describe("#64 SupplierRequests: confirmar o documento citado", () => {
+  const toConfirm: SupplierRequestRow = { id: "sr-9", invoiceNumber: "61004", supplier: "F07 Limpeza", request: "Nota de devolução", amountCents: 216320, dueOn: "2026-11-18", status: "fulfilledToConfirm", document: "NF-D 881" };
+  const COUNTS_BEFORE = { waiting: 0, fulfilled: 0, needsYou: 1, late: 0 };
+  const COUNTS_AFTER = { waiting: 0, fulfilled: 1, needsYou: 0, late: 0 };
+  const CONFIRMATION: DocumentConfirmationView = { document: "NF-D 881", by: "ana@example.test", on: "2026-11-17", time: "10:05" };
+  const SECRET = "stack trace do servidor: segredo-do-provedor";
+
+  /** #64 A conversa de um pedido que atendeu e cita NF-D 881; confirmado, a leitura passa a trazer a confirmação (o que a rota lê do servidor). */
+  const confirmable =
+    (confirmation?: DocumentConfirmationView) =>
+    (row: SupplierRequestRow): SupplierConversationView => ({
+      status: confirmation ? "fulfilled" : "fulfilledToConfirm",
+      sent: { document: "ND 6", amountCents: row.amountCents, sentOn: "2026-11-07", sentTime: "09:40", dueOn: row.dueOn },
+      reply: null,
+      asOf: "2026-11-17",
+      reading: { replyOutcome: "fulfilled", documentCited: "NF-D 881", summary: "Emitiu a NF-D 881.", nextStep: confirmation ? null : "confirm_document" },
+      ...(confirmation ? { confirmation } : {}),
+    });
+
+  type Confirm = NonNullable<SupplierRequestsProps["confirmDocument"]>;
+
+  function openToConfirm(props: Partial<SupplierRequestsProps> & { confirmDocument?: Confirm } = {}) {
+    const confirmDocument = vi.fn<Confirm>(props.confirmDocument ?? (async () => ({ ok: true })));
+    const view = render(
+      <ViewerProvider email="ana@example.test">
+        <SupplierRequests state="ready" rows={[toConfirm]} counts={COUNTS_BEFORE} onRetry={vi.fn()} conversationOf={confirmable()} draftOf={() => null} send={vi.fn()} {...props} confirmDocument={confirmDocument} />
+      </ViewerProvider>,
+    );
+    fireEvent.click(chip(/^Precisam de você/));
+    fireEvent.click(rowOf("61004"));
+    return { confirmDocument, ...view };
+  }
+
+  const confirmButton = () => screen.getByRole("button", { name: "Confirmar documento NF-D 881" });
+
+  it("#64/AC-1: na leitura cujo próximo passo é confirmar, a conversa mostra 'Confirmar documento' com o número citado", () => {
+    const { confirmDocument } = openToConfirm();
+    expect(confirmButton()).toBeTruthy();
+    expect(confirmDocument).not.toHaveBeenCalled();
+  });
+
+  it("#64/AC-2: o clique chama a confirmação do pedido aberto, uma vez, e o botão fica ocupado até ela voltar", async () => {
+    const pending = deferred<ConfirmResult>();
+    const { confirmDocument } = openToConfirm({ confirmDocument: () => pending.promise });
+    fireEvent.click(confirmButton());
+    expect(confirmDocument).toHaveBeenCalledTimes(1);
+    expect(confirmDocument.mock.calls[0]?.[0]).toMatchObject({ id: "sr-9", invoiceNumber: "61004" });
+    const busy = screen.getByRole("button", { name: "Confirmando o documento…" }) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    pending.resolve({ ok: true });
+    // #64/AC-3 Feita, o botão não volta a aceitar clique: a confirmação do servidor é a que passa a valer (sem segundo POST).
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirmando o documento…" }) as HTMLButtonElement).disabled).toBe(true));
+    expect(confirmDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("#64/AC-2: dois cliques seguidos, no mesmo instante ou durante a espera, mandam um só POST", async () => {
+    const pending = deferred<ConfirmResult>();
+    const { confirmDocument } = openToConfirm({ confirmDocument: () => pending.promise });
+    const button = confirmButton();
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Confirmando o documento…" }));
+    expect(confirmDocument).toHaveBeenCalledTimes(1);
+    pending.resolve({ ok: true });
+    await waitFor(() => expect(confirmDocument).toHaveBeenCalledTimes(1));
+  });
+
+  it("#64/AC-2: o erro mostra a mensagem fechada, mantém o estado de antes (o botão, sem confirmação) e deixa tentar de novo", async () => {
+    const results: ConfirmResult[] = [{ ok: false, failure: "unavailable" }, { ok: true }];
+    const { confirmDocument } = openToConfirm({ confirmDocument: async () => results.shift()! });
+    fireEvent.click(confirmButton());
+    expect((await screen.findByRole("alert")).textContent).toBe("Não consegui falar com o servidor agora. O documento não foi confirmado.");
+    expect(screen.queryByText(/confirmado por/)).toBeNull();
+    expect((confirmButton() as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirmButton());
+    expect(confirmDocument).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("#64/AC-2: quem confirma rejeita com o texto do servidor: a tela mostra só a mensagem fechada, nunca o texto", async () => {
+    openToConfirm({ confirmDocument: async () => Promise.reject(new Error(SECRET)) });
+    fireEvent.click(confirmButton());
+    expect((await screen.findByRole("alert")).textContent).toBe("Não consegui confirmar o documento agora. Tente de novo em um minuto.");
+    expect(document.body.textContent).not.toContain("segredo-do-provedor");
+  });
+
+  it("#64/AC-3: cenário: confirmado, a gaveta diz 'Documento NF-D 881 confirmado por você', o pedido sai de 'Precisam de você' e as contagens dos chips se atualizam", async () => {
+    let confirmation: DocumentConfirmationView | undefined;
+    const { confirmDocument, rerender } = openToConfirm({
+      confirmDocument: async () => {
+        confirmation = CONFIRMATION;
+        return { ok: true };
+      },
+      conversationOf: (row) => confirmable(confirmation)(row),
+    });
+    expect(chip(/^Precisam de você/).textContent).toMatch(/1/);
+    fireEvent.click(confirmButton());
+    // #64 A rota relê a lista: o pedido já não vem em "Precisam de você", e as contagens são as novas.
+    rerender(
+      <ViewerProvider email="ana@example.test">
+        <SupplierRequests state="ready" rows={[]} counts={COUNTS_AFTER} onRetry={vi.fn()} conversationOf={(row) => confirmable(confirmation)(row)} draftOf={() => null} send={vi.fn()} confirmDocument={confirmDocument} />
+      </ViewerProvider>,
+    );
+    expect((await screen.findByText(/^Documento NF-D 881 confirmado por você/)).textContent).toBe("Documento NF-D 881 confirmado por você em 17/11 às 10:05.");
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+    expect(screen.getByRole("region", { name: "Conversa e leitura do pedido" })).toBeTruthy();
+    expect(chip(/^Precisam de você/).textContent).toMatch(/0/);
+    expect(chip(/^Atendidos/).textContent).toMatch(/1/);
+  });
+
+  it("#64/AC-3: a gaveta segue aberta no pedido confirmado mesmo com a lista recarregando (sem linhas, em carga)", async () => {
+    let confirmation: DocumentConfirmationView | undefined;
+    const { confirmDocument, rerender } = openToConfirm({
+      confirmDocument: async () => {
+        confirmation = CONFIRMATION;
+        return { ok: true };
+      },
+    });
+    fireEvent.click(confirmButton());
+    rerender(
+      <ViewerProvider email="ana@example.test">
+        <SupplierRequests state="loading" rows={[]} onRetry={vi.fn()} conversationOf={(row) => confirmable(confirmation)(row)} draftOf={() => null} send={vi.fn()} confirmDocument={confirmDocument} />
+      </ViewerProvider>,
+    );
+    expect(await screen.findByText(/confirmado por você/)).toBeTruthy();
+  });
+
+  it("#64/AC-3: um pedido que o servidor já traz confirmado mostra a linha de quem confirmou e quando, e nenhum botão", () => {
+    render(
+      <ViewerProvider email="outra@example.test">
+        <SupplierRequests state="ready" rows={[{ ...toConfirm, status: "fulfilled" }]} onRetry={vi.fn()} conversationOf={confirmable(CONFIRMATION)} draftOf={() => null} send={vi.fn()} confirmDocument={vi.fn()} />
+      </ViewerProvider>,
+    );
+    fireEvent.click(chip(/^Atendidos/));
+    fireEvent.click(rowOf("61004"));
+    expect(screen.getByText("Documento NF-D 881 confirmado por ana@example.test em 17/11 às 10:05.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+  });
+
+  it("#64/AC-4: o pedido sem documento a confirmar (aguardando, atrasado, recusou) não mostra o botão de confirmar", () => {
+    renderScreen();
+    chooseLate();
+    fireEvent.click(rowOf("59738"));
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+  });
+
+  it("#64/AC-2: sem quem confirme (a tela sem 'confirmDocument'), o passo segue para o 'onNextStep' como antes", () => {
+    const onNextStep = vi.fn();
+    render(<SupplierRequests state="ready" rows={[toConfirm]} counts={COUNTS_BEFORE} onRetry={vi.fn()} conversationOf={confirmable()} draftOf={() => null} send={vi.fn()} onNextStep={onNextStep} />);
+    fireEvent.click(chip(/^Precisam de você/));
+    fireEvent.click(rowOf("61004"));
+    fireEvent.click(confirmButton());
+    expect(onNextStep).toHaveBeenCalledWith(toConfirm, "confirm_document");
   });
 });
