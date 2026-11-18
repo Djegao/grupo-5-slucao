@@ -76,6 +76,30 @@ describe('#63/AC-1 confirmDocument: um PATCH guardado, com a entrada document_co
     expect((outboxRow(fake).history as Record<string, unknown>[]).filter((e) => e.action === 'document_confirmed')).toHaveLength(1);
   });
 
+  it('#63/AC-4: a outra confirmação termina entre a primeira leitura e a gravação: quem chega depois volta already_confirmed, com 1 entrada, a da primeira pessoa', async () => {
+    const h = replyHarness({ [OUTBOX]: [sentRow(1)], [READINGS]: [readingRow(1, 1, 5, TO_CONFIRM)] });
+    const other = supabaseReplyRequestStore(h.rest, { now: () => NOW });
+    let interleaved = false;
+    const racing = new SupabaseRest({
+      url: 'https://projeto.test',
+      secretKey: 'sb_secret_teste',
+      fetch: async (input, init) => {
+        const response = await h.fake.fetch(input, init);
+        if (!interleaved && init?.method === 'GET' && String(input).includes(OUTBOX)) {
+          interleaved = true; // #63/AC-4: B termina inteira depois da primeira leitura de A (versão 3, sem confirmação) e antes da gravação de A
+          expect(await other.confirmDocument(1, confirmation(ANA))).toBe('recorded');
+        }
+        return response;
+      },
+    });
+    const store = supabaseReplyRequestStore(racing, { now: () => NOW });
+    expect(await store.confirmDocument(1, confirmation(BETO))).toBe('already_confirmed');
+    const confirmations = (outboxRow(h.fake).history as Record<string, unknown>[]).filter((e) => e.action === 'document_confirmed');
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]?.by).toBe(ANA);
+    expect(outboxRow(h.fake).version).toBe(4);
+  });
+
   it('#63/AC-4: a versão que andou por outra gravação entre a leitura e o PATCH volta stale, e nada é gravado', async () => {
     const h = replyHarness({ [OUTBOX]: [sentRow(1)], [READINGS]: [readingRow(1, 1, 5, TO_CONFIRM)] });
     let moved = false;

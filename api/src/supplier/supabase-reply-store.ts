@@ -88,9 +88,11 @@ type FollowUpChange = {
   readonly expects?: SupplierRequestText;
   /** #63/AC-1: campos a mais da entrada do histórico (o documento confirmado); nunca texto do rascunho nem da dependência. */
   readonly entry?: Record<string, string>;
+  /** #63/AC-4: a precondição, checada na MESMA leitura que guarda o `PATCH`; se vale, nada é gravado (`skipped`). */
+  readonly skipIf?: (row: WriteRow) => boolean;
 };
 
-type Written = 'ok' | 'missing' | 'refused' | 'stale';
+type Written = 'ok' | 'missing' | 'refused' | 'stale' | 'skipped';
 
 export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): ReplyRequestStore {
   /** #35 QR1b: o número da nota de origem de cada pedido; a tabela do pedido não tem chave estrangeira para invoices. */
@@ -132,6 +134,7 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
   async function writeFollowUp(id: number, change: FollowUpChange): Promise<Written> {
     const row = await readForWrite(id);
     if (row === null) return 'missing';
+    if (change.skipIf?.(row) === true) return 'skipped'; // #63/AC-4: decidido na leitura que o PATCH guarda
     if (change.expects !== undefined && row.follow_up_draft !== null && !sameText(row.follow_up_draft, change.expects)) return 'stale'; // #58/AC-5: sem rascunho a guarda recusa
     const after: FollowUpColumns = { ...row, ...change.columns };
     const version = row.version + 1;
@@ -229,17 +232,16 @@ export function supabaseReplyRequestStore(rest: SupabaseRest, clock: Clock): Rep
 
     /**
      * #63/AC-1, AC-4: lê a linha e grava a entrada `document_confirmed` num `PATCH` guardado pela versão lida e por `status=sent`, sem tocar coluna
-     * nenhuma (só version, history e updated_at, #63/AC-5). Com o documento já confirmado no histórico lido, volta sem gravar; com 0 linhas relê
+     * nenhuma (só version, history e updated_at, #63/AC-5). Com o documento já confirmado no histórico da MESMA leitura que guarda o `PATCH` (`skipIf`), volta sem gravar; com 0 linhas relê
      * para dizer por quê: a outra chamada ganhou (`already_confirmed`) ou a linha andou por outra gravação (`stale`).
      */
     async confirmDocument(id: number, confirmation: DocumentConfirmation): Promise<ConfirmWrite> {
       const confirmed = (history: readonly unknown[]): boolean => confirmationsOf(history).some((c) => c.document === confirmation.document);
-      const row = await readForWrite(id);
-      if (row === null) throw refused('confirm_document', OUTBOX_TABLE);
-      if (confirmed(row.history)) return 'already_confirmed';
-      const change: FollowUpChange = { action: CONFIRMED_ACTION, by: confirmation.by, at: confirmation.at, guard: SENT, columns: {}, entry: { document: confirmation.document } };
+      const skipIf = (row: WriteRow): boolean => confirmed(row.history);
+      const change: FollowUpChange = { action: CONFIRMED_ACTION, by: confirmation.by, at: confirmation.at, guard: SENT, columns: {}, entry: { document: confirmation.document }, skipIf };
       const written = await writeFollowUp(id, change);
       if (written === 'ok') return 'recorded';
+      if (written === 'skipped') return 'already_confirmed';
       const now = await readForWrite(id);
       if (written === 'missing' || now === null) throw refused('confirm_document', OUTBOX_TABLE);
       return confirmed(now.history) ? 'already_confirmed' : 'stale';
