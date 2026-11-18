@@ -69,6 +69,7 @@ O briefing pede exatamente isto: anotar os "termos que cada cargo usa com sentid
 | **Ação na doca** | A ação no recebimento quando o destino é um CD. | "a doca recebe, recebe parcial ou recusa" | Só para `CD-*`. Proibido: "ação na doca" para a loja; para ela, **ação no recebimento na loja** |
 | **Aceite** (`Acceptance`) | Aceitar a mercadoria e a nota. Para o jurídico, aceita o pedido. | "O jurídico diz que aceitar a nota é aceitar o pedido" | Proibido: "recebimento" para o aceite |
 | **Nota de devolução** (`ReturnNote`) | Documento que devolve ao fornecedor a diferença cobrada e não recebida ou não pedida. | "emitir nota de devolução"; "a divergência vira recusa ou nota de devolução no ERP" | Estados na fila do fiscal (#140): `pendente`, `emitida` (com o número da NF-e de devolução) e `cancelada` (com justificativa). |
+| **Pedido ao fornecedor** (`SupplierRequest`) | O e-mail ao fornecedor, com a nota de devolução quando houver; estados rascunho (`draft`), enviado (`sent`), envio falho (`send_failed`) e descartado (`discarded`). Na tela, a coluna curta é "Solicitação". | História #2 (barte-ai-services/formacao-fde-solucao-case#156); issue #10 | Nunca "ordem de compra": é o e-mail do pedido, não a ordem. |
 
 ## O pagamento
 
@@ -97,7 +98,7 @@ O briefing pede exatamente isto: anotar os "termos que cada cargo usa com sentid
 
 | # | Ambiguidade | Evidência | Resolução |
 |---|---|---|---|
-| 1 | **Pedido × ordem de compra** | "a ordem sobe para o ERP; 20% dos pedidos ainda sobem por CSV"; "Ordens complementares: 5% a 7% dos pedidos"; "Notas sem ordem de compra"; `pedido_referenciado` guarda o `OC-…` da ordem; "aceitar a nota é aceitar o pedido" | São o mesmo objeto. O termo é **ordem de compra**, com "pedido" como sinônimo |
+| 1 | **Pedido × ordem de compra** | "a ordem sobe para o ERP; 20% dos pedidos ainda sobem por CSV"; "Ordens complementares: 5% a 7% dos pedidos"; "Notas sem ordem de compra"; `pedido_referenciado` guarda o `OC-…` da ordem; "aceitar a nota é aceitar o pedido" | São o mesmo objeto. O termo é **ordem de compra**, com "pedido" como sinônimo. O **pedido ao fornecedor** é outra coisa: o e-mail de solicitação, nunca a ordem de compra |
 | 2 | **"O pedido do CFO"** | O título "O pedido do CFO" no briefing; "O contrato descreve o problema como o CFO o vê" | É o pedido de projeto, fora do domínio |
 | 3 | **Plano de compra e ordem complementar** | "O forecast gera o plano de compra e a ordem sobe para o ERP"; "Divergência vira ordem complementar" | O **plano de compra** vem antes da ordem e fica fora do domínio. A **ordem complementar** é uma ordem de compra ligada a outra: uma relação, não uma entidade |
 | 4 | **Nota × título × boleto × fatura** | "Dias da nota ao lançamento da fatura"; "Exportação de títulos e pagamentos do ERP"; "Já pagamos o mesmo boleto duas vezes"; "Valor pago por boleto: 66%" | **Nota fiscal** é o documento que cobra. **Título** é a obrigação de pagar, criada no lançamento. **Boleto** é um meio de pagamento. "Fatura" é proibido, porque o dossiê a usa para o título |

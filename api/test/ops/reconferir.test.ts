@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { proposeChecked } from '../../src/approval/propose-checked.js';
 import { supabaseConnectors } from '../../src/connectors/supabase-connectors.js';
@@ -69,5 +70,24 @@ describe('#56 reconferir', () => {
       'divergences',
       'titles',
     ]);
+  });
+});
+
+// #12 O pedido ao fornecedor sobrevive ao reconferir: as duas tabelas não são do domínio apagado e nenhuma FK as prende a ele.
+describe('#12 reconferir e as tabelas do pedido ao fornecedor', () => { // ADR-002
+  const sql = readFileSync(new URL('../../../supabase/migrations/20261117160000_supplier_request.sql', import.meta.url), 'utf8')
+    .replace(/--[^\n]*/g, '');
+
+  it('issued_return_notes e outbox_supplier_emails não estão em DOMAIN_TABLES', () => { // ADR-002
+    const tables = DOMAIN_TABLES.map(([t]) => t);
+    expect(tables).not.toContain('issued_return_notes');
+    expect(tables).not.toContain('outbox_supplier_emails');
+  });
+
+  it('nenhuma tabela apagada pelo reconferir é alvo de FK das duas tabelas na migração', () => { // ADR-002
+    const targets = [...sql.matchAll(/references public\.(\w+)/g)].map((m) => m[1]);
+    expect(targets.length).toBeGreaterThan(0);
+    const deleted = DOMAIN_TABLES.map(([t]) => t);
+    for (const target of targets) expect(deleted, target).not.toContain(target);
   });
 });

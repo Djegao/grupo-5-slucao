@@ -10,7 +10,8 @@ import { runTasks, type RunResult } from './runner.js';
 import { tasksFor } from './tasks/index.js';
 
 /**
- * #171 Pedidos por tarefa a cada rodada. Cada pedido custa 2 subrequests (a Messages API e o upsert).
+ * #171 Teto de pedidos por tarefa a cada rodada: vale o menor entre ele e o limite da própria tarefa (`limit`, #36/#12) e o seu
+ * `maxPerRun` (#230) (runner.ts). Cada pedido custa 2 subrequests (a Messages API e o upsert).
  * #38 A conta honesta do tick (tick.ts), medida no kit com o FakePostgrest: a rodada quieta, sem nota nova, faz
  * umas 59 chamadas ao Supabase antes do Claude (a captura, as propostas, o E8, a doca, o app da loja e os títulos
  * duplicados; cada leitura de propostas do store custa 6) e 1 depois (automation_runs). Ou seja: no plano gratuito
@@ -22,8 +23,9 @@ import { tasksFor } from './tasks/index.js';
  * havendo chave nova ou pronta para nova tentativa vêm o contexto (7) e até 5 × 2. Sem nada novo: 7 a 8, sem chamar
  * o Claude. Com as três tarefas cheias: as outras duas leem umas 7, o laço 3, o dossiê 7 + 7, e 3 × 5 × 2 = 54.
  * #230 O auditor (invoice-audit, `maxPerRun` 1) soma 22 no pior caso; a conta está em tasks/invoice-audit.ts.
+ * #36 As tarefas do #36 trazem o limite delas (api/src/claude/tasks/index.ts e api/src/supplier/draft-task.ts) e o teto só protege uma tarefa nova sem limite.
  */
-export const CRON_LIMIT = 5;
+export const CRON_LIMIT = 2;
 
 /** #171 Orçamento da rodada: o Claude é periférico e a captura é o caminho crítico, então a rodada para cedo. */
 export const ROUND_BUDGET_MS = 2 * 60_000;
