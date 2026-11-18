@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactElement } from "react";
+import { useMemo, useRef, useState, type ReactElement } from "react";
 import type { SentRequestDetailDto } from "../api/contract";
-import { saveFailureOf, supplierReplyApi, type SupplierReplyApi, type SupplierReplyReason } from "../api/supplier-reply";
+import { saveFailureOf, supplierReplyApi, supplierReplyReason, type SupplierReplyApi, type SupplierReplyReason } from "../api/supplier-reply";
 import { InvoiceDrawer } from "../approval/InvoiceDrawer";
 import { SupplierRequests, type DrawerShell } from "../components/SupplierRequests";
 import {
@@ -14,7 +14,7 @@ import {
   sendResultOf,
   todayInSaoPaulo,
 } from "../components/supplier-request-map";
-import { INITIAL_STATE, type SaveResult, type SendResult } from "../components/supplier-request-state";
+import { INITIAL_STATE, type ConfirmResult, type SaveResult, type SendResult } from "../components/supplier-request-state";
 import type { SupplierFilter, SupplierFilterValue, SupplierRequestRow } from "../components/supplier-request-view";
 import { useLoad } from "../components/useLoad";
 import { useRequestDetail } from "../components/useRequestDetail";
@@ -66,6 +66,26 @@ export async function saveOf(accessKey: string | null, template: string, api: Pi
   }
 }
 
+/** #64 O resultado de confirmar o documento: o resultado fechado e o pedido que o servidor devolveu (confirmado, ou relido num conflito), para a gaveta mostrar o estado dele. */
+export interface ConfirmOutcome {
+  result: ConfirmResult;
+  reread: SentRequestDetailDto | null;
+}
+
+/**
+ * #64/AC-2 Confirma o documento citado da linha de chave `accessKey` pelo POST; o erro vira o motivo fechado (só o status decide) e o texto dele não sai daqui.
+ * #64/AC-3 Um 409 que traz o pedido já confirmado (já confirmado, a primeira confirmação fica) vale como confirmado; um 409 sem a confirmação (o pedido mudou) é o conflito, com o pedido relido.
+ */
+export async function confirmOf(accessKey: string | null, api: Pick<SupplierReplyApi, "confirmDocument"> = supplierReplyApi): Promise<ConfirmOutcome> {
+  if (accessKey === null) return { result: { ok: false, failure: "unknown" }, reread: null };
+  try {
+    const { kind, detail } = await api.confirmDocument(accessKey);
+    return kind === "confirmed" || detail.documentConfirmation !== null ? { result: { ok: true }, reread: detail } : { result: { ok: false, failure: "conflict" }, reread: detail };
+  } catch (error) {
+    return { result: { ok: false, failure: supplierReplyReason(error) }, reread: null };
+  }
+}
+
 const drawerError = (reason: SupplierReplyReason | null): string => texts.supplierRequests.drawer.errors[reason ?? "unknown"];
 
 /** #5/AC-3 ADR-004 /pedidos-fornecedor: os pedidos ao fornecedor com a leitura da resposta (#4); a gaveta abre no bloco do pedido e "Cobrar" abre o rascunho para revisar e enviar. */
@@ -75,7 +95,10 @@ export default function SupplierRequestsRoute(_props: RouteProps): ReactElement 
   const [openId, setOpenId] = useState<string | null>(null);
   // #5/AC-4 O pedido que um envio não concluído releu (409): a gaveta mostra a leitura nova, em vez da de antes do envio.
   const [reread, setReread] = useState<SentRequestDetailDto | null>(null);
-  const keyOf = (id: string): string | null => data?.accessKeys[id] ?? null;
+  // #64/AC-3 Relida a lista depois de confirmar, o pedido confirmado já não vem no filtro e a gaveta dele segue aberta: a chave de cada linha vista fica guardada.
+  const seenKeys = useRef<Record<string, string>>({});
+  if (data) Object.assign(seenKeys.current, data.accessKeys);
+  const keyOf = (id: string): string | null => data?.accessKeys[id] ?? seenKeys.current[id] ?? null;
   const open = useRequestDetail(openId === null ? null : keyOf(openId), supplierReplyApi.detail);
   const today = useMemo(() => todayInSaoPaulo(), []);
 
@@ -108,6 +131,14 @@ export default function SupplierRequestsRoute(_props: RouteProps): ReactElement 
     return outcome.result;
   };
 
+  /** #64/AC-3 Confirma e, feita, relê a lista: o pedido sai de "Precisam de você", entra em "Atendidos" e as contagens são as do servidor. Em conflito a lista também se relê. */
+  const confirm = async (row: SupplierRequestRow): Promise<ConfirmResult> => {
+    const outcome = await confirmOf(keyOf(row.id));
+    if (outcome.reread) setReread(outcome.reread);
+    if (outcome.reread) retry();
+    return outcome.result;
+  };
+
   // #21 A gaveta da nota (#209), a mesma das outras grids: a proposta da #3 e o bloco "Pedido ao fornecedor" dela vêm dali, e o bloco desta tela entra acima.
   const shell: DrawerShell = ({ row, title, onClose, children }) => (
     <InvoiceDrawer key={row.id} invoiceAccessKey={keyOf(row.id) ?? ""} title={() => title} onClose={onClose}>
@@ -132,6 +163,7 @@ export default function SupplierRequestsRoute(_props: RouteProps): ReactElement 
       }}
       send={send}
       saveDraft={save}
+      confirmDocument={confirm}
       drawerState={open.state}
       drawerError={drawerError(open.reason)}
       onDrawerRetry={open.retry}

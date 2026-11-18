@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Frame } from "../src/App";
-import type { ReadingRowDto, ReplyFilterDto, SentRequestDetailDto } from "../src/api/contract";
+import type { DocumentConfirmationDto, ReadingRowDto, ReplyFilterDto, SentRequestDetailDto } from "../src/api/contract";
 import { fallbackContext, NAVIGATION } from "../src/shell/context";
 
 /**
@@ -48,8 +48,15 @@ const SUPPLIER_REQUESTS: Fixture[] = [
   fixture(3, "51877", "F02", "Bebidas", 98000, "2026-11-20", "awaiting"),
 ];
 
+/** #64 O cenário "confirmar documento": o pedido que atendeu e cita NF-D 881 espera a pessoa em "Precisam de você". */
+const TO_CONFIRM: Fixture = (() => {
+  const base = fixture(4, "61004", "F07", "Limpeza", 216320, "2026-11-18", "needs_you");
+  const reading = { replyOutcome: "fulfilled", fulfilledAsks: ["devolução dos 3 itens"], supplierDocument: "NF-D 881", summary: "O fornecedor diz que emitiu a NF-D 881.", nextStep: "confirm_document", injectionFlag: null } as const;
+  return { ...base, row: { ...base.row, reading: { ...reading, fulfilledAsks: [...reading.fulfilledAsks] } } };
+})();
+
 /** #21 O pedido enviado que o `GET /api/supplier-requests/{chave}` devolve: sem leitura (atrasado) e com o rascunho da cobrança. */
-function sentView(row: ReadingRowDto): SentRequestDetailDto {
+function sentView(row: ReadingRowDto, documentConfirmation: DocumentConfirmationDto | null = null): SentRequestDetailDto {
   return {
     status: "sent",
     invoiceAccessKey: row.invoiceAccessKey,
@@ -59,7 +66,8 @@ function sentView(row: ReadingRowDto): SentRequestDetailDto {
     asks: [],
     sentBy: "analista@barte.com",
     sentAt: "2026-11-07T12:40:00.000Z",
-    reading: null,
+    reading: row.reading,
+    documentConfirmation,
     followUp: {
       drafted: true,
       sent: row.followUp.sent,
@@ -84,6 +92,9 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
   let failDetail = false;
   /** #59 O texto que a API falsa guarda (o molde com {{chave}}); o PATCH o troca, e o POST .../send envia o que está aqui. */
   let savedTemplate: string | null = null;
+  /** #64 O que a API falsa gravou na confirmação, por chave de acesso; o POST .../confirm-document move o pedido de "needs_you" para "answered". */
+  let confirmations: Record<string, DocumentConfirmationDto> = {};
+  let failConfirm = false;
   let calls: { method: string; path: string; body?: unknown }[] = [];
   const counts = () => ({
     awaiting: requests.filter((r) => r.filter === "awaiting").length,
@@ -101,11 +112,19 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
       return Response.json({ filter, requests: requests.filter((r) => r.filter === filter).map((r) => r.row), counts: counts() });
     }
     if (path.startsWith("/api/supplier-requests/")) {
-      const key = path.slice("/api/supplier-requests/".length).replace("/send", "").replace("/follow-up", "");
+      const key = path.slice("/api/supplier-requests/".length).replace("/send", "").replace("/follow-up", "").replace("/confirm-document", "");
       if (failDetail) return Response.json({ error: "internal_error", detail: "SQLSTATE 42P01 relation supplier_requests" }, { status: 500 });
       const found = requests.find((r) => r.row.invoiceAccessKey === key);
       if (!found) return Response.json({ error: "not_found" }, { status: 404 });
-      const view = sentView(found.row);
+      const view = sentView(found.row, confirmations[key] ?? null);
+      if (path.endsWith("/confirm-document") && init.method === "POST") {
+        if (failConfirm) return Response.json({ error: "supabase_unavailable", correlationId: "c-64", detail: "SQLSTATE 42P01 supplier_requests" }, { status: 502 });
+        if (confirmations[key]) return Response.json({ error: "conflict", reason: "already_confirmed" }, { status: 409 });
+        const done = { document: found.row.reading?.supplierDocument ?? "", by: "analista@barte.com", at: "2026-11-17T13:05:00.000Z" };
+        confirmations = { ...confirmations, [key]: done };
+        requests = requests.map((r) => (r === found ? { ...r, filter: "answered" } : r));
+        return Response.json({ request: sentView(found.row, done) });
+      }
       if (savedTemplate !== null && view.followUp.draft) view.followUp.draft = { ...view.followUp.draft, template: savedTemplate, body: savedTemplate.replace("{{cobranca.prazo}}", "20/11") };
       if (path.endsWith("/follow-up") && init.method === "PATCH") {
         const { template } = JSON.parse(String(init.body)) as { template: string };
@@ -126,6 +145,8 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     failList = false;
     failDetail = false;
     savedTemplate = null;
+    confirmations = {};
+    failConfirm = false;
     calls = [];
     vi.stubGlobal("fetch", vi.fn(respond));
   });
@@ -301,6 +322,60 @@ describe("#18: /pedidos-fornecedor (wireframe aprovado, #5)", () => { // ADR-004
     const region = await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
     expect(within(region).queryByRole("button", { name: /Cobrar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Enviar cobrança" })).toBeNull();
+  });
+
+  it("#64/AC-1 #64/AC-2 #64/AC-3: cenário: o pedido 'Atendeu, falta confirmar: NF-D 881' mostra 'Confirmar documento'; o clique faz um POST em .../confirm-document, mostra 'Documento NF-D 881 confirmado por você', o pedido passa para Atendidos e as contagens se atualizam", async () => {
+    requests = [...SUPPLIER_REQUESTS, TO_CONFIRM];
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Precisam de você/ }));
+    const row = (await screen.findByText("NF 61004")).closest("tr")!;
+    expect(within(row).getByText("Atendeu: NF-D 881")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /^Precisam de você/ }).textContent).toMatch(/1/);
+    fireEvent.click(row);
+
+    const button = await screen.findByRole("button", { name: "Confirmar documento NF-D 881" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(await screen.findByText(/^Documento NF-D 881 confirmado por você/)).toBeTruthy();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([{ method: "POST", path: `/api/supplier-requests/${keyOf(4)}/confirm-document`, body: {} }]);
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
+    // #64/AC-3 A lista é relida: o pedido sai de "Precisam de você" e entra em "Atendidos", com as contagens do servidor.
+    await waitFor(() => expect(screen.getByRole("radio", { name: /^Precisam de você/ }).textContent).toMatch(/0/));
+    expect(screen.getByRole("radio", { name: /^Atendidos/ }).textContent).toMatch(/1/);
+    expect(screen.queryByText("NF 61004")).toBeNull();
+    // #64/AC-3 A gaveta segue aberta no pedido confirmado, com a linha de quem e quando.
+    expect(screen.getByRole("region", { name: "Conversa e leitura do pedido" })).toBeTruthy();
+    expect(screen.getByText(/confirmado por você em 17\/11 às 10:05/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /^Atendidos/ }));
+    expect(await screen.findByText("NF 61004")).toBeTruthy();
+  });
+
+  it("#64/AC-2: a confirmação que falha (502) mostra a mensagem fixa, nunca o corpo da resposta, mantém o botão e o pedido em 'Precisam de você', e tentar de novo confirma", async () => {
+    requests = [...SUPPLIER_REQUESTS, TO_CONFIRM];
+    failConfirm = true;
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Precisam de você/ }));
+    fireEvent.click((await screen.findByText("NF 61004")).closest("tr")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmar documento NF-D 881" }));
+
+    expect(await screen.findByText("Não consegui falar com o servidor agora. O documento não foi confirmado.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/SQLSTATE|supplier_requests|supabase_unavailable|c-64/);
+    expect(screen.getByRole("radio", { name: /^Precisam de você/ }).textContent).toMatch(/1/);
+    expect(screen.queryByText(/confirmado por/)).toBeNull();
+
+    failConfirm = false;
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar documento NF-D 881" }));
+    expect(await screen.findByText(/^Documento NF-D 881 confirmado por você/)).toBeTruthy();
+  });
+
+  it("#64/AC-4: o pedido sem documento a confirmar (atrasado, com a leitura de cobrar) não mostra 'Confirmar documento' na gaveta", async () => {
+    requests = [...SUPPLIER_REQUESTS, TO_CONFIRM];
+    renderRoute();
+    fireEvent.click(await screen.findByRole("radio", { name: /^Atrasados/ }));
+    fireEvent.click((await screen.findByText("NF 59738")).closest("tr")!);
+    await screen.findByRole("region", { name: "Conversa e leitura do pedido" });
+    expect(screen.queryByRole("button", { name: /Confirmar documento/ })).toBeNull();
   });
 
   it("#21: a leitura da gaveta que falha mostra a mensagem fechada, nunca o corpo da resposta da API", async () => {

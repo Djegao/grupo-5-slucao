@@ -37,6 +37,7 @@ const DETAIL: SentRequestDetailDto = {
   sentBy: "analista@barte.com",
   sentAt: "2026-11-07T12:40:00.000Z",
   reading: null,
+  documentConfirmation: null,
   followUp: {
     drafted: true,
     sent: false,

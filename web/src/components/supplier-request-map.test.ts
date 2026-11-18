@@ -58,6 +58,7 @@ function detail(over: Partial<SentRequestDetailDto> = {}): SentRequestDetailDto 
     sentBy: "analista@barte.com",
     sentAt: "2026-11-07T12:40:00.000Z",
     reading: null,
+    documentConfirmation: null,
     followUp: { drafted: true, sent: false, draft: { subject: "Cobrança", body: "Olá", template: "Olá {{cobranca.prazo}}", asks: [] }, sentBy: null, sentAt: null, failure: null, dueOn: "2026-11-19" },
     ...over,
   };
@@ -245,5 +246,37 @@ describe("#21 gaveta: conversa, rascunho e resultado do envio", () => {
       expect(conversationOf(row, detail({ reading: read }), "2026-11-16").reading.nextStep).toBe("follow_up");
       expect(draftOf(detail({ reading: read }))).not.toBeNull();
     }
+  });
+});
+
+describe("#64 a confirmação do documento citado na conversa", () => {
+  const today = "2026-11-17";
+  const toConfirm = reading({ supplierDocument: "NF-D 881", nextStep: "confirm_document" });
+  const confirmation = { document: "NF-D 881", by: "analista@barte.com", at: "2026-11-17T13:05:00.000Z" };
+
+  it("#64/AC-1: atendeu com documento e próximo passo confirmar: a leitura traz o documento citado e o passo 'confirm_document'", () => {
+    const row = rowOf(dto({ reading: toConfirm }), "needs_you");
+    const view = conversationOf(row, detail({ reading: toConfirm }), today);
+    expect(view.reading).toMatchObject({ documentCited: "NF-D 881", nextStep: "confirm_document" });
+    expect(view.confirmation).toBeUndefined();
+  });
+
+  it("#64/AC-4: sem documento citado não há o que confirmar: o próximo passo 'confirm_document' não vira botão", () => {
+    const noDocument = reading({ supplierDocument: null, nextStep: "confirm_document" });
+    const row = rowOf(dto({ reading: noDocument }), "needs_you");
+    expect(conversationOf(row, detail({ reading: noDocument }), today).reading.nextStep).toBeNull();
+  });
+
+  it("#64/AC-3: confirmado, a conversa traz o documento, quem confirmou e quando (dia e hora de São Paulo), e o bloco passa a 'Atendeu'", () => {
+    const row = rowOf(dto({ reading: toConfirm }), "needs_you");
+    const view = conversationOf(row, detail({ reading: toConfirm, documentConfirmation: confirmation }), today);
+    expect(view.confirmation).toEqual({ document: "NF-D 881", by: "analista@barte.com", on: "2026-11-17", time: "10:05" });
+    expect(view.status).toBe("fulfilled");
+  });
+
+  it("#64/AC-3: confirmado, o passo de confirmar some da leitura (nenhum botão sobra)", () => {
+    const row = rowOf(dto({ reading: toConfirm }), "answered");
+    const view = conversationOf(row, detail({ reading: toConfirm, documentConfirmation: confirmation }), today);
+    expect(view.reading.nextStep).toBeNull();
   });
 });

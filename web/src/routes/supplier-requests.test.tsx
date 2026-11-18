@@ -3,7 +3,7 @@ import { ApiError } from "../api/client";
 import type { ReadingListDto, ReadingRowDto, ReplyFilterDto, SentRequestDetailDto } from "../api/contract";
 import type { SupplierReplyApi } from "../api/supplier-reply";
 import { FILTER_OF_CHIP } from "../components/supplier-request-map";
-import { loadList, saveOf, sendOf } from "./supplier-requests";
+import { confirmOf, loadList, saveOf, sendOf } from "./supplier-requests";
 
 // #21 A rota "Pedidos ao fornecedor" lê a lista do servidor: o filtro, as quatro contagens e a chave de cada linha; o envio exige a chave. Dados fictícios.
 
@@ -109,5 +109,55 @@ describe("#59 rota Pedidos ao fornecedor: salvar a edição da cobrança", () =>
   it("#59: o conflito (409) devolve a falha 'conflict' com o pedido relido, para a gaveta mostrar o estado atual", async () => {
     const saveFollowUp = vi.fn<SupplierReplyApi["saveFollowUp"]>(async () => ({ kind: "conflict", detail }));
     await expect(saveOf(key(1), "x", { saveFollowUp })).resolves.toEqual({ result: { ok: false, failure: "conflict" }, reread: detail });
+  });
+});
+
+describe("#64 rota Pedidos ao fornecedor: confirmar o documento citado", () => {
+  const confirmation = { document: "NF-D 881", by: "ana@example.test", at: "2026-11-17T13:05:00.000Z" };
+  const confirmed = { documentConfirmation: confirmation } as SentRequestDetailDto;
+  const pending = { documentConfirmation: null } as SentRequestDetailDto;
+
+  it("#64/AC-2: sem chave de acesso não há o que confirmar: o motivo fechado é 'unknown' e nada é chamado", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>();
+    await expect(confirmOf(null, { confirmDocument })).resolves.toEqual({ result: { ok: false, failure: "unknown" }, reread: null });
+    expect(confirmDocument).not.toHaveBeenCalled();
+  });
+
+  it("#64/AC-3: confirmado, o resultado é ok e o pedido que o servidor devolveu (com quem e quando) é o que a gaveta passa a mostrar", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => ({ kind: "confirmed", detail: confirmed }));
+    await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: true }, reread: confirmed });
+    expect(confirmDocument).toHaveBeenCalledWith(key(1));
+  });
+
+  it("#64/AC-3: um 409 em que o servidor já tem a confirmação (já confirmado) vale como confirmado: a primeira confirmação é a que aparece", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => ({ kind: "conflict", detail: confirmed }));
+    await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: true }, reread: confirmed });
+  });
+
+  it("#64/AC-2: um 409 em que o pedido ainda não consta confirmado (mudou) falha como 'conflict' e traz o pedido relido, para a tela mostrar o estado atual", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => ({ kind: "conflict", detail: pending }));
+    await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: false, failure: "conflict" }, reread: pending });
+  });
+
+  it.each([
+    [403, "unauthorized"],
+    [404, "not_found"],
+    [502, "unavailable"],
+    [0, "unavailable"],
+    [500, "unknown"],
+  ] as const)("#64/AC-2: o status %i vira o motivo fechado '%s', sem o texto da API", async (status, failure) => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => {
+      throw new ApiError(status, "x", "texto cru da dependência");
+    });
+    const outcome = await confirmOf(key(1), { confirmDocument });
+    expect(outcome).toEqual({ result: { ok: false, failure }, reread: null });
+    expect(JSON.stringify(outcome)).not.toContain("texto cru");
+  });
+
+  it("#64/AC-2: um erro que não é da API (rede, código) também vira 'unknown'", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => {
+      throw new TypeError("texto cru");
+    });
+    await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: false, failure: "unknown" }, reread: null });
   });
 });

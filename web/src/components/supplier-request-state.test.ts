@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCharges,
+  asFulfilled,
   countByChip,
   INITIAL_STATE,
   screenReducer,
@@ -26,7 +27,7 @@ function run(actions: ScreenAction[], from: ScreenState = INITIAL_STATE): Screen
 
 describe("#20 chips, contagens e linhas", () => {
   it("#5/AC-2: o estado começa no chip Aguardando, sem gaveta e sem cobrança feita (Q3)", () => {
-    expect(INITIAL_STATE).toEqual({ filter: "waiting", drawer: null, charged: {}, sending: [] });
+    expect(INITIAL_STATE).toEqual({ filter: "waiting", drawer: null, charged: {}, sending: [], confirm: {} });
   });
 
   it("#5/AC-2: a contagem de cada chip segue o mapa de situação para chip (Q2): precisam de você junta confirmar, responder, cobrar, parcial, informação e recusa (#50)", () => {
@@ -262,5 +263,50 @@ describe("#59 edição do rascunho da cobrança", () => {
     expect(run([{ type: "cancelEdit" }], editing).drawer?.followUp).toEqual({ phase: { phase: "review" }, editing: false, body: null });
     const saving = run([{ type: "saveStarted", id: "r-late" }], editing);
     expect(run([{ type: "cancelEdit" }], saving)).toEqual(saving);
+  });
+});
+
+describe("#64 a confirmação do documento citado", () => {
+  const start = (id: string) => ({ type: "confirmStarted", id }) as const;
+
+  it("#64/AC-2: confirmar começa parado em 'confirmando' e um segundo clique não muda nada (o POST não se repete)", () => {
+    const once = run([start("a")]);
+    expect(once.confirm).toEqual({ a: { phase: "confirming" } });
+    expect(screenReducer(once, start("a"))).toBe(once);
+  });
+
+  it("#64/AC-2: confirmado, o estado guarda 'confirmado' e já não aceita outra confirmação", () => {
+    const done = run([start("a"), { type: "confirmSucceeded", id: "a" }]);
+    expect(done.confirm).toEqual({ a: { phase: "confirmed" } });
+    expect(screenReducer(done, start("a"))).toBe(done);
+  });
+
+  it("#64/AC-2: o erro guarda só o motivo fechado e libera o botão para tentar de novo, apagando o motivo anterior", () => {
+    const failed = run([start("a"), { type: "confirmFailed", id: "a", failure: "unavailable" }]);
+    expect(failed.confirm).toEqual({ a: { phase: "failed", failure: "unavailable" } });
+    expect(run([start("a")], failed).confirm).toEqual({ a: { phase: "confirming" } });
+  });
+
+  it("#64/AC-2: o resultado só vale para quem estava confirmando; um resultado solto não inventa estado", () => {
+    expect(run([{ type: "confirmSucceeded", id: "a" }]).confirm).toEqual({});
+    expect(run([{ type: "confirmFailed", id: "a", failure: "unknown" }]).confirm).toEqual({});
+  });
+
+  it("#64/AC-2: a confirmação de um pedido não toca a de outro, nem a gaveta, nem a cobrança", () => {
+    const state = run([{ type: "openRow", id: "a" }, start("a"), start("b"), { type: "confirmFailed", id: "b", failure: "conflict" }]);
+    expect(state.confirm).toEqual({ a: { phase: "confirming" }, b: { phase: "failed", failure: "conflict" } });
+    expect(state.drawer?.requestId).toBe("a");
+    expect(state.charged).toEqual({});
+  });
+
+  it("#64/AC-2: fechar a gaveta com a confirmação em curso não a cancela: o resultado ainda chega ao estado", () => {
+    const state = run([{ type: "openRow", id: "a" }, start("a"), { type: "close" }, { type: "confirmSucceeded", id: "a" }]);
+    expect(state.confirm).toEqual({ a: { phase: "confirmed" } });
+  });
+
+  it("#64/AC-3: a linha confirmada vale como 'Atendeu': sai de 'Precisam de você' e conta em 'Atendidos', sem o documento a confirmar", () => {
+    const confirmed = asFulfilled(row("a", "fulfilledToConfirm", "2026-11-10"));
+    expect(confirmed).toEqual({ id: "a", invoiceNumber: "a", supplier: "F07 Limpeza", request: "Nota de devolução", amountCents: 1000, dueOn: "2026-11-10", status: "fulfilled" });
+    expect(countByChip([confirmed])).toEqual({ waiting: 0, fulfilled: 1, needsYou: 0, late: 0 });
   });
 });

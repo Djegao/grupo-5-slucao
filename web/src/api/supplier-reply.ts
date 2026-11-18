@@ -1,7 +1,7 @@
 /**
  * #21 O fio da lista "Pedidos ao fornecedor" (#5) e da leitura da resposta (#4): `api/src/http/supplier-requests.ts` (#36).
  * A lista vem por filtro, com as contagens dos quatro filtros calculadas pelo servidor; a gaveta lê o pedido pela chave de acesso,
- * "Cobrar" envia pelo `POST .../send`, e "Editar" guarda o texto pelo `PATCH .../follow-up` (#59). O erro de uma chamada vira um motivo fechado (`SupplierReplyReason`): o corpo da resposta não sai daqui.
+ * "Cobrar" envia pelo `POST .../send`, "Editar" guarda o texto pelo `PATCH .../follow-up` (#59) e "Confirmar documento" grava a confirmação pelo `POST .../confirm-document` (#64). O erro de uma chamada vira um motivo fechado (`SupplierReplyReason`): o corpo da resposta não sai daqui.
  */
 import { ApiError, apiGet, apiPatch, apiPost } from "./client";
 import type { ReadingListDto, ReplyFilterDto, SentRequestDetailDto, SupplierRequestDetailResponseDto } from "./contract";
@@ -18,6 +18,15 @@ export type SaveFailure = "invalid" | "conflict" | "unknown";
 /** #59 O que o salvamento devolve: o pedido como ficou, e se o servidor recusou por conflito (já enviado, envio em curso, sem rascunho, texto trocado no meio). */
 export interface SavedFollowUp {
   kind: "saved" | "conflict";
+  detail: SentRequestDetailDto;
+}
+
+/** #64 O prazo da confirmação do documento: o servidor só grava a confirmação (sem e-mail nem catálogo), mas a chamada parada termina, como as da #17 e da #59. */
+export const CONFIRM_DOCUMENT_TIMEOUT_MS = 20_000;
+
+/** #64 O que a confirmação devolve: o pedido como ficou, e se o servidor recusou por conflito (já confirmado, mudou no meio, sem documento a confirmar); em ambos, o pedido é o relido do servidor. */
+export interface ConfirmedDocument {
+  kind: "confirmed" | "conflict";
   detail: SentRequestDetailDto;
 }
 
@@ -79,6 +88,19 @@ async function saveFollowUpOf(accessKey: string, template: string): Promise<Save
   }
 }
 
+/**
+ * #64/AC-2 A pessoa confirma o documento que o fornecedor citou (POST .../confirm-document, #63): o corpo é vazio, quem confirma vem do Access.
+ * #64 Um 409 (already_confirmed, stale, not_confirm_document) não é falha desconhecida: relê o pedido e o devolve como conflito, e o `documentConfirmation` dele diz se a confirmação existe. O corpo do 409 não é lido (layer-exposure).
+ */
+async function confirmDocumentOf(accessKey: string): Promise<ConfirmedDocument> {
+  try {
+    return { kind: "confirmed", detail: sentOf(await apiPost<SupplierRequestDetailResponseDto>(pathOf(accessKey, "/confirm-document"), {}, { timeoutMs: CONFIRM_DOCUMENT_TIMEOUT_MS })) };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 409) throw error;
+    return { kind: "conflict", detail: sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey))) };
+  }
+}
+
 export interface SupplierReplyApi {
   /** #21 As linhas do filtro e as contagens dos quatro filtros. */
   list: (filter: ReplyFilterDto, signal: AbortSignal) => Promise<ReadingListDto>;
@@ -88,6 +110,8 @@ export interface SupplierReplyApi {
   sendFollowUp: (accessKey: string) => Promise<SentRequestDetailDto>;
   /** #59 Salva o molde editado da cobrança (com os `{{chave}}`); o servidor reconfere os números e guarda o texto, e o envio manda o que ele guarda. */
   saveFollowUp: (accessKey: string, template: string) => Promise<SavedFollowUp>;
+  /** #64 Confirma o documento citado na leitura; devolve o pedido como ficou, com `documentConfirmation` (quem e quando), ou relido num conflito. */
+  confirmDocument: (accessKey: string) => Promise<ConfirmedDocument>;
 }
 
 export const supplierReplyApi: SupplierReplyApi = {
@@ -95,4 +119,5 @@ export const supplierReplyApi: SupplierReplyApi = {
   detail: async (accessKey, signal) => sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey), { signal })),
   sendFollowUp: sendFollowUpOf,
   saveFollowUp: saveFollowUpOf,
+  confirmDocument: confirmDocumentOf,
 };

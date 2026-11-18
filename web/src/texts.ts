@@ -425,6 +425,20 @@ export const texts = {
       summary: (text: string) => `Resumo: "${text}"`,
       nextStepLabel: "Próximo passo",
       nextStep: { close: "Encerrar", confirm_document: "Confirmar documento", answer_supplier: "Responder ao fornecedor", follow_up: "Cobrar" },
+      /** #64/AC-1 O botão de confirmar leva o número que o fornecedor citou ("Confirmar documento NF-D 881"). */
+      confirmDocument: (document: string) => `Confirmar documento ${document}`,
+      /** #64/AC-2 O botão enquanto a confirmação está em curso. */
+      confirming: "Confirmando o documento…",
+      /** #64/AC-3 `by` é "por você" ou "por fulano" (quem confirmou, quando não é quem olha a tela). */
+      confirmed: (document: string, by: string, on: string, time: string | undefined) => `Documento ${document} confirmado ${by} em ${on}${time ? ` às ${time}` : ""}.`,
+      /** #64/AC-2 O motivo da confirmação recusada é um dos fechados de api/supplier-reply.ts; o texto do servidor nunca chega à tela (layer-exposure). */
+      confirmFailed: {
+        unauthorized: "Sua sessão não permite confirmar este documento. Entre de novo.",
+        not_found: "Este pedido não foi encontrado.",
+        conflict: "Este pedido mudou e o documento não foi confirmado. Veja o estado atual e tente de novo.",
+        unavailable: "Não consegui falar com o servidor agora. O documento não foi confirmado.",
+        unknown: "Não consegui confirmar o documento agora. Tente de novo em um minuto.",
+      },
     },
     /** #19 O rascunho da cobrança e o que acontece ao enviar. */
     draft: {

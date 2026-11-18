@@ -16,6 +16,7 @@ const sent = (key: string): SentRequestDetailDto => ({
   sentBy: null,
   sentAt: null,
   reading: null,
+  documentConfirmation: null,
   followUp: { drafted: false, sent: false, draft: null, sentBy: null, sentAt: null, failure: null, dueOn: null },
 });
 

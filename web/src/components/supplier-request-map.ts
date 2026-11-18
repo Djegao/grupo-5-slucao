@@ -114,7 +114,12 @@ function blockStatusOf(row: SupplierRequestRow, charged: boolean): SupplierBlock
 function readingOf(detail: SentRequestDetailDto, row: SupplierRequestRow, charged: boolean): SupplierReadingView {
   const reading = detail.reading;
   // #21 Cobrado (followUp.sent): sem próximo passo, como o estado 9 do wireframe.
-  const nextStep = (step: NextStepDto): SupplierNextStep | null => (charged ? null : step);
+  // #64/AC-3, AC-4 Confirmar exige o documento citado (o servidor só aceita com ele) e some depois de confirmado: sem botão onde não há o que confirmar.
+  const nextStep = (step: NextStepDto): SupplierNextStep | null => {
+    if (charged) return null;
+    if (step === "confirm_document" && (reading === null || reading.supplierDocument === null || detail.documentConfirmation !== null)) return null;
+    return step;
+  };
   // #21 Sem leitura (a resposta ainda não foi lida): só o atrasado tem o que fazer, que é cobrar.
   if (reading === null) return { replyOutcome: "no_reply", summary: "", nextStep: row.status === "late" ? nextStep("follow_up") : null };
   const itemsFulfilled = reading.fulfilledAsks.join(", ");
@@ -131,8 +136,10 @@ function readingOf(detail: SentRequestDetailDto, row: SupplierRequestRow, charge
 /** #5/AC-3 A conversa e a leitura do agente da gaveta, a partir do pedido que o `GET` devolveu. O contrato não traz o texto da resposta. */
 export function conversationOf(row: SupplierRequestRow, detail: SentRequestDetailDto, today: string): SupplierConversationView {
   const charged = detail.followUp.sent;
+  const confirmed = detail.documentConfirmation;
   return {
-    status: blockStatusOf(row, charged),
+    // #64/AC-3 Confirmado o documento, o bloco deixa de dizer "falta confirmar": atendeu.
+    status: confirmed === null ? blockStatusOf(row, charged) : "fulfilled",
     sent: {
       document: detail.returnNote.number ?? "—",
       amountCents: row.amountCents,
@@ -142,7 +149,14 @@ export function conversationOf(row: SupplierRequestRow, detail: SentRequestDetai
     reply: null,
     asOf: today,
     reading: readingOf(detail, row, charged),
+    ...(confirmed === null ? {} : { confirmation: { document: confirmed.document, by: confirmed.by, ...momentOfConfirmation(confirmed.at) } }),
   };
+}
+
+/** #64/AC-3 Quando a pessoa confirmou: o dia e a hora de São Paulo, como o envio da cobrança (`momentOf`). */
+function momentOfConfirmation(at: string): { on: string; time?: string } {
+  const { sentOn, sentTime } = momentOf(at);
+  return sentTime === undefined ? { on: sentOn } : { on: sentOn, time: sentTime };
 }
 
 /** #5/AC-4 O rascunho da cobrança que o servidor guarda; nulo quando não há, já não confere com o catálogo (#36) ou a cobrança já foi enviada. O novo prazo é o do servidor (#59), nunca calculado aqui. */
