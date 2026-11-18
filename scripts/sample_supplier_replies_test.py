@@ -72,6 +72,7 @@ class RepliesTest(unittest.TestCase):
 
 
 class WriteTest(unittest.TestCase):
+    # Os dois testes exercitam `write()` sem estado compartilhado: agrupar pela unidade testada é intencional (LCOM4 = 2 é esperado).
     def test_running_twice_leaves_four_messages(self) -> None:
         inbox = FakeInbox(REQUESTS)
         self.assertEqual(sr.write(inbox), (4, 0))
