@@ -114,8 +114,10 @@ describe('#12 a migração segue as convenções do projeto', () => { // ADR-002
     expect(flat).not.toContain('disable row level security');
   });
 
-  it('só o índice parcial e as chaves são índices novos: nenhum índice sem consulta', () => { // ADR-002
-    expect(flat.match(/create (unique )?index/g)).toHaveLength(1);
+  it('só o parcial e os dois de leitura (Q6 e Q7) são índices novos: nenhum índice sem consulta', () => { // ADR-002
+    expect(flat.match(/create (unique )?index/g)).toHaveLength(3);
+    expect(flat).toContain('create index outbox_supplier_emails_latest on public.outbox_supplier_emails (invoice_access_key, request_type, id desc)');
+    expect(flat).toContain('create index outbox_supplier_emails_status on public.outbox_supplier_emails (status, id desc)');
   });
 
   it('cada linha de comentário leva o ponteiro de uma issue ou ADR; cada enum leva -- ADR-002', () => { // ADR-002

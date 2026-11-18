@@ -18,8 +18,8 @@ function compare(a: unknown, b: unknown): number {
 }
 
 /** #35 `order=a.desc.nullslast,b`: ordena as linhas como o PostgREST; o nulo vai por último (o fake não distingue nullsfirst).
- * #35 Difere do PostgreSQL, que no DESC põe o nulo primeiro sem a cláusula: nenhum adaptador da #35 ordena DESC numa coluna anulável
- * #35 sem `nullslast` explícito (READINGS_ORDER), então o fake e o banco concordam. Um adaptador novo que o faça deve dizer o nulo. */
+ * #35 Difere do PostgreSQL, que no DESC põe o nulo primeiro sem a cláusula: nenhum adaptador ordena DESC numa coluna anulável
+ * #35 sem `nullslast` explícito, então o fake e o banco concordam. Um adaptador novo que o faça deve dizer o nulo. */
 function sortRows(rows: Row[], order: string): Row[] {
   const specs = order.split(',').map((spec) => {
     const [column = '', ...modifiers] = spec.split('.');
@@ -42,10 +42,6 @@ const RELATIONS: Record<string, Record<string, { table: string; local: string; f
     invoices: { table: 'invoices', local: 'invoice_access_key', foreign: 'access_key', many: false },
   },
   invoices: { divergences: { table: 'divergences', local: 'access_key', foreign: 'invoice_access_key', many: true } },
-  // #12 O pedido ao fornecedor: o fornecedor (muitos-para-um).
-  outbox_supplier_emails: {
-    kit_fornecedores: { table: 'kit_fornecedores', local: 'supplier_id', foreign: 'fornecedor_id', many: false },
-  },
 };
 
 /** #8 Lê `a,b,rel(c,rel2(d))` do select do PostgREST, separando só nas vírgulas de fora dos parênteses. */
@@ -127,7 +123,7 @@ export class FakePostgrest {
         result = result.slice(from, to + 1);
       }
       const select = params.get('select');
-      if (select && select !== '*') result = result.map((r) => this.project(table, r, parseSelect(select), params));
+      if (select && select !== '*') result = result.map((r) => this.project(table, r, parseSelect(select)));
       return json(200, result);
     }
     if (method === 'POST') {
@@ -168,7 +164,7 @@ export class FakePostgrest {
   };
 
   /** #8 Projeta as colunas do select e monta os recursos embutidos pelas chaves estrangeiras. */
-  private project(table: string, row: Row, items: SelectItem[], params: URLSearchParams): Row {
+  private project(table: string, row: Row, items: SelectItem[]): Row {
     const out: Row = {};
     for (const item of items) {
       // #230 `*,invoices(*)`: o curinga traz todas as colunas da linha, como no PostgREST.
@@ -184,7 +180,7 @@ export class FakePostgrest {
       if (!relation) throw new Error(`fake: relação não suportada ${table}.${item.name}`);
       const related = this.rows(relation.table)
         .filter((r) => r[relation.foreign] === row[relation.local])
-        .map((r) => this.project(relation.table, r, item.embed ?? [], params));
+        .map((r) => this.project(relation.table, r, item.embed ?? []));
       out[item.name] = relation.many ? related : (related[0] ?? null);
     }
     return out;
@@ -255,7 +251,7 @@ export class FakePostgrest {
 
   private matches(row: Row, params: URLSearchParams): boolean {
     for (const [col, expr] of params) {
-      if (['select', 'order', 'on_conflict', 'limit'].includes(col) || col.endsWith('.order')) continue;
+      if (['select', 'order', 'on_conflict', 'limit'].includes(col)) continue;
       // #12 or=(a.is.null,b.lt.X): cada termo é `coluna.operador.valor`; o valor pode ter pontos.
       if (col === 'or') {
         const terms = /^\((.*)\)$/.exec(expr)?.[1]?.split(',') ?? [];
