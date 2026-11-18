@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { erpReturnNoteOutbox } from '../../src/connectors/erp-return-note.js';
 import { SupabaseRestError } from '../../src/connectors/supabase-rest.js';
 import { publishReturnNote } from '../../src/returns/publish-return-note.js';
@@ -97,12 +97,40 @@ describe('#8/AC-3 linha fora do formato vira erro sem repetir os dados', () => {
     expect(String(error)).not.toContain(secret);
   });
 
-  it('proposta decidida sem aprovação', async () => {
+  it('proposta decidida sem aprovação: pula a linha e registra só a chave e o motivo, e as outras decisões continuam lidas', async () => {
     const { fake, rest } = await proposedWorld();
     const e3 = awaiting(fake, 'E3');
     e3.state = 'aprovada';
-    const error = await new SupabaseDecidedReturnSource(rest).listDecided().catch((e: unknown) => e);
-    expect(error).toMatchObject({ operation: 'parse', table: 'approvals' });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const decided = await new SupabaseDecidedReturnSource(rest).listDecided();
+      expect(decided).toHaveLength(14);
+      expect(decided.some((d) => d.invoice.accessKey === e3.invoice_access_key)).toBe(false);
+      const written = log.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(written).toContain(String(e3.invoice_access_key));
+      expect(written).toContain('sem aprovação');
+      expect(written).not.toContain(String(e3.dock_action));
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('proposta decidida sem aprovação: a varredura publica as outras decisões da mesma leitura', async () => {
+    const { fake, rest } = await proposedWorld();
+    const e3 = awaiting(fake, 'E3');
+    e3.state = 'aprovada';
+    const e1 = awaiting(fake, 'E1');
+    decide(fake, e1, { state: 'aprovada', action: returnFirstItem(fake, e1), decidedOn: '2026-11-13' });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { published } = await sweepReturnNotes(new SupabaseDecidedReturnSource(rest), erpReturnNoteOutbox(rest), 20);
+      expect(published).toBeGreaterThan(0);
+      const keys = fake.rows('outbox_return_notes').map((r) => r.invoice_access_key);
+      expect(keys).toContain(e1.invoice_access_key);
+      expect(keys).not.toContain(e3.invoice_access_key);
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('recebimento fora do formato', async () => {

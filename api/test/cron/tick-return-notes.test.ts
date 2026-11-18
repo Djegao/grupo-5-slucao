@@ -142,10 +142,10 @@ describe('#9/AC-2 o teto de 20 publicações por rodada', () => {
 describe('#9/AC-2 a devolução que falha não derruba a rodada', () => {
   it('#9/AC-2: decisão com linha fora do formato falha o passo, sem repetir os dados, e a rodada segue e é registrada', async () => {
     const { fake, log, error, round } = await afterFirstRound();
-    const segredo = 'valor-secreto-do-banco';
+    const secret = 'valor-secreto-do-banco';
     const e3 = awaiting(fake, 'E3');
     decide(fake, e3, { state: 'aprovada', action: returnFirst(fake, e3), decidedOn: '2026-11-15' });
-    e3.classification = segredo;
+    e3.classification = secret;
     const runsBefore = fake.rows('automation_runs').length;
     log.mockClear();
     error.mockClear();
@@ -154,7 +154,7 @@ describe('#9/AC-2 a devolução que falha não derruba a rodada', () => {
 
     const written = [...log.mock.calls, ...error.mock.calls].map((c) => String(c[0])).join('\n');
     expect(written).toMatch(/devoluções/);
-    expect(written).not.toContain(segredo);
+    expect(written).not.toContain(secret);
     expect(fake.rows('automation_runs')).toHaveLength(runsBefore + 1);
     expect(fake.rows('automation_runs').at(-1)?.status).toBe('ok');
   });

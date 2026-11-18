@@ -87,12 +87,12 @@ Não há inquilino. `strategies.tenancy.strategy: none`. O RLS ligado e sem pol�
 
 | Condição | Cumprida por | Não cumprida, e por quê |
 |---|---|---|
-| PER-1 | as tabelas da #8 e todo o `kit_*` no registro | sete tabelas fora da #8 ainda sem modo (lista no topo do registro) |
+| PER-1 | as tabelas da #8 e todo o `kit_*` no registro | dez tabelas fora da #8 ainda sem modo (lista no topo do registro) |
 | PER-2 | `approvals`, `divergences`: a #8 não as grava | `divergences` recebe upsert em `invoice-store.ts`. O banco não recusa `UPDATE` porque o Worker não tem papel próprio (`refusal: access-layer`) |
 | PER-3, PER-4 | `outbox_return_notes`: uma transição, com quem e quando e o filtro por `status` | `proposals` e `invoices` sem versão nem histórico (lacuna anterior à #8) |
 | PER-5 | a #8 não apaga | `ops/reconferir.ts` apaga as tabelas do domínio (#56) |
 | PER-6 | `approvals`: uma linha por proposta, lida direto | n/a |
-| PER-7 | nenhum modo muda | primeira versão do registro |
+| PER-7 | nenhum modo muda | a #8 acrescenta ao registro |
 | PER-8 | histórico declarado por tabela | `in-row-transition` é extensão deste projeto, fora das formas de `docs/entity-history.md` |
 | TRX-1 | cada gravação é um `POST`, numa transação | n/a |
 | TRX-2 | nenhum adaptador emite `BEGIN` ou `COMMIT`. A transação é a da requisição | não há porta de unidade de trabalho: a borda é a requisição |

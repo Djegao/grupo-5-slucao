@@ -62,11 +62,16 @@ export class SupabaseDecidedReturnSource implements DecidedReturnSource {
       new WmsCountConnector(this.rest).listReceipts(),
       new ErpRegistryConnector(this.rest).listProducts(),
     ]);
-    return parseRows(proposals, isDecidedRow, 'proposals').map((row): DecidedReturnCase => {
-      // #8 Decisão sem aprovação ou sem nota é dado quebrado: erro sem repetir a linha, nunca decisão pela metade.
-      if (row.approvals === null) return corrupt('approvals', 'decisão sem aprovação');
+    return parseRows(proposals, isDecidedRow, 'proposals').flatMap((row): DecidedReturnCase[] => {
+      // Decisão do dono do grupo, 17/11: a decisão sem aprovação é pulada e registrada (só a chave e o motivo, sem o corpo),
+      // como em dock-source.ts, para as outras entrarem na fila; o propose-checked da main pode deixá-la sem reparo.
+      if (row.approvals === null) {
+        console.error(`#8 devolução da nota ${row.invoice_access_key} pulada: decisão sem aprovação`);
+        return [];
+      }
+      // #8 Decisão sem nota é dado quebrado: erro sem repetir a linha, nunca decisão pela metade.
       if (row.invoices === null) return corrupt('invoices', 'decisão sem nota');
-      return {
+      return [{
         invoice: invoiceFromRows(row.invoices, row.invoices.divergences),
         decision: {
           classification: row.classification,
@@ -77,7 +82,7 @@ export class SupabaseDecidedReturnSource implements DecidedReturnSource {
         },
         receipts,
         products,
-      };
+      }];
     });
   }
 }

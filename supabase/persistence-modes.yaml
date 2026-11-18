@@ -14,10 +14,10 @@
 # #230: acrescenta invoice_audits e proposal_level_changes e a subida de nível de proposals (uma requisição
 # PostgREST por escrita, ver strategies).
 #
-# Primeira versão (#8): declara as tabelas que a camada de persistência da devolução lê ou grava e
+# #8 acrescenta: declara as tabelas que a camada de persistência da devolução lê ou grava e
 # toda a base do kit. Ainda sem modo declarado, a declarar pelo dono de cada uma: titles,
 # outbox_dock_actions, outbox_registry_corrections, outbox_store_actions, claude_suggestions,
-# exceptions, automation_runs.
+# exceptions, automation_runs, dossier_requests (#253), engine_decisions e engine_settings (#251).
 
 database: postgresql 17          # supabase/config.toml, [db] major_version = 17
 migrations: supabase/migrations  # migrações do Supabase CLI, YYYYMMDDHHMMSS_nome.sql
