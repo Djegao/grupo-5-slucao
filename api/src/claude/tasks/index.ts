@@ -8,11 +8,20 @@ import { SupabaseInvoiceAudits } from '../../connectors/invoice-audit-store.js';
 import { descriptionMatch } from './description-match.js';
 import { invoiceAuditTask } from './invoice-audit.js';
 import { probableOrderTask } from './probable-order.js';
+import { supplierRequestDraftTask } from '../../supplier/draft-task.js';
+import { supplierDeps } from '../../supplier/supabase-deps.js';
+
+/** #36: o casamento de descrição e a ordem provável têm 1 pedido por rodada cada (eram 5, o teto antigo da rodada): ficam 5 vezes mais lentos para caber nas subrequests; a conta está em api/src/claude/cron.ts. */
+export const DESCRIPTION_MATCH_LIMIT = 1;
+export const PROBABLE_ORDER_LIMIT = 1;
 
 export function tasksFor(rest: SupabaseRest): readonly ClaudeTask<unknown, unknown>[] {
+  // #36/AC-3: estas tarefas nunca enviam: o envio é só da rota, por uma pessoa; o `mailer` padrão aqui nem é chamado.
+  // #36 A ordem é a da fome: com o Worker no plano gratuito (50 subrequests), passado o limite todo fetch lança e as últimas tarefas não rodam; O que sobra de fora é a lacuna da #48.
   return [
-    descriptionMatch, // #66 casamento de descrição do item sem cadastro
-    probableOrderTask(rest), // #65 ordem provável da nota sem ordem (E5)
-    invoiceAuditTask({ audits: new SupabaseInvoiceAudits(rest), reads: new SupabaseAuditReads(rest) }), // #230 auditor de notas
+    { ...descriptionMatch, limit: DESCRIPTION_MATCH_LIMIT }, // #66 casamento de descrição do item sem cadastro; #36 de 5 para 1 por rodada (mais lento, para caber nas subrequests)
+    { ...probableOrderTask(rest), limit: PROBABLE_ORDER_LIMIT }, // #65 ordem provável da nota sem ordem (E5); #36 de 5 para 1 por rodada (mais lento, para caber nas subrequests)
+    supplierRequestDraftTask(supplierDeps(rest)), // #12 rascunho do pedido ao fornecedor (#2/AC-1); não emite nem envia
+    invoiceAuditTask({ audits: new SupabaseInvoiceAudits(rest), reads: new SupabaseAuditReads(rest) }), // #230 auditor de notas (maxPerRun 1); por último: é a mais cara, com tool use
   ] as readonly ClaudeTask<unknown, unknown>[];
 }

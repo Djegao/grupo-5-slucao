@@ -18,3 +18,6 @@ export * from './probable-order.js';
 export * from './dossier.js';
 export * from './invoice-audit.js';
 export * from './return-note.js';
+export * from './calendar.js';
+export * from './return-note-document.js';
+export * from './supplier-request.js';
