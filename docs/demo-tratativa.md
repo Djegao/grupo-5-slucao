@@ -98,8 +98,8 @@ Só os nomes. Os valores ficam fora do git.
 ### Banco
 
 As migrações e a carga do kit entram pelo workflow `.github/workflows/supabase-base-do-kit.yml` a cada
-merge. **Neste fork o workflow falha no passo "Ligar ao projeto"**, então não há garantia de que o banco
-tenha as migrações `20261117160000` e `20261117170000`. À mão, com a CLI do Supabase (os mesmos comandos do
+merge. **No fork do grupo 5 (`Djegao/grupo-5-slucao`) o workflow falhava no passo "Ligar ao projeto"**, então lá
+não havia garantia de que o banco tivesse as migrações `20261117160000` e `20261117170000`. À mão, com a CLI do Supabase (os mesmos comandos do
 workflow, não rodados aqui):
 
 ```bash
@@ -265,13 +265,14 @@ credenciais do Supabase.
 
 **A API pela linha de comando.** Ver a seção 3. Precisa do banco e do token do Access.
 
-**A demo da PR #40 (só como referência de UX).** A pasta `demo-tratativa/` **não está na `main`**. A PR #40
-está aberta. Ela é uma página independente, sem build, com uma API falsa em `mock-api.js` que **reimplementa
-as regras em JavaScript** e não usa o Worker. O modo "com o Worker de verdade" chama `/api/pedidos-fornecedor*`,
-rotas que não existem na `main` (lá é `/api/supplier-requests`). Para ver sem fazer checkout nem merge:
+**A demo da PR #40 do fork do grupo 5 (só como referência de UX).** É a PR `Djegao/grupo-5-slucao#40`, de outro
+integrante do grupo; a pasta `demo-tratativa/` **não está na `main`** daqui. Ela é uma página independente, sem
+build, com uma API falsa em `mock-api.js` que **reimplementa as regras em JavaScript** e não usa o Worker. O modo
+"com o Worker de verdade" chama `/api/pedidos-fornecedor*`, rotas que não existem nesta `main` (aqui é
+`/api/supplier-requests`). Para ver sem fazer checkout nem merge:
 
 ```bash
-git fetch origin pull/40/head:ref-pr40
+git fetch https://github.com/Djegao/grupo-5-slucao pull/40/head:ref-pr40
 mkdir -p /tmp/pr40 && git archive ref-pr40 demo-tratativa | tar -x -C /tmp/pr40
 python3 -m http.server 8156 --directory /tmp/pr40/demo-tratativa
 # http://localhost:8156/?mock=1           o bloco do pedido (#156)
@@ -279,24 +280,14 @@ python3 -m http.server 8156 --directory /tmp/pr40/demo-tratativa
 node --test /tmp/pr40/demo-tratativa/mock-api.test.mjs
 ```
 
-Aqui a página respondeu 200 e o teste deu 20 de 20. O `node --test demo-tratativa/` do README da PR falhou
-com Node 24, porque passa a pasta e não o arquivo.
+A página respondeu 200 e o teste deu 20 de 20. O `node --test demo-tratativa/` do README da PR falhou com
+Node 24, porque passa a pasta e não o arquivo.
 
 ## 5. Limitações e pendências
 
 **Não verificado:**
 
-- A suíte, o typecheck e o build de `web/` do épico rodaram só contra substitutos locais dos kits privados (a conta do fork não os lê), nunca contra os kits reais; o CI da principal, que os instala, é a primeira execução real. Na
-  primeira vez que rodaram, o typecheck deu 14 erros e a suíte, 12 falhas em 536 testes, todos em código ou teste do
-  épico : `Dossier.tsx` (falta `return_note` em `SOURCE_LABEL`),
-  `SupplierRequestBlock.test.tsx` (`cleanup` sem import), `SupplierRequestList.test.tsx` (`Extract<..., { status:
-  "late" }>` dá `never`), `SupplierRequests.test.tsx` (`.mock` num tipo de função; o chip "Atrasados" que segue em 2
-  depois do reenvio; "por você" na cobrança de outra pessoa), o mapa e o estado dos chips de
-  `components/supplier-request-*.test.ts`, `approval/supplier-request-state.test.ts` (status 0),
-  `SupplierRequestSection.test.tsx` (`{{numero}}` sem substituir), `api/client.test.ts` (o abort vira `ApiError`) e
-  três testes de tela que procuram a gaveta por `role="heading"` (o `Drawer` do DS a escreve num `<p>`) ou
-  esperam o chip sem o " ·". O Worker deste fork
-  nunca foi publicado.
+- A suíte, o typecheck e o build de `web/` do épico rodaram só contra substitutos locais dos kits privados (a conta do fork do grupo 5 não os lê), nunca contra os kits reais; o CI da principal, que os instala, é a primeira execução real. O Worker do fork nunca foi publicado.
 - As lentes de confiabilidade e de observabilidade não rodaram na revisão.
 - Não há trilha contra um banco real. Os cenários de aceite rodam sobre o `FakePostgrest`
   (`api/test/support/fake-postgrest.ts`), e os testes online pulam sem credencial.
