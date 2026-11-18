@@ -112,25 +112,25 @@ describe('a emissão mock da nota de devolução', () => {
 // #10/AC-1: o kit nomeia os campos em português (data/kit/notas.json); o domínio os nomeia em inglês.
 // #10: o mapeamento para o JSON do kit é da borda, não do domínio.
 const KIT_NOTE_FIELDS = {
-  nota_id: 'noteId',
-  chave: 'accessKey',
-  numero: 'number',
-  serie: 'series',
-  fornecedor_id: 'supplierId',
-  destino: 'destination',
-  data_emissao: 'issuedOn',
-  itens: 'items',
-  valor_total: 'total',
+  nota_id: 'noteId', // ADR-001
+  chave: 'accessKey', // ADR-001
+  numero: 'number', // ADR-001
+  serie: 'series', // ADR-001
+  fornecedor_id: 'supplierId', // ADR-001
+  destino: 'destination', // ADR-001
+  data_emissao: 'issuedOn', // ADR-001
+  itens: 'items', // ADR-001
+  valor_total: 'total', // ADR-001
 } as const;
 
 const KIT_ITEM_FIELDS = {
-  codigo_fornecedor: 'supplierCode',
+  codigo_fornecedor: 'supplierCode', // ADR-001
   sku: 'sku',
-  descricao: 'description',
-  quantidade: 'quantity',
-  unidade: 'unit',
-  preco_unitario: 'unitPrice',
-  valor: 'value',
+  descricao: 'description', // ADR-001
+  quantidade: 'quantity', // ADR-001
+  unidade: 'unit', // ADR-001
+  preco_unitario: 'unitPrice', // ADR-001
+  valor: 'value', // ADR-001
 } as const;
 
 describe('os campos da nota de devolução e os da nota do kit', () => {
