@@ -1,8 +1,43 @@
 // Fake do PostgREST em memória, servido por um fetch injetado (#59). Cobre o que o cliente usa:
 // #59 select paginado por Range, filtros eq, insert com on_conflict e resolution, PATCH e DELETE.
+// #8 select com recurso embutido (proposals -> approvals, invoices -> divergences), pelas chaves estrangeiras.
 import type { FetchFn } from '../../src/connectors/supabase-rest.js';
 
 type Row = Record<string, unknown>;
+
+type SelectItem = { name: string; embed?: SelectItem[] };
+
+/** #8 As chaves estrangeiras que o fake sabe embutir: muitos-para-um e um-para-um dão objeto ou null; um-para-muitos, lista. */
+const RELATIONS: Record<string, Record<string, { table: string; local: string; foreign: string; many: boolean }>> = {
+  proposals: {
+    approvals: { table: 'approvals', local: 'id', foreign: 'proposal_id', many: false },
+    invoices: { table: 'invoices', local: 'invoice_access_key', foreign: 'access_key', many: false },
+  },
+  invoices: { divergences: { table: 'divergences', local: 'access_key', foreign: 'invoice_access_key', many: true } },
+};
+
+/** #8 Lê `a,b,rel(c,rel2(d))` do select do PostgREST, separando só nas vírgulas de fora dos parênteses. */
+function parseSelect(select: string): SelectItem[] {
+  const items: SelectItem[] = [];
+  let depth = 0;
+  let start = 0;
+  const flush = (end: number): void => {
+    const text = select.slice(start, end).trim();
+    const open = text.indexOf('(');
+    if (open < 0) items.push({ name: text });
+    else items.push({ name: text.slice(0, open), embed: parseSelect(text.slice(open + 1, text.length - 1)) });
+  };
+  for (let i = 0; i < select.length; i += 1) {
+    if (select[i] === '(') depth += 1;
+    else if (select[i] === ')') depth -= 1;
+    else if (select[i] === ',' && depth === 0) {
+      flush(i);
+      start = i + 1;
+    }
+  }
+  flush(select.length);
+  return items;
+}
 
 export class FakePostgrest {
   readonly tables = new Map<string, Row[]>();
@@ -53,10 +88,7 @@ export class FakePostgrest {
         result = result.slice(from, to + 1);
       }
       const select = params.get('select');
-      if (select && select !== '*') {
-        const cols = select.split(',');
-        result = result.map((r) => Object.fromEntries(cols.map((c) => [c, r[c]])));
-      }
+      if (select && select !== '*') result = result.map((r) => this.project(table, r, parseSelect(select)));
       return json(200, result);
     }
     if (method === 'POST') {
@@ -91,6 +123,29 @@ export class FakePostgrest {
     }
     return json(405, {});
   };
+
+  /** #8 Projeta as colunas do select e monta os recursos embutidos pelas chaves estrangeiras. */
+  private project(table: string, row: Row, items: SelectItem[]): Row {
+    const out: Row = {};
+    for (const item of items) {
+      // #230 `*,invoices(*)`: o curinga traz todas as colunas da linha, como no PostgREST.
+      if (item.name === '*') {
+        Object.assign(out, row);
+        continue;
+      }
+      if (item.embed === undefined) {
+        out[item.name] = row[item.name];
+        continue;
+      }
+      const relation = RELATIONS[table]?.[item.name];
+      if (!relation) throw new Error(`fake: relação não suportada ${table}.${item.name}`);
+      const related = this.rows(relation.table)
+        .filter((r) => r[relation.foreign] === row[relation.local])
+        .map((r) => this.project(relation.table, r, item.embed ?? []));
+      out[item.name] = relation.many ? related : (related[0] ?? null);
+    }
+    return out;
+  }
 
   private defaults(table: string): Row {
     const now = new Date().toISOString();

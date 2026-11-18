@@ -14,6 +14,7 @@ import { onDemandAskWithUsage } from "./dossier/on-demand";
 import { restDb } from "./claude/db";
 import { SupabaseTimelineSource } from "./automation/readers";
 import { appStoreActionOutbox } from "./connectors/store-action";
+import { erpReturnNoteOutbox } from "./connectors/erp-return-note";
 import { wmsDockActionOutbox } from "./connectors/wms-dock-action";
 import { SupabaseEngineStore } from "./engine/supabase-store";
 
@@ -49,6 +50,9 @@ function approvalDeps(env: Env) {
     dockOutbox: wmsDockActionOutbox(rest),
     // #135 A nota de loja vai para o app da loja.
     storeOutbox: appStoreActionOutbox(rest),
+    // #9/AC-1 A devolução da decisão vai para a fila das notas de devolução (#1); os recebimentos vêm do WMS.
+    returnOutbox: erpReturnNoteOutbox(rest),
+    receipts: () => captureDeps.wms.listReceipts(),
     // #68: o dossiê que o job do Claude gravou, conferido contra o contexto da nota.
     // #176 A unidade de estoque do receber parcial vem do fator de caixa do cadastro.
     products: () => captureDeps.registry.listProducts(),

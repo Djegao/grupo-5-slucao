@@ -38,7 +38,7 @@ import {
 
 // #63 Formato das linhas, conferido na borda antes de virar domínio.
 
-type InvoiceRow = {
+export type InvoiceRow = {
   access_key: string;
   number: string;
   series: string;
@@ -52,7 +52,7 @@ type InvoiceRow = {
   state: InvoiceState;
 };
 
-type DivergenceRow = {
+export type DivergenceRow = {
   invoice_access_key: string;
   seq: number;
   classification: string;
@@ -157,14 +157,14 @@ const CLASSIFICATIONS: readonly Classification[] = [
   'E8',
   'NAO_CATALOGADA',
 ];
-const isClassification = oneOf(...CLASSIFICATIONS);
+export const isClassification = oneOf(...CLASSIFICATIONS);
 const isEvidence = shaped<Evidence>({
   source: oneOf('sefaz', 'erp_compras', 'erp_contas_a_pagar', 'erp_cadastro', 'banco', 'wms'),
   reference: isString,
   description: isString,
 } satisfies Shape<Evidence>);
 
-function corrupt(table: string, detail: string): never {
+export function corrupt(table: string, detail: string): never {
   throw new SupabaseRestError('parse', table, 0, detail);
 }
 
