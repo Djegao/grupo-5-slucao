@@ -10,7 +10,7 @@ import {
 import { noteFilename } from '../supplier/kit-note.js';
 import type { RequestRecord, SourceInvoice } from '../supplier/ports.js';
 import type { ReplyRequest } from '../supplier/reply-ports.js';
-import { followUpOf, readingOf, type WireFollowUp, type WireReading } from './supplier-reply-view.js';
+import { confirmationOf, followUpOf, readingOf, type WireDocumentConfirmation, type WireFollowUp, type WireReading } from './supplier-reply-view.js';
 
 export type WireMoney = { readonly text: string };
 
@@ -38,7 +38,15 @@ export type WireRequest =
   | { readonly status: 'writing' }
   | ({ readonly status: 'draft' } & WireContent) // ADR-002
   // #36: o pedido enviado ganha a leitura da resposta (#4) e a cobrança; os campos da #13 ficam como estavam.
-  | ({ readonly status: 'sent'; readonly sentBy: string | null; readonly sentAt: string | null; readonly reading: WireReading | null; readonly followUp: WireFollowUp } & WireContent) // ADR-002
+  // #63/AC-3: e a confirmação do documento citado na leitura (nula enquanto a pessoa não confirmou).
+  | ({
+      readonly status: 'sent'; // ADR-002
+      readonly sentBy: string | null;
+      readonly sentAt: string | null;
+      readonly reading: WireReading | null;
+      readonly documentConfirmation: WireDocumentConfirmation | null;
+      readonly followUp: WireFollowUp;
+    } & WireContent)
   | ({ readonly status: 'send_failed'; readonly failure: string } & WireContent) // ADR-002
   | { readonly status: 'discarded'; readonly discardedAt: string | null; readonly discardedBy: string | null } // ADR-002
   | { readonly status: 'failed'; readonly failure: 'number_mismatch' | 'invalid_shape' };
@@ -100,7 +108,8 @@ export function viewOf(record: RequestRecord, source: SourceInvoice | null, repl
   };
   if (request.status === 'sent') { // ADR-002
     const sent = { sentBy: record.audit?.sentBy ?? null, sentAt: record.audit?.sentAt ?? null };
-    return { ok: true, view: { status: 'sent', ...sent, reading: readingOf(reply?.reading ?? null), followUp: reply === null ? NO_FOLLOW_UP : followUpOf(reply), ...content } }; // ADR-002
+    const documentConfirmation = confirmationOf(reply?.documentConfirmation ?? null); // #63/AC-3
+    return { ok: true, view: { status: 'sent', ...sent, reading: readingOf(reply?.reading ?? null), documentConfirmation, followUp: reply === null ? NO_FOLLOW_UP : followUpOf(reply), ...content } }; // ADR-002
   }
   if (request.status === 'send_failed') { // ADR-002
     return { ok: true, view: { status: 'send_failed', failure: request.sendFailureReason ?? 'send_failed', ...content } }; // ADR-002

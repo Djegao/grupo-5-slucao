@@ -105,12 +105,21 @@ Todas anuláveis e sem default, num único `alter table ... add column ..., add 
 
 Cada gravação da cobrança faz um `GET` da linha, para ler `version` e `history`, e depois um único `PATCH` guardado: `id=eq.<id>&version=eq.<v>&<guarda da transição>`. O corpo leva as colunas da cobrança, `version: v+1`, `updated_at` e `history` com uma entrada a mais. A entrada é `{version, at, by, action, state, follow_up}`, com estes campos:
 
-- `action`: um de `follow_up_drafted`, `follow_up_rejected`, `follow_up_claimed`, `follow_up_failed`, `follow_up_sent`, `follow_up_edited`.
+- `action`: um de `follow_up_drafted`, `follow_up_rejected`, `follow_up_claimed`, `follow_up_failed`, `follow_up_sent`, `follow_up_edited`; e, da #63, `document_confirmed` (abaixo).
 - `state`: o `state` da última entrada, copiado sem mudar. A cobrança não muda o estado da #12.
 - `follow_up`: o estado da cobrança depois da gravação.
 - `by`: o nome da varredura do prazo (`supplier-overdue-sweep`, #58) quando quem grava é a regra; o usuário quando é uma pessoa (ver as mudanças de porta). Até a #58 era o nome da tarefa do Claude (`supplier-follow-up-draft`), que saiu do Cron; as linhas antigas guardam esse nome.
 
 O guard de forma da #12 (`history: arrayOf(isUnknown)`) aceita a chave a mais. O construtor confere que o `select` e o `shaped` do adaptador da #12 não recusam as colunas novas.
+
+### A confirmação do documento (#63): uma entrada do histórico, sem migração
+
+A pessoa confirma o documento que o fornecedor citou na leitura (`fulfilled`, `supplier_document`, próximo passo `confirm_document`). A confirmação é um fato com quem e quando (ADR-005), e ela cabe no que já existe: **uma entrada do `history jsonb` da linha do pedido**, com `action: 'document_confirmed'`, `document` (o documento confirmado), `by` (o e-mail do Access), `at`, e o `state` e o `follow_up` das outras entradas. Nenhuma coluna nova, nenhuma tabela, nenhuma migração: o modo de `outbox_supplier_emails` (`upsert-with-history`, histórico `json-column`, versão em `version`) já diz onde o histórico mora, e a entrada é a que o histórico foi desenhado para guardar.
+
+- **Gravação (QF5).** `confirmDocument` lê a linha (`GET`, para `version` e `history`) e faz um único `PATCH` guardado: `id=eq.<id>&version=eq.<v>&status=eq.sent`, com o corpo só em `version: v+1`, `updated_at` e `history` com a entrada a mais. Nenhuma coluna do pedido muda (#63/AC-5), e nenhuma outra tabela é tocada. Se o histórico lido já tem a confirmação do mesmo documento, volta `already_confirmed` sem gravar. Com 0 linhas, relê: o documento confirmado agora é `already_confirmed` (a outra chamada ganhou), senão a linha andou por outra gravação e volta `stale`. Duas chamadas ao mesmo tempo na mesma versão: um `PATCH` pega a linha, o outro, 0 linhas; um 200 e um 409.
+- **Leitura.** O `select` do pedido pede `history`; `confirmationsOf` (`supabase-reply-request-row.ts`) tira as entradas `document_confirmed` bem formadas, e a regra do domínio (`confirmationOf`) escolhe a mais recente **do documento da leitura atual**. A entrada fora do formato é ignorada, não lançada.
+- **Uma leitura nova.** A confirmação é do documento, não da leitura: uma leitura nova que cita o mesmo documento mantém a confirmação, e uma que cita outro documento (ou deixa de ser `fulfilled` com `confirm_document`) deixa a velha no histórico e o pedido volta a `needs_you`, pedindo outra. O histórico nunca perde a entrada antiga.
+- **Custo.** O histórico de um pedido é curto e já era lido com a linha nas gravações; agora também vai na lista de leitura (`listSent`). Se um dia a lista pesar, a confirmação ganha coluna própria (`document_confirmed_*`) numa migração; a regra e a API não mudam.
 
 ## Leituras e gravações dos adaptadores
 
@@ -146,6 +155,8 @@ O embedding segue as FKs. A ordem do recurso embutido usa a sintaxe de "Embedded
 **QF1** `saveFollowUpDraft`: guarda `status=eq.sent&follow_up_draft=is.null&follow_up_rejection=is.null`. Com 0 linhas, o adaptador relê. Se já há rascunho ou recusa, não grava e volta (#35/AC-3: a cobrança não se repete). Se a versão andou por outro motivo, lança. Desde a #58 o rascunho (`jsonb`) leva também `dueOn`, o novo prazo da cobrança (AAAA-MM-DD), sem coluna nova; o rascunho do Claude, de antes, não o tem. Nada mais grava `follow_up_rejection`: as recusas já gravadas seguem lidas.
 
 **QF1b** `editFollowUpDraft` (#58): lê a linha, troca o texto do rascunho (mantém o `dueOn`) num `PATCH` guardado pela versão lida e pela mesma guarda da reivindicação (`status=eq.sent&follow_up_draft=not.is.null&follow_up_sent_at=is.null&or=(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.<agora - LEASE_MS>)`), com a entrada `follow_up_edited` e o e-mail de quem editou em `by`. Corpo: o texto novo e `follow_up_claimed_at`/`follow_up_claim` nulos: a edição depois da reivindicação vencida a solta, e o antigo detentor, se voltar, recebe `lost` no carimbo. Com 0 linhas relê: carimbado é `already_sent`, reivindicação de pé (há menos que `LEASE_MS`) é `send_in_progress`, o resto é `stale`.
+
+**QF5** `confirmDocument` (#63): `GET` da linha, depois um `PATCH` guardado por `version=eq.<lida>&status=eq.sent` com a entrada `document_confirmed` no `history`; ver "A confirmação do documento".
 
 **QF2** `claimFollowUpSend`: guarda `status=eq.sent&follow_up_draft=not.is.null&follow_up_sent_at=is.null&or=(follow_up_claimed_at.is.null,follow_up_claimed_at.lt.<agora - LEASE_MS>)` (o prazo da #12: a reivindicação vencida é retomada; ver o risco aceito nas colunas). Corpo: `follow_up_claimed_at`, a versão nova e a entrada `follow_up_claimed`. Corpo também: a ficha nova (`follow_up_claim`). Uma linha devolvida dá a ficha (`won`); 0 linhas dá `taken` (outro envio reivindicado ou carimbado, ou não há o que enviar) ou `stale` (#58/AC-5: a versão andou numa edição no meio). A reivindicação recebe o texto que o envio leu: se a linha lida já tem outro, volta `stale` sem gravar, e o `PATCH` pela versão lida fecha a janela entre a leitura e a gravação, de modo que o envio nunca manda um texto que a pessoa já trocou. No Read Committed, o segundo `UPDATE` da mesma linha espera o primeiro confirmar e reavalia o `WHERE` na versão nova ([Transaction Isolation, 13.2.1](https://www.postgresql.org/docs/17/transaction-iso.html), como na #12). Só um ganha.
 
@@ -240,6 +251,7 @@ Nenhum. `strategies.tenancy.strategy: none`. As duas tabelas novas seguem a conv
 - **Online** (`api/test/supplier/online-reply.test.ts`, pula sem as credenciais): o catálogo (`service_role` sem `UPDATE`/`DELETE` em `supplier_reply_readings` e só as colunas concedidas em `inbox_supplier_messages`), o `EXPLAIN` de QI1 e das leituras por pedido com os índices nomeados, e um `PATCH` de versão velha que atinge 0 linhas.
 - **QF1:** com rascunho ou recusa já gravados, não grava de novo (#35/AC-3).
 - **#4/AC-6 e #35/AC-2:** nenhuma requisição do fake fora das três tabelas, e nenhum `PATCH` em `outbox_supplier_emails` leva coluna fora de `follow_up_*`, `version`, `history` e `updated_at`.
+- **#63** (`api/test/supplier/supabase-reply-confirm-document.test.ts`): o `PATCH` da confirmação leva só `version`, `history` e `updated_at`, guardado por `version` e `status=eq.sent`; duas confirmações juntas gravam uma; a versão que andou no meio volta `stale`; a leitura nova com outro documento deixa a confirmação para trás.
 - **Script** (`scripts/sample_supplier_replies.py` e `scripts/sample_supplier_replies_test.py`): rodar duas vezes deixa quatro mensagens.
 - **`FakePostgrest`:** o construtor confere se ele já entende embutido com ordem (`<tabela>.order=`), `gt.`, `not.is.null`, `limit` e o 409 `23505` de índice parcial, e estende o que faltar.
 
@@ -248,6 +260,8 @@ Nenhum. `strategies.tenancy.strategy: none`. As duas tabelas novas seguem a conv
 - `claimFollowUpSend(id, by)` e `recordFollowUpFailure(id, reason, by)`. O histórico pede quem (PER-3), e `sendFollowUp` já recebe `by`. **#35, rodada 3:** `claimFollowUpSend` devolve a ficha (`string | null`, no lugar de `boolean`), e `recordFollowUpFailure(id, claim, reason, by)` e `recordFollowUpSent(id, claim, stamp)` a recebem e devolvem `'recorded' | 'lost'`. `saveFollowUpDraft` grava com `by` = o nome da tarefa, sem mudar a assinatura. **#58:** a tarefa saiu; `saveFollowUpDraft(id, text, dueOn)` grava com `by` = `supplier-overdue-sweep`, `recordFollowUpRejection` foi removida da porta, e `editFollowUpDraft(id, text, by)` é a gravação nova, da pessoa.
 - A docstring de `ReadingRecorded`/`recordReading`: `superseded` passa a significar "gravada no log, mas não é a leitura atual" (QR5). O UPDATE condicional na linha vira gravação append-only com a projeção pela ordem das mensagens. As garantias que a docstring pede continuam de pé (a leitura antiga não troca a nova; a tardia vence o `no_reply`), mas pelo outro mecanismo.
 - O comentário de `reply-task.ts` sobre "UPDATE condicional no id da mensagem guardada" muda pelo mesmo motivo.
+
+- `confirmDocument(id, confirmation)` (#63): a porta ganha a gravação da confirmação (`'recorded' | 'already_confirmed' | 'stale'`), e `ReplyRequest` ganha `documentConfirmation`, derivada do histórico.
 
 ## Em aberto
 

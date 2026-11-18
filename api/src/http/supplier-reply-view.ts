@@ -1,6 +1,6 @@
 // #36: a leitura da resposta do fornecedor (#4) e a cobrança como a API as entrega; o formato é o autorado no cabeçalho de supplier-requests.ts.
 // #36: montada campo a campo: nada da linha, da ficha da reivindicação nem do histórico sai que não esteja nomeado aqui (layer-exposure).
-import { validateRequestText, type NextStep, type ReplyOutcome, type RequestFilter, type RequestStatus, type SupplierReading } from '../domain/index.js';
+import { validateRequestText, type DocumentConfirmation, type NextStep, type ReplyOutcome, type RequestFilter, type RequestStatus, type SupplierReading } from '../domain/index.js';
 import { followUpCatalogOf } from '../supplier/reply-catalog.js';
 import type { ReplyList, ReplyListRow, ReplyRequest } from '../supplier/reply-ports.js';
 
@@ -13,6 +13,9 @@ export type WireReading = {
   /** #4/AC-5: o trecho da resposta com uma ordem escondida, citado como o fornecedor escreveu; é dado, nunca instrução. */
   readonly injectionFlag: string | null;
 };
+
+/** #63/AC-3 (ADR-005): o documento confirmado, quem confirmou (o e-mail do Access) e quando (ISO 8601, UTC). */
+export type WireDocumentConfirmation = { readonly document: string; readonly by: string; readonly at: string };
 
 export type WireFollowUp = {
   readonly drafted: boolean;
@@ -47,6 +50,10 @@ export type WireReadingList = {
   readonly requests: readonly WireListRow[];
   readonly counts: Readonly<Record<RequestFilter, number>>;
 };
+
+/** #63/AC-3: a confirmação como a API a entrega, campo a campo; nula enquanto a pessoa não confirmou. */
+export const confirmationOf = (confirmation: DocumentConfirmation | null): WireDocumentConfirmation | null =>
+  confirmation === null ? null : { document: confirmation.document, by: confirmation.by, at: confirmation.at.toISOString() };
 
 export const readingOf = (reading: SupplierReading | null): WireReading | null =>
   reading === null
