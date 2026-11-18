@@ -7,7 +7,7 @@ Issue: #12 (história #2). Banco: PostgreSQL 17 no Supabase (`supabase/config.to
 | Entrada | Valor | Fonte |
 |---|---|---|
 | Raízes | `SupplierRequest` (pedido ao fornecedor); `IssuedReturnNote` (a nota emitida pelo mock, valor imutável); a entrada da fila `outbox_return_notes` (existente, #140) | `api/src/domain/supplier-request.ts`, `return-note-document.ts`, `api/src/returns/return-notes.ts` |
-| Consultas | Q1 `findOpen(invoice_access_key, request_type)` entre `draft`, `sent`, `send_failed`; Q1b `listOpenKeys(request_type, invoice_access_keys)`: das notas de origem pendentes na fila, as com pedido aberto do tipo, numa leitura só limitada por `invoice_access_key=in.(<chaves pendentes>)` e feita depois da leitura da fila (o `pending()` da tarefa do Cron, em vez de um `findOpen` por devolução; sem chave pendente, nenhuma leitura; mesmo predicado do índice parcial, então o payload não cresce com os pedidos enviados do histórico); Q2 `get(id)`; Q3 `issue(queueId)`: a nota já emitida da devolução; Q4 `SourceInvoices.find`: `invoices` por `access_key` e `kit_fornecedores` por `fornecedor_id`; Q5 o pedido por id na trava e nas gravações | `api/src/supplier/ports.ts`, `draft.ts`, `use-cases.ts` |
+| Consultas | Q1 `findOpen(invoice_access_key, request_type)` entre `draft`, `sent`, `send_failed`; Q1b `listOpenKeys(request_type, invoice_access_keys)`: das notas de origem pendentes na fila, as com pedido aberto do tipo, numa leitura só limitada por `invoice_access_key=in.(<chaves pendentes>)` e feita depois da leitura da fila (o `pending()` da tarefa do Cron, em vez de um `findOpen` por devolução; sem chave pendente, nenhuma leitura; mesmo predicado do índice parcial, então o payload não cresce com os pedidos enviados do histórico); Q2 `get(id)`; Q3 `issue(queueId)`: a nota já emitida da devolução; Q4 `SourceInvoices.find`: `invoices` por `access_key` e `kit_fornecedores` por `fornecedor_id`; Q5 o pedido por id na trava e nas gravações; Q6 `findLatest(invoice_access_key, request_type)`: o mais recente da nota e do tipo, `order=id.desc&limit=1`; Q7 `listByStatus(status, limit)`: os mais novos do estado, `status=eq.<estado>&order=id.desc&limit=<n>` | `api/src/supplier/ports.ts`, `draft.ts`, `use-cases.ts` |
 | Inquilino | nenhum | brief da #12 |
 | Números assumidos | pedidos por dia: não informado; entradas de histórico por pedido: poucas dezenas (rascunho, edições, emissão, tentativas de envio), assumido; prazo da trava do envio: 5 minutos, assumido (não informado o tempo máximo do envio de e-mail) | |
 
@@ -56,6 +56,8 @@ O PostgreSQL guarda `jsonb` indexável ([jsonb Indexing](https://www.postgresql.
 |---|---|---|---|---|
 | `outbox_supplier_emails_pkey` | `outbox_supplier_emails` | `(id)` | Q2, Q5 e todo `PATCH` por id | tabela nova: n/a |
 | `outbox_supplier_emails_open_key` (único, parcial) | `outbox_supplier_emails` | `(invoice_access_key, request_type) where status in ('draft', 'sent', 'send_failed')` | AC-3, Q1 e Q1b: o filtro do `findOpen` e o do `listOpenKeys` repetem o predicado (`status=in.(draft,sent,send_failed)`), e o `listOpenKeys` ainda filtra `invoice_access_key` (a primeira coluna do índice), para o planejador poder usar o índice parcial ([Partial Indexes](https://www.postgresql.org/docs/current/indexes-partial.html)) | tabela nova: n/a |
+| `outbox_supplier_emails_latest` | `outbox_supplier_emails` | `(invoice_access_key, request_type, id desc)` | Q6: o filtro por nota e tipo e a ordem por `id` decrescente com `limit 1` saem do índice | tabela nova: n/a |
+| `outbox_supplier_emails_status` | `outbox_supplier_emails` | `(status, id desc)` | Q7: o filtro por estado e a ordem por `id` decrescente com `limit` saem do índice | tabela nova: n/a |
 | `issued_return_notes_pkey` | `issued_return_notes` | `(id)` | a FK do pedido e a leitura da nota pelo número | tabela nova: n/a |
 | `issued_return_notes_queue_id_key` (único) | `issued_return_notes` | `(queue_id)` | AC-2 e Q3: `issue` lê e grava por `queue_id`, e o `on_conflict=queue_id` do insert usa esta restrição | tabela nova: n/a |
 | `kit_fornecedores_pkey` (existente) | `kit_fornecedores` | `(fornecedor_id)` | Q4: o e-mail do fornecedor da nota | já existe |
@@ -133,7 +135,7 @@ Nenhum. `strategies.tenancy.strategy: none`. Todas as tabelas seguem a convenç�
 | TRX-2 | nenhum adaptador emite `BEGIN`/`COMMIT` | nenhum |
 | TRX-3 | cada gravação toca uma raiz | o envio afeta a fila e a nota emitida sem evento na mesma transação: são passos idempotentes refeitos pelo reenvio, a decisão da #11; registrar como ADR (em aberto) |
 | TRX-4 | o PostgREST confirma ou desfaz cada requisição | nenhum |
-| IDX-1 | Q1 a Q5 têm índice acima | sem banco de verdade, nenhum teste lê o plano; o detector seria um teste de integração que roda `EXPLAIN` no Q1 com linhas semeadas |
+| IDX-1 | Q1 a Q7 têm índice acima | sem banco de verdade, nenhum teste lê o plano; o detector seria um teste de integração que roda `EXPLAIN` no Q1 com linhas semeadas |
 | IDX-2 | cada índice novo tem a consulta ao lado | nenhum |
 | IDX-3 | n/a (relacional) | |
 | IDX-4 | só tabelas novas recebem índice | nenhum |
