@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 import type { SentRequestDetailDto } from "../api/contract";
-import { saveFailureOf, supplierReplyApi, supplierReplyReason, type SupplierReplyApi, type SupplierReplyReason } from "../api/supplier-reply";
+import { ConfirmRereadFailed, saveFailureOf, supplierReplyApi, supplierReplyReason, type SupplierReplyApi, type SupplierReplyReason } from "../api/supplier-reply";
 import { InvoiceDrawer } from "../approval/InvoiceDrawer";
 import { SupplierRequests, type DrawerShell } from "../components/SupplierRequests";
 import {
@@ -82,6 +82,8 @@ export async function confirmOf(accessKey: string | null, api: Pick<SupplierRepl
     const { kind, detail } = await api.confirmDocument(accessKey);
     return kind === "confirmed" || detail.documentConfirmation !== null ? { result: { ok: true }, reread: detail } : { result: { ok: false, failure: "conflict" }, reread: detail };
   } catch (error) {
+    // #64 O 409 cuja releitura falhou: o motivo fechado do 409 decide a mensagem, e nenhuma afirma "não foi confirmado" sem saber.
+    if (error instanceof ConfirmRereadFailed) return { result: { ok: false, failure: error.reason === "already_confirmed" ? "alreadyConfirmed" : "conflictUnread" }, reread: null };
     return { result: { ok: false, failure: supplierReplyReason(error) }, reread: null };
   }
 }

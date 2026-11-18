@@ -279,4 +279,32 @@ describe("#3/AC-9 bloco Pedido ao fornecedor: não foi possível carregar", () =
     expect(screen.getByRole("alert").textContent).toContain("Não foi possível carregar o pedido");
     expect(screen.queryByText("O Claude está preparando o pedido…")).toBeNull();
   });
+
+  it("#65/AC-4: no envio falho com nota, o texto diz que tentar de novo não emite outra nota e que descartar não cancela a nota já emitida", () => {
+    setup({ status: "send_failed", returnNote, email, attachment, failure: "resend_unavailable" });
+    expect(screen.getByText("Tentar de novo só reenvia o e-mail: não emite outra nota. Descartar o pedido não cancela a nota já emitida.")).toBeTruthy();
+  });
+
+  it("#65/AC-4: no envio falho sem nota, não há o que dizer sobre nota emitida", () => {
+    setup({ status: "send_failed", ...mailOnly, failure: "send_failed" });
+    expect(screen.queryByText(/não emite outra nota/)).toBeNull();
+  });
+
+  it("#65/AC-6: o rascunho com anexo mostra a dica com o nome real, com o clipe: '📎 nota-devolucao-ND-0012.pdf (anexa ao enviar)'", () => {
+    setup(draft);
+    const hint = screen.getByText("nota-devolucao-ND-0012.pdf (anexa ao enviar)");
+    expect(hint.textContent).toContain("📎");
+    expect(hint.querySelector('[aria-hidden="true"]')?.textContent?.trim()).toBe("📎");
+  });
+
+  it("#65/AC-6: o rascunho com nota e sem nome de anexo (a nota ainda não foi emitida) segue o wireframe: '📎 nota-devolucao-…pdf (anexa ao enviar)'", () => {
+    setup({ status: "draft", returnNote: { ...returnNote, number: null }, email });
+    const hint = screen.getByText("nota-devolucao-…pdf (anexa ao enviar)");
+    expect(hint.textContent).toContain("📎");
+  });
+
+  it("#65/AC-6: o rascunho só de e-mail não tem anexo, nem dica", () => {
+    setup({ status: "draft", ...mailOnly });
+    expect(screen.queryByText(/anexa ao enviar/)).toBeNull();
+  });
 });

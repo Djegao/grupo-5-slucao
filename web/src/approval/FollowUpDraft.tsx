@@ -1,5 +1,6 @@
-import type { ReactElement } from "react";
+import { useId, type ReactElement } from "react";
 import { Button, Text } from "barte-design-system";
+import { MAX_FOLLOW_UP_TEMPLATE } from "../api/contract";
 import { shortDate, type FollowUpDraftView } from "../components/supplier-request-view";
 import { useViewer } from "../shell/viewer";
 import { texts } from "../texts";
@@ -44,13 +45,14 @@ interface FollowUpDraftBaseProps {
   onRetry: () => void;
 }
 
-function Field({ label, children }: { label: string; children: string }): ReactElement {
+function Field({ label, children, keepLineBreaks = false }: { label: string; children: string; keepLineBreaks?: boolean }): ReactElement {
   return (
     <div style={{ display: "flex", gap: "var(--spacing-sm)" }}>
       <Text as="span" variant="caption-sm" color="var(--content-tertiary)">
         {label}
       </Text>
-      <Text as="span" variant="body-base">
+      {/* #65/AC-3 O corpo do e-mail traz quebras de linha: `pre-line` as mantém e ainda quebra a linha longa. */}
+      <Text as="span" variant="body-base" style={keepLineBreaks ? { whiteSpace: "pre-line" } : undefined}>
         {children}
       </Text>
     </div>
@@ -62,6 +64,7 @@ export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
   const { draft, editing, saving = false, saveFailure, onEdit, onSave, onCancelEdit, onBodyChange, onSend, onDiscard, onRetry } = props;
   const phase = props.phase;
   const viewer = useViewer();
+  const counterId = useId();
   if (props.phase === "sent") {
     // #5/AC-4 O "por você" é de quem olha a tela, como no pedido da #3 (#17): outro remetente aparece pelo nome.
     const by = props.sentBy === undefined || props.sentBy === null || props.sentBy === viewer ? texts.supplierRequest.byYou : texts.supplierRequest.by(props.sentBy);
@@ -99,8 +102,12 @@ export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
             <Text as="span" variant="caption-sm" color="var(--content-tertiary)">
               {t.body}
             </Text>
-            <textarea value={draft.template} rows={5} disabled={saving} onChange={(event) => onBodyChange(event.target.value)} />
+            <textarea value={draft.template} rows={5} disabled={saving} aria-describedby={counterId} onChange={(event) => onBodyChange(event.target.value)} />
           </label>
+          {/* #65/AC-5 Conta como a API: `template.length`, unidades UTF-16 do molde (não do texto renderizado). */}
+          <Text as="p" variant="caption-sm" color="var(--content-tertiary)" id={counterId}>
+            {t.counter(draft.template.length, MAX_FOLLOW_UP_TEMPLATE)}
+          </Text>
           <Text as="p" variant="caption-sm" color="var(--content-tertiary)">
             {t.keepMarkers}
           </Text>
@@ -114,7 +121,9 @@ export function FollowUpDraft(props: FollowUpDraftProps): ReactElement {
           ) : null}
         </>
       ) : (
-        <Field label={t.body}>{draft.body}</Field>
+        <Field label={t.body} keepLineBreaks>
+          {draft.body}
+        </Field>
       )}
       <Field label={t.attachment}>{draft.attachmentName}</Field>
       {busy ? (

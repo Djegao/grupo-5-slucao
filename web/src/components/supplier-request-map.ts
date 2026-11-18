@@ -77,6 +77,8 @@ export function rowOf(row: ReadingRowDto, filter: ReplyFilterDto): SupplierReque
     dueOn: row.dueOn,
     // #5/AC-4 A cobrança que o servidor já enviou vem marcada, para a tela não oferecer cobrar de novo; o status e o chip seguem como o servidor os deu.
     ...(row.followUp.sent ? { alreadyCharged: true } : {}),
+    // #65/AC-1 Só o sinal da ordem escondida chega à linha; o trecho citado fica na gaveta (layer-exposure).
+    ...(row.reading?.injectionFlag ? { hiddenOrder: true } : {}),
   };
   return { ...base, ...rowStatus(row, filter) };
 }

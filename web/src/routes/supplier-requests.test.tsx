@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import type { ReadingListDto, ReadingRowDto, ReplyFilterDto, SentRequestDetailDto } from "../api/contract";
-import type { SupplierReplyApi } from "../api/supplier-reply";
+import { ConfirmRereadFailed, type SupplierReplyApi } from "../api/supplier-reply";
 import { FILTER_OF_CHIP } from "../components/supplier-request-map";
 import { confirmOf, loadList, saveOf, sendOf } from "./supplier-requests";
 
@@ -159,5 +159,19 @@ describe("#64 rota Pedidos ao fornecedor: confirmar o documento citado", () => {
       throw new TypeError("texto cru");
     });
     await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: false, failure: "unknown" }, reread: null });
+  });
+
+  it("#64: um 409 já confirmado cuja releitura falhou vira 'alreadyConfirmed': o servidor disse que já está confirmado", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => {
+      throw new ConfirmRereadFailed("already_confirmed");
+    });
+    await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: false, failure: "alreadyConfirmed" }, reread: null });
+  });
+
+  it("#64: um 409 de outro motivo cuja releitura falhou vira 'conflictUnread': a tela não afirma o resultado", async () => {
+    const confirmDocument = vi.fn<SupplierReplyApi["confirmDocument"]>(async () => {
+      throw new ConfirmRereadFailed("other");
+    });
+    await expect(confirmOf(key(1), { confirmDocument })).resolves.toEqual({ result: { ok: false, failure: "conflictUnread" }, reread: null });
   });
 });

@@ -30,6 +30,8 @@ interface SupplierRequestRowBase {
   dueOn: string;
   /** #5/AC-4 O servidor já enviou a cobrança desta linha (followUp.sent, #36): ela segue no chip que o servidor deu, sem "Cobrar"; a atrasada lê "Atrasado (cobrado)". */
   alreadyCharged?: boolean;
+  /** #65/AC-1 A leitura da resposta traz ordem escondida (injectionFlag): a linha mostra o selo. Só o sinal; o trecho vive na conversa. */
+  hiddenOrder?: boolean;
 }
 
 /** #19 Só `fulfilledToConfirm` mostra o documento ("Atendeu: ND 881"), e por isso o exige: nenhuma outra situação o aceita. */

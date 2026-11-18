@@ -30,6 +30,20 @@ export interface ConfirmedDocument {
   detail: SentRequestDetailDto;
 }
 
+/** #64 O motivo fechado de um 409 da confirmação: "já confirmado" (o servidor o diz) ou qualquer outro (mudou, sem documento a confirmar, motivo que a tela não conhece). */
+export type ConfirmConflictReason = "already_confirmed" | "other";
+
+/**
+ * #64 O 409 da confirmação veio, mas a releitura do pedido falhou: a tela já sabe o motivo fechado do 409 e não sabe o estado do pedido.
+ * O texto do 409 e o do erro da releitura não ficam aqui (layer-exposure).
+ */
+export class ConfirmRereadFailed extends Error {
+  constructor(readonly reason: ConfirmConflictReason) {
+    super("a releitura do pedido falhou depois de um conflito na confirmação");
+    this.name = "ConfirmRereadFailed";
+  }
+}
+
 /** #21 Os motivos fechados de uma chamada falha; é o que a tela sabe de um erro (layer-exposure). */
 export type SupplierReplyReason = "unauthorized" | "not_found" | "conflict" | "unavailable" | "unknown";
 
@@ -90,14 +104,21 @@ async function saveFollowUpOf(accessKey: string, template: string): Promise<Save
 
 /**
  * #64/AC-2 A pessoa confirma o documento que o fornecedor citou (POST .../confirm-document, #63): o corpo é vazio, quem confirma vem do Access.
- * #64 Um 409 (already_confirmed, stale, not_confirm_document) não é falha desconhecida: relê o pedido e o devolve como conflito, e o `documentConfirmation` dele diz se a confirmação existe. O corpo do 409 não é lido (layer-exposure).
+ * #64 Um 409 (already_confirmed, stale, not_confirm_document) não é falha desconhecida: relê o pedido e o devolve como conflito, e o `documentConfirmation` dele diz se a confirmação existe. Do corpo do 409 só se lê o `reason`, e como valor fechado (layer-exposure).
+ * #64 Se a releitura falhar, o erro é `ConfirmRereadFailed`, com esse motivo fechado.
  */
 async function confirmDocumentOf(accessKey: string): Promise<ConfirmedDocument> {
   try {
     return { kind: "confirmed", detail: sentOf(await apiPost<SupplierRequestDetailResponseDto>(pathOf(accessKey, "/confirm-document"), {}, { timeoutMs: CONFIRM_DOCUMENT_TIMEOUT_MS })) };
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 409) throw error;
-    return { kind: "conflict", detail: sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey))) };
+    // #64 O motivo do 409 vira um de dois valores fechados antes de a releitura tentar: se ela falhar, a tela ainda sabe se o servidor disse "já confirmado".
+    const reason: ConfirmConflictReason = error.reason === "already_confirmed" ? "already_confirmed" : "other";
+    try {
+      return { kind: "conflict", detail: sentOf(await apiGet<SupplierRequestDetailResponseDto>(pathOf(accessKey))) };
+    } catch {
+      throw new ConfirmRereadFailed(reason);
+    }
   }
 }
 

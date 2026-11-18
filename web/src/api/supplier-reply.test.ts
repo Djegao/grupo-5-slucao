@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import type { ReadingListDto, SentRequestDetailDto } from "./contract";
-import { CONFIRM_DOCUMENT_TIMEOUT_MS, FOLLOW_UP_SAVE_TIMEOUT_MS, FOLLOW_UP_SEND_TIMEOUT_MS, saveFailureOf, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
+import { CONFIRM_DOCUMENT_TIMEOUT_MS, ConfirmRereadFailed, FOLLOW_UP_SAVE_TIMEOUT_MS, FOLLOW_UP_SEND_TIMEOUT_MS, saveFailureOf, supplierReplyApi, supplierReplyReason } from "./supplier-reply";
 
 // #21 O fio da lista "Pedidos ao fornecedor" (#5): o filtro vai na consulta, as contagens são do servidor, e o erro vira motivo fechado.
 
@@ -247,5 +247,30 @@ describe("#64 fio da confirmação do documento citado", () => {
   it("#64/AC-2: uma resposta 200 que não é o pedido enviado falha a chamada, em vez de mostrar o que não se sabe", async () => {
     serve(() => Response.json({ request: { status: "draft" } }));
     await expect(supplierReplyApi.confirmDocument(KEY)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("#64: 409 já confirmado e a releitura falha: o motivo fechado 'already_confirmed' sai, sem o corpo nem o texto do erro", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) =>
+        init.method === "POST" ? Response.json({ error: "conflict", reason: "already_confirmed", detail: "texto cru" }, { status: 409 }) : Response.json({ error: "x" }, { status: 503 }),
+      ),
+    );
+    const failure = await supplierReplyApi.confirmDocument(KEY).catch((reason: unknown) => reason);
+    expect(failure).toBeInstanceOf(ConfirmRereadFailed);
+    expect(failure).toMatchObject({ reason: "already_confirmed" });
+    expect(String((failure as Error).message)).not.toContain("texto cru");
+  });
+
+  it("#64: 409 de outro motivo (ou um que a tela não conhece) e a releitura falha: o motivo fechado é 'other'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) =>
+        init.method === "POST" ? Response.json({ error: "conflict", reason: "<b>stale?</b>" }, { status: 409 }) : Response.json({ error: "x" }, { status: 503 }),
+      ),
+    );
+    const failure = await supplierReplyApi.confirmDocument(KEY).catch((reason: unknown) => reason);
+    expect(failure).toMatchObject({ reason: "other" });
+    expect(String((failure as Error).message)).not.toContain("<b>");
   });
 });
